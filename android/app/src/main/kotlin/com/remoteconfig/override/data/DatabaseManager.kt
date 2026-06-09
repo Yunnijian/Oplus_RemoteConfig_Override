@@ -293,6 +293,53 @@ class DatabaseManager(private val context: Context) {
         return text.ifEmpty { null }
     }
 
+    // ── 本地文件配置管理 ─────────────────────────────────────
+
+    private val configDir: File
+        get() = File(context.filesDir, "configs").also { it.mkdirs() }
+
+    private fun configFile(packageName: String) = File(configDir, "${packageName}.json")
+    private fun backupFile(packageName: String) = File(configDir, "${packageName}.json.bak")
+
+    /** 将配置写入本地文件（创建备份 → 写入新内容） */
+    fun saveLocalConfig(packageName: String, json: String): WriteResult {
+        return try {
+            val file = configFile(packageName)
+            val bak = backupFile(packageName)
+            // 如果已存在本地文件，先备份
+            if (file.exists()) {
+                if (bak.exists()) bak.delete()
+                file.renameTo(bak)
+            }
+            file.writeText(json)
+            WriteResult(true, "配置已保存到本地")
+        } catch (e: Exception) {
+            WriteResult(false, "保存失败: ${e.message}")
+        }
+    }
+
+    /** 从本地文件读取配置 */
+    fun loadLocalConfig(packageName: String): String? {
+        val file = configFile(packageName)
+        return if (file.exists()) file.readText() else null
+    }
+
+    /** 检查是否有备份文件 */
+    fun hasBackup(packageName: String): Boolean = backupFile(packageName).exists()
+
+    /** 从备份恢复配置（备份 → 当前文件） */
+    fun restoreFromBackup(packageName: String): WriteResult {
+        return try {
+            val file = configFile(packageName)
+            val bak = backupFile(packageName)
+            if (!bak.exists()) return WriteResult(false, "未找到备份文件")
+            file.writeText(bak.readText())
+            WriteResult(true, "已从备份恢复")
+        } catch (e: Exception) {
+            WriteResult(false, "恢复失败: ${e.message}")
+        }
+    }
+
     private fun sleep(ms: Long) {
         try { Thread.sleep(ms) } catch (_: InterruptedException) { }
     }

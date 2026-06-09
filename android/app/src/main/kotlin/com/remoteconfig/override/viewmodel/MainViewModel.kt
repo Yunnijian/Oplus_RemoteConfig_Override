@@ -127,14 +127,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── 配置编辑 ─────────────────────────────────────────────
 
     /**
-     * 从数据库加载指定包名的原始 JSON 配置。
+     * 从数据库加载指定包名的原始 JSON 配置，并写入本地文件。
      */
     fun loadConfig(packageName: String) {
         viewModelScope.launch {
             _isLoading.value = true
             _editingPackageName.value = packageName
             try {
-                _editingJson.value = dbManager.loadRawConfig(packageName)
+                val json = dbManager.loadRawConfig(packageName)
+                if (json != null) {
+                    // 保存到本地文件
+                    dbManager.saveLocalConfig(packageName, json)
+                    _editingJson.value = json
+                } else {
+                    _editingJson.value = null
+                }
             } catch (_: Exception) {
                 _editingJson.value = null
             } finally {

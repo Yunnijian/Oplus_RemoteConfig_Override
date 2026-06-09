@@ -175,6 +175,22 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     IconButton(onClick = { showOverflow = true }) {
                         Icon(Icons.Filled.MoreVert, "更多操作")
                         DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
+                            DropdownMenuItem(text = { Text("保存配置") }, onClick = {
+                                showOverflow = false
+                                viewModel.saveLocalConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
+                            })
+                            if (systemStatus.isRooted) {
+                                DropdownMenuItem(text = { Text("保存到数据库") }, onClick = {
+                                    showOverflow = false
+                                    viewModel.writeToDatabase { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
+                                })
+                            }
+                            DropdownMenuItem(text = { Text("回退配置") }, onClick = {
+                                showOverflow = false
+                                viewModel.restoreBackupConfig { s, msg ->
+                                    resultSuccess = s; resultMessage = msg; showResultDialog = true
+                                }
+                            })
                             DropdownMenuItem(text = { Text("导入配置") }, onClick = {
                                 showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
                             })
@@ -182,14 +198,6 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                                 showOverflow = false
                                 viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
                             })
-                        }
-                    }
-                    if (systemStatus.isRooted) {
-                        IconButton(onClick = {
-                            viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
-                        }, enabled = !isLoading) {
-                            Icon(Icons.Default.Send, "保存",
-                                tint = if (isLoading) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
