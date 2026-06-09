@@ -1,0 +1,183 @@
+{
+  "package_name": "com.tencent.lolm",
+  "type_id": null,
+  "feature_flag": "139658791440",
+  "cpu_config": "",
+  "gpu_config": {
+    "490": {
+      "c0": 9,
+      "c1": 16,
+      "c2": 16,
+      "fps": 60
+    }
+  },
+  "io_config": "",
+  "dynamic_resolution": "",
+  "launch_boost": "",
+  "usage_power_ratio": "",
+  "memory_clear": "",
+  "frameBoost": "",
+  "refresh_rate": "",
+  "gpa_config": {
+    "144": {
+      "cl": 0,
+      "ch": 23,
+      "sm": 13,
+      "gf": 0,
+      "gm": 27,
+      "cold": 60,
+      "pf": "3,0,3,0,3,0",
+      "mtl": "80,80,80",
+      "framedrop": "-1,-1",
+      "sft": 4,
+      "es4g": {
+        "state": true,
+        "isolate": "128,0",
+        "clist": "4,7,5,6",
+        "partial": false,
+        "tcount": 4,
+        "fps": 144,
+        "delay": 30000,
+        "slimwaltCtrl": 1,
+        "ctype": {
+          "ef": "0-3",
+          "pf": "4-6",
+          "ec": "7"
+        }
+      },
+      "mema": {
+        "beta": "45",
+        "mode": "2",
+        "tl": "0,80,300,90",
+        "custom": {
+          "0-3": "50,0",
+          "4-6": {
+            "beta": 60,
+            "mode": 0,
+            "tl": "0,90,250,90,400,90"
+          },
+          "7": {
+            "beta": 40,
+            "mode": 0,
+            "tl": "0,90,250,90,400,90"
+          }
+        }
+      },
+      "timeline": {
+        "ddl": 15,
+        "switch": 1
+      }
+    }
+  },
+  "sdk_config": "",
+  "created_at": "2030-02-01 09:14:45",
+  "modified_at": "2030-06-09 11:48:52",
+  "other": "24813_false&",
+  "from_server": 0,
+  "data_collector": "",
+  "simple_client": {
+    "fg": {
+      "decision": [
+        {
+          "type": "game_switch_enable",
+          "perf_value": "9",
+          "autoTouchRate": false
+        }
+      ],
+      "sf_tf": "1,35"
+    },
+    "bg": {
+      "decision": [
+        {
+          "type": "game_switch_enable",
+          "value": "0"
+        }
+      ],
+      "sf_tf": "0,0"
+    }
+  },
+  "cool_ex": "",
+  "lighting_start": "",
+  "prison": "",
+  "cosa_version": "",
+  "tgpa_client": "",
+  "game_zone": {
+    "recognize_interval": "8000",
+    "wake_up_times": "10",
+    "key_thread_ux": "2",
+    "white_list": [
+      "UnityChoreograp"
+    ],
+    "task_count": "15",
+    "uad_ux": "1",
+    "fixed_critical_task": [
+      "n___render__",
+      "n_UnityMain",
+      "n_NativeThread",
+      "n_LogicThread"
+    ]
+  },
+  "bind_core": "",
+  "decision": "",
+  "control": "",
+  "game_loading": "",
+  "game_loading_finish": "",
+  "game_start": "",
+  "game_stop": "",
+  "game_status": "",
+  "game_switch": "",
+  "game_config": "",
+  "perf_mode": "",
+  "target_fps": "",
+  "thermal_frame": {
+    "144": {
+      "balance_nl": "43,120,44,90,46,60",
+      "highperf_nl": "47,120,48,90,49,60"
+    },
+    "120": {
+      "balance_nl": "44,90,46,60",
+      "highperf_nl": "48,90,49,60"
+    },
+    "90": {
+      "balance_nl": "46,60",
+      "highperf_nl": "49,60"
+    }
+  },
+  "resv_1": "",
+  "resv_2": "",
+  "resv_3": "",
+  "resv_4": "",
+  "resv_5": "",
+  "resv_6": "",
+  "resv_7": {
+    "autoSystraceCollectEnabled": false,
+    "latencyThreshold": 23,
+    "latencyIntervalThreshold": 60000
+  },
+  "resv_8": "",
+  "resv_9": "",
+  "resv_10": "",
+  "resv_11": "",
+  "resv_12": "",
+  "resv_13": {
+    "targetFrameInsertFPS": 120,
+    "maxLowFPS": 24,
+    "lowFPSLimit": 30,
+    "minLowFPS": 10,
+    "thermalLimit": 49,
+    "thermalLevelLimit": 12,
+    "validThermalLevel": 11,
+    "sr_hdr_normal": 47,
+    "sr_hdr_low": 47,
+    "sr_hdr_high": 49,
+    "sr_hdr_x": 49
+  },
+  "unity_game_boost": "",
+  "fps_stabilizer": {
+    "boostStep": "1.2,1.5",
+    "freqStep": "12,0,17,0,18,0,17,0,21,0,21,0",
+    "temp": 500,
+    "mode": "ddl"
+  },
+  "bg_update": ""
+}
