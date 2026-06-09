@@ -91,6 +91,16 @@ android/app/src/main/kotlin/com/remoteconfig/override/
 
 本项目基于 **GPL-3.0** 协议开源。
 
+## 捐赠支持
+
+Color云控修改始终保持免费使用。如果你觉得这个工具对你有帮助，可以考虑请作者喝杯咖啡 ☕
+
+| 微信支付 | 支付宝 |
+|----------|--------|
+| ![微信收款码](docs/wechat_qr.jpg) | ![支付宝收款码](docs/alipay_qr.jpg) |
+
+感谢每一位捐赠者的支持 ❤️
+
 ## 免责声明
 
 - 修改系统配置有风险，请谨慎操作
