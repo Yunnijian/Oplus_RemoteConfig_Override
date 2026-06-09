@@ -2,6 +2,8 @@ package com.remoteconfig.override.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.model.GameConfigSummary
 import com.remoteconfig.override.viewmodel.MainViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ConfigListContent(
     viewModel: MainViewModel,
@@ -47,6 +49,7 @@ fun ConfigListContent(
     var showClearConfirm by remember { mutableStateOf(false) }
     var resultMsg by remember { mutableStateOf("") }
     var showResultDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
 
     var isSearching by remember { mutableStateOf(false) }
 
@@ -193,8 +196,12 @@ fun ConfigListContent(
                                 trailingContent = {
                                     Icon(Icons.Default.KeyboardArrowRight, "编辑", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 },
-                                modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                    onClick = { onGameClick(summary.packageName) })
+                                modifier = Modifier.combinedClickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = androidx.compose.material.ripple.rememberRipple(),
+                                    onClick = { onGameClick(summary.packageName) },
+                                    onLongClick = { showDeleteConfirm = summary.packageName }
+                                )
                             )
                         }
                     }
@@ -238,6 +245,18 @@ fun ConfigListContent(
             text = { Text("确定要清除应用增强服务数据吗？\n清除后游戏配置将恢复默认。") },
             confirmButton = { TextButton(onClick = { showClearConfirm = false; viewModel.clearGameData(); resultMsg = "应用增强服务数据已清除"; showResultDialog = true }) { Text("确定") } },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
+        )
+    }
+    if (showDeleteConfirm != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = null },
+            title = { Text("删除配置") },
+            text = { Text("确定要删除 ${showDeleteConfirm} 的配置吗？\n本地文件和备份将一并删除。") },
+            confirmButton = { TextButton(onClick = {
+                val pkg = showDeleteConfirm ?: ""; showDeleteConfirm = null
+                viewModel.deleteConfig(pkg) { s, msg -> resultMsg = msg; showResultDialog = true }
+            }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("取消") } }
         )
     }
 }
