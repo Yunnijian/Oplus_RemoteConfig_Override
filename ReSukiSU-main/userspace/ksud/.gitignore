@@ -1,4 +1,0 @@
-/target
-.cargo/config.toml
-*.bak
-*.sh

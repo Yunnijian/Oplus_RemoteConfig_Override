@@ -19,3 +19,7 @@ android/local.properties
 # OS temp files
 *.log
 *.tmp
+
+# Third-party reference projects
+/KernelSU-Next-dev/
+/ReSukiSU-main/
