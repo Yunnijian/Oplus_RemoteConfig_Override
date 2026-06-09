@@ -52,8 +52,11 @@ fun HomeContent(
         Scaffold(
             topBar = {
                 LargeTopAppBar(
-                    title = { Text("Color云控修改") },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                    title = { Text("Color云控修改", style = MaterialTheme.typography.headlineLarge) },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surface
+                    ),
                     scrollBehavior = scrollBehavior
                 )
             },
@@ -201,6 +204,26 @@ fun HomeContent(
                                 Text("支付宝", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
+                    }
+                }
+                // ── 开源仓库卡片 ──
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Yunnijian/Oplus_RemoteConfig_Override")))
+                        } catch (_: Exception) {}
+                    },
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Image(painter = painterResource(id = R.drawable.author_avatar),
+                            contentDescription = "GitHub 头像", modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("查看源代码", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text("在 GitHub 上查看源代码", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

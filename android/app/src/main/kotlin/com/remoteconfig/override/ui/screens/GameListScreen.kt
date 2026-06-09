@@ -87,7 +87,7 @@ fun ConfigListContent(
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { isSearching = false })
                         )
                     } else {
-                        Text("云控配置")
+                        Text("云控配置", style = MaterialTheme.typography.headlineLarge)
                     }
                 },
                 navigationIcon = {
@@ -111,7 +111,10 @@ fun ConfigListContent(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+                ),
                 scrollBehavior = scrollBehavior
             )
         },

@@ -42,3 +42,7 @@ android/wechat_icon.svg
 /auto.sh
 /customize.sh
 /service.sh
+
+# Reference projects
+/ushio-md-main/
+
