@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+*.apk
+*.aab
+*.keystore
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# macOS
+.DS_Store
+
+# OS temp files
+*.log
+*.tmp

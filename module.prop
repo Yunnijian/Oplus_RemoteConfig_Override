@@ -1,0 +1,6 @@
+id=RemoteConfigOverride
+name=一加云控数据覆盖
+version=v2.2
+versionCode=1
+author=toolfor
+description=通过覆盖应用增强服务数据库配置优化风驰策略
