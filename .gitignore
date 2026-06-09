@@ -23,3 +23,13 @@ android/local.properties
 # Third-party reference projects
 /KernelSU-Next-dev/
 /ReSukiSU-main/
+
+# Third-party reference files (modules, scripts, configs)
+/back/
+/tool/
+/webroot/
+/module.prop
+/action.sh
+/auto.sh
+/customize.sh
+/service.sh
