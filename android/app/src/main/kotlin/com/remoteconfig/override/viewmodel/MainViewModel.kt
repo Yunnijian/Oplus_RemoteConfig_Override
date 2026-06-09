@@ -40,9 +40,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _editingPackageName = MutableStateFlow<String?>(null)
     val editingPackageName: StateFlow<String?> = _editingPackageName.asStateFlow()
 
-    private val _toastMessage = MutableStateFlow<String?>(null)
-    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
-
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -163,55 +160,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _editingPackageName.value = null
     }
 
-    /**
-     * 从数据库重新加载（放弃本地编辑）。
-     */
-    fun reloadFromDb() {
-        val pkg = _editingPackageName.value ?: return
+    fun injectConfig(onComplete: (Boolean, String) -> Unit) {
+        val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
+        val json = _editingJson.value ?: run { onComplete(false, "无编辑内容"); return }
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                _editingJson.value = dbManager.loadRawConfig(pkg)
-                _toastMessage.value = "已从数据库重新加载"
-            } catch (e: Exception) {
-                _toastMessage.value = "重新加载失败: ${e.message}"
-            } finally {
-                _isLoading.value = false
-            }
+                val localResult = dbManager.saveLocalConfig(pkg, json)
+                if (!localResult.success) {
+                    onComplete(false, "本地保存失败: ${localResult.message}")
+                    _isLoading.value = false; return@launch
+                }
+                if (_systemStatus.value.isRooted) {
+                    val dbResult = dbManager.writeRawConfig(pkg, json)
+                    if (dbResult.success) { refreshAll(); onComplete(true, "配置已注入（本地 + 数据库）") }
+                    else { onComplete(true, "已保存到本地，数据库写入: ${dbResult.message}") }
+                } else { onComplete(true, "配置已保存到本地") }
+            } catch (e: Exception) { onComplete(false, "注入失败: ${e.message}") }
+            finally { _isLoading.value = false }
         }
     }
 
-    /**
-     * 将当前 JSON 写入数据库。
-     */
-    fun writeToDatabase(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
-        val pkg = _editingPackageName.value ?: return
-        val json = _editingJson.value ?: return
+    fun restoreBackupConfig(onComplete: (Boolean, String) -> Unit) {
+        val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
+        val result = dbManager.restoreFromBackup(pkg)
+        if (result.success) { _editingJson.value = dbManager.loadLocalConfig(pkg) }
+        onComplete(result.success, result.message)
+    }
 
+    fun deleteConfig(packageName: String, onComplete: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = dbManager.writeRawConfig(pkg, json)
-                _toastMessage.value = result.message
-                onComplete(result.success, result.message)
-                if (result.success) refreshAll()
-            } catch (e: Exception) {
-                _toastMessage.value = "写入失败: ${e.message}"
-                onComplete(false, e.message ?: "未知错误")
-            } finally {
-                _isLoading.value = false
-            }
+                if (_systemStatus.value.isRooted) { dbManager.deleteConfig(packageName) }
+                val configDir = java.io.File(getApplication<Application>().filesDir, "configs")
+                java.io.File(configDir, "${packageName}.json").delete()
+                java.io.File(configDir, "${packageName}.json.bak").delete()
+                refreshAll(); onComplete(true, "配置 $packageName 已删除")
+            } catch (e: Exception) { onComplete(false, "删除失败: ${e.message}") }
+            finally { _isLoading.value = false }
         }
     }
-
-    fun clearToast() { _toastMessage.value = null }
 
     /** 重启应用增强服务 */
     fun restartGameService() {
         viewModelScope.launch {
             _isLoading.value = true
-            val result = dbManager.restartGameService()
-            _toastMessage.value = result.message
+            dbManager.restartGameService()
             _isLoading.value = false
         }
     }
@@ -220,8 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearGameData() {
         viewModelScope.launch {
             _isLoading.value = true
-            val result = dbManager.clearGameData()
-            _toastMessage.value = result.message
+            dbManager.clearGameData()
             _isLoading.value = false
         }
     }
@@ -233,33 +227,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             val result = dbManager.exportConfig(pkg, json)
-            _toastMessage.value = result.message
             onComplete(result.success, result.message)
             _isLoading.value = false
         }
     }
-
-    /** 从本地文件导入配置并覆盖当前编辑内容 */
-    fun importConfig(onComplete: (Boolean, String) -> Unit) {
-        val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
-        viewModelScope.launch {
-            _isLoading.value = true
-            val json = dbManager.importConfig(pkg)
-            if (json != null) {
-                _editingJson.value = json
-                val msg = "已导入配置"
-                _toastMessage.value = msg
-                onComplete(true, msg)
-            } else {
-                val msg = "未找到本地配置文件"
-                _toastMessage.value = msg
-                onComplete(false, msg)
-            }
-            _isLoading.value = false
-        }
-    }
-
-    // ── 辅助 ─────────────────────────────────────────────────
 
     data class SystemStatus(
         val isRooted: Boolean = false,

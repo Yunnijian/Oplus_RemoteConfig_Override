@@ -26,7 +26,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,7 +134,6 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     }
 
     var showResultDialog by remember { mutableStateOf(false) }
-    var showFontDialog by remember { mutableStateOf(false) }
     var resultMessage by remember { mutableStateOf("") }
     var resultSuccess by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -170,10 +168,10 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {},
                 actions = {
                     var showOverflow by remember { mutableStateOf(false) }
-                    IconButton(onClick = { showFontDialog = true }) { Icon(Icons.Default.Edit, "字号") }
+                    IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小") }
+                    IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大") }
                     IconButton(onClick = { showOverflow = true }) {
                         Icon(Icons.Filled.MoreVert, "更多操作")
                         DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
@@ -296,24 +294,4 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             text = { Text(resultMessage) },
             confirmButton = { FilledTonalButton(onClick = { showResultDialog = false }) { Text("确定") } }
         )
-    }
-    if (showFontDialog) {
-        AlertDialog(
-            onDismissRequest = { showFontDialog = false },
-            title = { Text("字号设置") },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("${fontSize.toInt()} sp", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
-                        FilledTonalButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Text("-", fontSize = 18.sp) }
-                        Spacer(Modifier.width(32.dp))
-                        FilledTonalButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Text("+", fontSize = 18.sp) }
-                    }
-                    Text("8～32 sp", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-                }
-            },
-            confirmButton = { TextButton(onClick = { showFontDialog = false }) { Text("关闭") } }
-        )
-    }
 }
