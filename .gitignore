@@ -20,6 +20,10 @@ android/local.properties
 *.log
 *.tmp
 
+# Tooling
+/.codegraph/
+/.reasonix/
+
 # Third-party reference projects
 /KernelSU-Next-dev/
 /ReSukiSU-main/
