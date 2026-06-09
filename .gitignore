@@ -13,6 +13,11 @@ android/build/
 android/app/build/
 android/local.properties
 
+# Unnecessary assets
+android/1.jpg
+android/alipay_icon.svg
+android/wechat_icon.svg
+
 # macOS
 .DS_Store
 
