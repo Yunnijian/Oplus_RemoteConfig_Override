@@ -186,7 +186,7 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     }
                     if (systemStatus.isRooted) {
                         IconButton(onClick = {
-                            viewModel.writeToDatabase { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
+                            viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
                         }, enabled = !isLoading) {
                             Icon(Icons.Default.Send, "保存",
                                 tint = if (isLoading) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary)
@@ -294,4 +294,5 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             text = { Text(resultMessage) },
             confirmButton = { FilledTonalButton(onClick = { showResultDialog = false }) { Text("确定") } }
         )
+}
 }
