@@ -343,43 +343,6 @@ class DatabaseManager(private val context: Context) {
     private fun sleep(ms: Long) {
         try { Thread.sleep(ms) } catch (_: InterruptedException) { }
     }
-
-    // ── 本地文件配置管理 ─────────────────────────────────────
-
-    private val configDir: File
-        get() = File(context.filesDir, "configs").also { it.mkdirs() }
-
-    private fun configFile(packageName: String) = File(configDir, "${packageName}.json")
-    private fun backupFile(packageName: String) = File(configDir, "${packageName}.json.bak")
-
-    fun saveLocalConfig(packageName: String, json: String): WriteResult {
-        return try {
-            val file = configFile(packageName)
-            val bak = backupFile(packageName)
-            if (file.exists()) { if (bak.exists()) bak.delete(); file.renameTo(bak) }
-            file.writeText(json)
-            WriteResult(true, "配置已保存到本地")
-        } catch (e: Exception) { WriteResult(false, "保存失败: ${e.message}") }
-    }
-
-    fun loadLocalConfig(packageName: String): String? {
-        val file = configFile(packageName)
-        return if (file.exists()) file.readText() else null
-    }
-
-    fun hasBackup(packageName: String): Boolean = backupFile(packageName).exists()
-
-    fun restoreFromBackup(packageName: String): WriteResult {
-        return try {
-            val file = configFile(packageName)
-            val bak = backupFile(packageName)
-            if (!bak.exists()) return WriteResult(false, "未找到备份文件")
-            val tmp = if (file.exists()) file.readText() else ""
-            file.writeText(bak.readText()); bak.writeText(tmp)
-            WriteResult(true, "已回退到上次保存的版本")
-        } catch (e: Exception) { WriteResult(false, "回退失败: ${e.message}") }
-    }
-
     private fun sqliteColumnName(field: String): String = colNameMap[field] ?: field.replaceFirstChar { it.uppercase() }
 
     data class WriteResult(val success: Boolean, val message: String)
