@@ -18,7 +18,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold as MaterialScaffold
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -89,9 +88,6 @@ fun MainScreen(viewModel: MainViewModel) {
     // 内容门控用 settledPage（停稳才算当前页）
     val settledPage = pagerState.settledPage
 
-    // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
-    var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
-
     val surfaceColor = when (uiMode) {
         UiMode.Material -> MaterialTheme.colorScheme.surface // Blur is not used in Material, this is just a placeholder
         UiMode.Miuix -> MiuixTheme.colorScheme.surface
@@ -130,21 +126,16 @@ fun MainScreen(viewModel: MainViewModel) {
                             bottomInnerPadding = bottomInnerPadding,
                             isCurrentPage = isCurrentPage,
                             onGameClick = { pkg ->
-                                if (expanded) {
-                                    // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
-                                    dualPaneSelected = pkg
-                                } else {
-                                    viewModel.loadConfig(pkg)
-                                    navigator.push(Route.ConfigEditor(pkg))
-                                }
+                                // 宽屏也走路由：ConfigEditor 路由页在 expanded 时渲染
+                                // Row{列表|编辑器} 双窗同框；窄屏全屏编辑器。
+                                // 编辑器在路由页（Pager 外）→ IME 不干扰 Pager currentPage。
+                                viewModel.loadConfig(pkg)
+                                navigator.push(Route.ConfigEditor(pkg))
                             },
                             onNewConfig = { pkg ->
                                 viewModel.createNewConfig(pkg)
-                                if (expanded) dualPaneSelected = pkg
-                                else navigator.push(Route.ConfigEditor(pkg))
+                                navigator.push(Route.ConfigEditor(pkg))
                             },
-                            dualPaneSelected = if (expanded) dualPaneSelected else null,
-                            onDualPaneSelect = { dualPaneSelected = it },
                         )
 
                         2 -> if (isCurrentPage || contentReady) SettingsContent(bottomInnerPadding)
@@ -158,48 +149,9 @@ fun MainScreen(viewModel: MainViewModel) {
                 .only(WindowInsetsSides.Start)
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
-            // 宽屏双窗内容（Pager 外，不参与 Pager 测量 → IME 弹出不影响 currentPage）：
-            // 配置页（settledPage==1）时用 左列表 + 右编辑器 同框替代 Pager 的 page 1。
-            // 编辑器与列表同框（不是全屏覆盖），且 tab 切换不受影响（仅配置页走双窗）。
-            val dualPaneContent: @Composable () -> Unit = {
-                if (expanded && settledPage == 1) {
-                    Row(Modifier.fillMaxSize()) {
-                        Box(Modifier.fillMaxWidth(0.42f)) {
-                            ConfigListPage(
-                                viewModel = viewModel,
-                                bottomInnerPadding = navBarBottomPadding,
-                                isCurrentPage = true,
-                                onGameClick = { pkg ->
-                                    dualPaneSelected = pkg
-                                },
-                                onNewConfig = { pkg ->
-                                    viewModel.createNewConfig(pkg)
-                                    dualPaneSelected = pkg
-                                },
-                                dualPaneSelected = dualPaneSelected,
-                                onDualPaneSelect = { dualPaneSelected = it },
-                            )
-                        }
-                        VerticalDivider()
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            if (dualPaneSelected.isNullOrEmpty()) {
-                                EmptyPaneHint()
-                            } else {
-                                ConfigEditorPane(
-                                    viewModel = viewModel,
-                                    packageName = dualPaneSelected!!,
-                                    bottomInnerPadding = navBarBottomPadding,
-                                    onClosed = {
-                                        dualPaneSelected = null
-                                        viewModel.clearEditingConfig()
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
+            // Pager 正常渲染 3 tab（含 spring 动画）。双窗编辑器走 Route.ConfigEditor
+            // 路由页（宽屏时该页渲染 Row{列表|编辑器} 同框），编辑器在 Pager 外，
+            // IME 不干扰 Pager currentPage；Navigation3 管理转场（无闪烁）。
             when (uiMode) {
                 UiMode.Miuix -> MiuixScaffold { _ ->
                     Row {
@@ -209,11 +161,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .weight(1f)
                                 .consumeWindowInsets(startInsets)
                         ) {
-                            dualPaneContent()
-                            // Pager 只在非配置页（首页/设置页）或非 expanded 时显示
-                            if (!(expanded && settledPage == 1)) {
-                                pagerContent(navBarBottomPadding)
-                            }
+                            pagerContent(navBarBottomPadding)
                         }
                     }
                 }
@@ -228,10 +176,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .weight(1f)
                                 .consumeWindowInsets(startInsets)
                         ) {
-                            dualPaneContent()
-                            if (!(expanded && settledPage == 1)) {
-                                pagerContent(navBarBottomPadding)
-                            }
+                            pagerContent(navBarBottomPadding)
                         }
                     }
                 }

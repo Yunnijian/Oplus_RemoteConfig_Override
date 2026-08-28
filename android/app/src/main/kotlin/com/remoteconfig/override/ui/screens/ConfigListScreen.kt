@@ -1,13 +1,24 @@
 package com.remoteconfig.override.ui.screens
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,5 +96,52 @@ internal fun EmptyPaneHint() {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * 宽屏双窗编辑器路由页：左配置列表 + 右编辑器同框。
+ *
+ * 这是 [Route.ConfigEditor] 在 Expanded 宽度下的渲染（MainActivity entry 分发）。
+ * 编辑器在路由页（Pager 外）→ IME 弹出不干扰 Pager currentPage（修复横屏跳设置页）；
+ * 与列表同框，保持"配置 + 编辑"双窗体验；Navigation3 管理转场（无闪烁）。
+ */
+@Composable
+fun DualPaneEditorScreen(
+    viewModel: MainViewModel,
+    packageName: String,
+    onBack: () -> Unit,
+) {
+    // 当前选中的编辑包（初始为路由参数，后续点列表切换）
+    var selected by rememberSaveable(packageName) { mutableStateOf(packageName) }
+    val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    Row(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxWidth(0.42f)) {
+            ConfigListPage(
+                viewModel = viewModel,
+                bottomInnerPadding = navBarBottomPadding,
+                isCurrentPage = true,
+                onGameClick = { pkg ->
+                    viewModel.loadConfig(pkg)
+                    selected = pkg
+                },
+                onNewConfig = { pkg ->
+                    viewModel.createNewConfig(pkg)
+                    selected = pkg
+                },
+                dualPaneSelected = selected,
+                onDualPaneSelect = { selected = it },
+            )
+        }
+        VerticalDivider()
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            ConfigEditorPane(
+                viewModel = viewModel,
+                packageName = selected,
+                bottomInnerPadding = navBarBottomPadding,
+                onClosed = onBack,
+            )
+        }
     }
 }

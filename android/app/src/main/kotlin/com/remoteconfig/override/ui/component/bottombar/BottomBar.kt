@@ -40,7 +40,7 @@ class MainPagerState(
 
     private var navJob: Job? = null
 
-    fun animateToPage(targetIndex: Int) {
+    fun animateToPage(targetIndex: Int, instant: Boolean = false) {
         if (targetIndex == selectedPage) return
 
         navJob?.cancel()
@@ -51,7 +51,13 @@ class MainPagerState(
         navJob = coroutineScope.launch {
             val myJob = coroutineContext.job
             try {
-                pagerState.springAnimateToPage(targetIndex)
+                if (instant) {
+                    // rail 模式：配置页用双窗 Row 替代 Pager，Pager 不该滚动——
+                    // 瞬时跳转避免弹簧滚动的残余帧闪烁（双窗 vs Pager 切换）。
+                    pagerState.scrollToPage(targetIndex)
+                } else {
+                    pagerState.springAnimateToPage(targetIndex)
+                }
             } finally {
                 if (navJob == myJob) {
                     isNavigating = false
