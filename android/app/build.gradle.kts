@@ -99,10 +99,8 @@ dependencies {
 
     // Navigation3
     implementation("androidx.navigation3:navigation3-runtime:1.1.6")
-
-    // TODO(Task 4): 移除 —— 旧 NavGraph.kt 仍使用 Navigation Compose，
-    // 在迁移到 Navigation3 (NavDisplay + NavKey) 前暂时保留以维持可编译基线。
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+    // NavDisplay（androidx.navigation3.ui）由 Miuix Navigation3 UI 提供（对齐 KernelSU 用法）
+    implementation("top.yukonga.miuix.kmp:miuix-navigation3-ui-android:$miuix")
 
     // Activity & Lifecycle
     implementation("androidx.activity:activity-compose:1.13.0")

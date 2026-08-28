@@ -2,14 +2,26 @@ package com.remoteconfig.override
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.ui.Modifier
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.rememberNavController
-import com.remoteconfig.override.navigation.NavGraph
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.ui.NavDisplay
+import com.remoteconfig.override.navigation.LocalNavigator
+import com.remoteconfig.override.navigation.Navigator
+import com.remoteconfig.override.navigation.Route
+import com.remoteconfig.override.navigation.rememberNavigator
+import com.remoteconfig.override.settings.AppSettingsRepository
+import com.remoteconfig.override.ui.screens.ColorPaletteScreenPlaceholder
+import com.remoteconfig.override.ui.screens.ConfigEditorScreen
+import com.remoteconfig.override.ui.screens.MainScreen
+import com.remoteconfig.override.ui.theme.LocalEnableGlass
+import com.remoteconfig.override.ui.theme.LocalEnableGlassBlur
+import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.RemoteConfigTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
 
@@ -19,17 +31,51 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            RemoteConfigTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val navController = rememberNavController()
-                    val viewModel: MainViewModel = viewModel()
+            val viewModel: MainViewModel = viewModel()
+            val darkTheme = isSystemInDarkTheme()
 
-                    NavGraph(
-                        navController = navController,
-                        viewModel = viewModel
+            DisposableEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { darkTheme },
+                )
+                window.isNavigationBarContrastEnforced = false
+                onDispose { }
+            }
+
+            val navigator = rememberNavigator(Route.Main)
+
+            CompositionLocalProvider(
+                LocalNavigator provides navigator,
+                LocalUiMode provides AppSettingsRepository.uiMode,
+                LocalEnableGlass provides AppSettingsRepository.enableGlass,
+                LocalEnableGlassBlur provides AppSettingsRepository.enableGlassBlur,
+            ) {
+                RemoteConfigTheme {
+                    NavDisplay(
+                        backStack = navigator.backStack,
+                        onBack = { navigator.pop() },
+                        entryProvider = entryProvider {
+                            entry<Route.Main> {
+                                MainScreen(viewModel = viewModel)
+                            }
+                            entry<Route.ColorPalette> { ColorPaletteScreenPlaceholder() }
+                            entry<Route.ConfigEditor> { key ->
+                                ConfigEditorScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        viewModel.clearEditingConfig()
+                                        navigator.pop()
+                                    },
+                                )
+                            }
+                        },
                     )
                 }
             }
