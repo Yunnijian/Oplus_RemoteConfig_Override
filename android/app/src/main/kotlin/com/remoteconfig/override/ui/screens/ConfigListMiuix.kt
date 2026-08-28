@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -489,11 +490,13 @@ private fun AppIcon(pkg: String, viewModel: MainViewModel) {
             // miuix Icon 默认 tint = LocalContentColor.current（浅色 = 深色 onBackground），
             // 会把彩色 App 图标整体染黑。传 Unspecified 取消着色（对齐 Material 版 Image 无 tint）。
             tint = Color.Unspecified,
-            modifier = Modifier.size(40.dp),
+            // C2: 统一图标形状（对齐 Material 版 clip(RoundedCornerShape) 圆角），
+            // 避免不同 App 图标形状不统一。
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)),
         )
     } else {
         Box(
-            modifier = Modifier.size(40.dp).clip(CircleShape).background(colorScheme.secondaryContainer),
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
