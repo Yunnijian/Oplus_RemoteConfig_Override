@@ -64,15 +64,8 @@ class MainPagerState(
     }
 
     fun syncPage() {
-        // 只在"滚动中（跟手）"或"已停稳（settledPage 到位）"时同步 selectedPage。
-        // 守卫：IME 弹出/窗口尺寸变化会让 Pager 短暂重排、currentPage 抖动（非滚动、非停稳），
-        // 此时不同步，避免 selectedPage 误跳到错误页（C1：横屏编辑器弹输入法跳设置页）。
-        // isNavigating=true（点击 tab 的程序滚动）时也不同步，避免被拉回。
-        if (isNavigating) return
-        if (pagerState.isScrollInProgress || pagerState.settledPage == pagerState.currentPage) {
-            if (selectedPage != pagerState.currentPage) {
-                selectedPage = pagerState.currentPage
-            }
+        if (!isNavigating && selectedPage != pagerState.currentPage) {
+            selectedPage = pagerState.currentPage
         }
     }
 }
