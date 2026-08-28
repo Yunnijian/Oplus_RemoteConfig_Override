@@ -78,7 +78,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // 锁定 material3 稳定版 1.4.0（BOM 2026.08.00 也是 1.4.0）。
+    // 不锁的话，miuix 0.9.3 的 CMP material3 传递依赖会把 androidx material3 抬到
+    // 1.5.0-alpha17 → 编译期(1.4.0)/运行期(1.5.0-alpha17) ABI 不一致 → AbstractMethodError
+    implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
 
@@ -94,9 +97,14 @@ dependencies {
     implementation("io.github.kyant0:shapes:1.2.1")
 
     // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
-    implementation("com.materialkolor:material-kolor:5.0.0")
+    // 排除 material-kolor 的 CMP material3 传递依赖：它会把 androidx material3 抬到
+    // 1.5.0-alpha17（atomic group 强制同版本）→ 编译期(1.4.0)/运行期(1.5.0-alpha17)
+    // ABI 不一致 → AbstractMethodError。material-kolor 只用其 PaletteStyle/ColorSpec 枚举。
+    implementation("com.materialkolor:material-kolor:5.0.0") {
+        exclude(group = "org.jetbrains.compose.material3", module = "material3")
+    }
 
-    // 平板/大屏适配（Google 标准 WindowSizeClass）
+    // 平板/大屏适配（Google 标准 WindowSizeClass，版本由 BOM 管理）
     implementation("androidx.compose.material3:material3-window-size-class")
 
     // Navigation3
