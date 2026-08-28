@@ -41,6 +41,7 @@ fun ConfigListContentMaterial(
     viewModel: MainViewModel,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
+    dualPaneSelected: String? = null,
 ) {
     val gameList by viewModel.gameList.collectAsState()
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -161,9 +162,14 @@ fun ConfigListContentMaterial(
                             val bmp = viewModel.getCachedIcon(summary.packageName) ?: return@remember null
                             BitmapPainter(bmp.asImageBitmap())
                         }
+                        val isSelected = summary.packageName == dualPaneSelected
                         Card(
                             modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            colors = CardDefaults.cardColors(
+                                // 双窗选中行高亮：secondaryContainer（区别于普通行 surfaceVariant 半透明）
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
                         ) {
                             ListItem(
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),

@@ -7,6 +7,9 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -23,11 +26,13 @@ import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalEnableGlass
 import com.remoteconfig.override.ui.theme.LocalEnableGlassBlur
 import com.remoteconfig.override.ui.theme.LocalUiMode
+import com.remoteconfig.override.ui.theme.LocalWindowWidthClass
 import com.remoteconfig.override.ui.theme.RemoteConfigTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -52,6 +57,10 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
 
+            // 平板/大屏适配（Google 标准 WindowSizeClass）：在 setContent 内计算，
+            // 每次重组读取当前窗口尺寸 → 分屏/平行视窗/自由窗口重布局即时响应。
+            val windowSizeClass = calculateWindowSizeClass(this)
+
             val navigator = rememberNavigator(Route.Main)
 
             CompositionLocalProvider(
@@ -59,6 +68,7 @@ class MainActivity : ComponentActivity() {
                 LocalUiMode provides AppSettingsRepository.uiMode,
                 LocalEnableGlass provides AppSettingsRepository.enableGlass,
                 LocalEnableGlassBlur provides AppSettingsRepository.enableGlassBlur,
+                LocalWindowWidthClass provides windowSizeClass.widthSizeClass,
             ) {
                 RemoteConfigTheme {
                     NavDisplay(

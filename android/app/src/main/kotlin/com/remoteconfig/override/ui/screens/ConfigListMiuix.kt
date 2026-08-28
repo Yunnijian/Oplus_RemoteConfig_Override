@@ -48,6 +48,7 @@ import com.remoteconfig.override.viewmodel.MainViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
@@ -98,6 +99,7 @@ fun ConfigListContentMiuix(
     viewModel: MainViewModel,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
+    dualPaneSelected: String? = null,
 ) {
     val gameList by viewModel.gameList.collectAsState()
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -255,7 +257,16 @@ fun ConfigListContentMiuix(
                         )
                     }
                     items(filteredGames, key = { it.packageName }, contentType = { "app" }) { summary ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        val isSelected = summary.packageName == dualPaneSelected
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            // 双窗选中行高亮（容器色 = secondaryContainer，对齐 Material 侧高亮语义）
+                            colors = if (isSelected) {
+                                CardDefaults.defaultColors(color = colorScheme.secondaryContainer)
+                            } else {
+                                CardDefaults.defaultColors()
+                            },
+                        ) {
                             BasicComponent(
                                 // BasicComponent 无 onLongClick 槽：用 combinedClickable 包裹实现长按删除
                                 // （不传 onClick 避免与 combinedClickable 双重触发）

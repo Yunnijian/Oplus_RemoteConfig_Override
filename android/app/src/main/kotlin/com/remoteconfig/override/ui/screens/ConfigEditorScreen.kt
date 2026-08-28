@@ -58,6 +58,7 @@ import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Close
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
@@ -163,9 +164,39 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     }
 }
 
+/**
+ * 双窗右侧窗格（Task 12）：宽屏配置页右侧内嵌编辑器，不占路由。
+ *
+ * 进入时加载指定包名的配置（仿 ConfigEditorScreen 打开路径）；
+ * 顶栏无返回箭头（showBack=false），显示关闭 X → [onClosed]。
+ *
+ * 注意：loadConfig 内部自己 launch 协程（非 suspend），直接调用即可。
+ * 若该包名已在编辑中（含 MainScreen onNewConfig 的 createNewConfig 模板），
+ * 跳过重载以保留未保存的编辑 / 新建模板。
+ */
+@Composable
+fun ConfigEditorPane(viewModel: MainViewModel, packageName: String, onClosed: () -> Unit) {
+    val editingPackageName by viewModel.editingPackageName.collectAsState()
+    LaunchedEffect(packageName) {
+        if (editingPackageName != packageName) {
+            viewModel.loadConfig(packageName)
+        }
+    }
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> ConfigEditorContent(viewModel, onClosed, isMiuix = true, packageName = packageName, showBack = false)
+        UiMode.Material -> ConfigEditorContent(viewModel, onClosed, isMiuix = false, packageName = packageName, showBack = false)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ConfigEditorContent(viewModel: MainViewModel, onBack: () -> Unit, isMiuix: Boolean) {
+private fun ConfigEditorContent(
+    viewModel: MainViewModel,
+    onBack: () -> Unit,
+    isMiuix: Boolean,
+    packageName: String? = null,
+    showBack: Boolean = true,
+) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -489,10 +520,17 @@ private fun ConfigEditorContent(viewModel: MainViewModel, onBack: () -> Unit, is
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 MiuixTopAppBar(
-                    title = "JSON 编辑",
+                    title = if (packageName != null) appLabel else "JSON 编辑",
                     navigationIcon = {
-                        MiuixIconButton(onClick = onBack) {
-                            MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回")
+                        if (showBack) {
+                            MiuixIconButton(onClick = onBack) {
+                                MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回")
+                            }
+                        } else {
+                            // 双窗模式：关闭 X → onClosed
+                            MiuixIconButton(onClick = onBack) {
+                                MiuixIcon(imageVector = MiuixIcons.Basic.Close, contentDescription = "关闭")
+                            }
                         }
                     },
                     actions = editorActions,
@@ -508,8 +546,15 @@ private fun ConfigEditorContent(viewModel: MainViewModel, onBack: () -> Unit, is
                 TopAppBar(
                     title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, "返回")
+                        if (showBack) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.Default.ArrowBack, "返回")
+                            }
+                        } else {
+                            // 双窗模式：关闭 X → onClosed
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.Default.Close, "关闭")
+                            }
                         }
                     },
                     actions = editorActions,
