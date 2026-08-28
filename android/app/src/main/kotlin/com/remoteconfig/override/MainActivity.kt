@@ -11,6 +11,7 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
@@ -91,6 +92,14 @@ class MainActivity : ComponentActivity() {
                             }
                             entry<Route.ColorPalette> { ColorPaletteScreen() }
                             entry<Route.ConfigEditor> { key ->
+                                // Bug 5：进程重建恢复 backStack（含 ConfigEditor(pkg)）时新 VM 无编辑态，
+                                // 按 route 参数幂等加载。判重：仅当 editingPackageName 不是该包时才 load，
+                                // 避免与列表页 onGameClick 已先调用的 loadConfig 重复（重复无害但会闪 loading）。
+                                LaunchedEffect(key.packageName) {
+                                    if (viewModel.editingPackageName.value != key.packageName) {
+                                        viewModel.loadConfig(key.packageName)
+                                    }
+                                }
                                 ConfigEditorScreen(
                                     viewModel = viewModel,
                                     onBack = {
