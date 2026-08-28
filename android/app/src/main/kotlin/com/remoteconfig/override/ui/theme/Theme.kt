@@ -79,11 +79,14 @@ object ThemeController {
 /**
  * 双主题分发入口 — 对齐 KernelSU KernelSUTheme，按 [uiMode] 分发到
  * MiuixTheme / MaterialTheme。
+ * [miuixMonet]：Material 模式下的动态取色门控（读 SettingsRepository.miuixMonet，
+ * 由 MainActivity 传入；keyColor==0 时才生效，keyColor 优先）。
  */
 @Composable
 fun RemoteConfigTheme(
     appSettings: AppSettings = ThemeController.getAppSettings(),
     uiMode: UiMode = LocalUiMode.current,
+    miuixMonet: Boolean = SettingsRepositoryImpl().miuixMonet,
     content: @Composable () -> Unit
 ) {
     when (uiMode) {
@@ -94,6 +97,7 @@ fun RemoteConfigTheme(
 
         UiMode.Material -> RemoteConfigMaterialTheme(
             appSettings = appSettings,
+            miuixMonet = miuixMonet,
             content = content,
         )
     }
