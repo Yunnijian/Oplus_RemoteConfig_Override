@@ -83,7 +83,7 @@ fun MainScreen(viewModel: MainViewModel) {
         ) { page ->
             val isCurrentPage = page == settledPage
             when (page) {
-                0 -> if (isCurrentPage || contentReady) PlaceholderPage("首页 — Task 8")
+                0 -> if (isCurrentPage || contentReady) HomePage(viewModel, isCurrentPage)
                 1 -> if (isCurrentPage || contentReady) PlaceholderPage("配置列表 — Task 9")
                 2 -> if (isCurrentPage || contentReady) SettingsContent()
             }
