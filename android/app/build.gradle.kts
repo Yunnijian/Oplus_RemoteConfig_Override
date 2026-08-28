@@ -8,7 +8,8 @@ plugins {
 android {
     namespace = "com.remoteconfig.override"
     compileSdk {
-        version = release(36) {}
+        // Compose BOM 2026.08.00 (ui 1.12.0) / material-kolor 5.0.0 require minCompileSdk 37.
+        version = release(37) {}
     }
 
     defaultConfig {
