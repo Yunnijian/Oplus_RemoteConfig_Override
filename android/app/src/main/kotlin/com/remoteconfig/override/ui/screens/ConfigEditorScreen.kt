@@ -389,15 +389,16 @@ private fun ConfigEditorContent(
                                 if (!editorFocused || !editorVisible || textScroll.viewportSize <= 0) {
                                     return@LaunchedEffect
                                 }
-                                // windowInsetsPadding(WindowInsets.ime) makes the scroll viewport
-                                // itself end above the keyboard, so use that measured boundary.
+                                // windowInsetsPadding(WindowInsets.ime) 在 verticalScroll 内侧——滚动视口是
+                                // 全屏高度，需手动扣除键盘高度，否则光标会被滚到键盘下方（API 30+）
                                 delay(if (imeBottom > 0) 120 else 60)
                                 val margin = with(density) { 28.dp.toPx() }
                                 val top = textScroll.value.toFloat()
-                                val bottom = top + textScroll.viewportSize
+                                // Bug 5: 键盘开启时视口底界 = 视口底 - imeBottom，光标保持在键盘上方可视区
+                                val viewportBottom = top + textScroll.viewportSize - (if (imeBottom > 0) imeBottom else 0)
                                 val target = when {
-                                    caret.bottom + margin > bottom ->
-                                        textScroll.value + (caret.bottom + margin - bottom).toInt()
+                                    caret.bottom + margin > viewportBottom ->
+                                        textScroll.value + (caret.bottom + margin - viewportBottom).toInt()
                                     caret.top - margin < top ->
                                         textScroll.value - (top - caret.top + margin).toInt()
                                     else -> null

@@ -194,7 +194,9 @@ private fun GlassLiquidBottomTabs(
         var currentIndex by remember {
             mutableIntStateOf(selectedTabIndex())
         }
-        val dampedDragAnimation = remember(animationScope) {
+        val dampedDragAnimation = remember(animationScope, constraints.maxWidth) {
+            // Bug 4: key 补 constraints.maxWidth——分屏/自由窗口尺寸变化时重建闭包，
+            // 重新捕获最新 tabWidth，避免拖拽用陈旧宽度（拖错 tab）
             DampedDragAnimation(
                 animationScope = animationScope,
                 initialValue = selectedTabIndex().toFloat(),
@@ -241,7 +243,9 @@ private fun GlassLiquidBottomTabs(
                 }
         }
 
-        val interactiveHighlight = remember(animationScope) {
+        val interactiveHighlight = remember(animationScope, constraints.maxWidth) {
+            // Bug 4: key 补 constraints.maxWidth——尺寸变化时重建 position 闭包，
+            // 重新捕获最新 tabWidth，避免指示器高亮定位用陈旧宽度
             InteractiveHighlight(
                 animationScope = animationScope,
                 position = { size, _ ->
@@ -258,35 +262,45 @@ private fun GlassLiquidBottomTabs(
         val tabSelect: (Int) -> Unit = { index -> currentIndex = index }
 
         // —— 第一段：可见玻璃面板 ——
-        Row(
-            Modifier
-                .graphicsLayer {
-                    translationX = panelOffset
-                }
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        vibrancy()
-                        if (blurEnabled) blur(8.dp.toPx())
-                        lens(24.dp.toPx(), 24.dp.toPx())
-                    },
-                    layerBlock = {
-                        val progress = dampedDragAnimation.pressProgress
-                        val scale = lerp(1f, 1f + 16.dp.toPx() / size.width, progress)
-                        scaleX = scale
-                        scaleY = scale
-                    },
-                    onDrawSurface = { drawRect(containerColor) }
-                )
-                .then(interactiveHighlight.modifier)
-                // Bug 4: pill 高度收敛 64→56dp（内容 48dp + 上下 4dp padding）
-                .height(56.dp)
-                .fillMaxWidth()
-                .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content
-        )
+        // Bug 8: 可见 Row 同样 provide LocalGlassTabSelect/LocalGlassTabScale——之前只有离屏
+        // Row 提供，可见 tab 的点击读到的 LocalGlassTabSelect 是默认空实现（TalkBack 点击无响应，
+        // 无法切换页签）。两个 Row 各自作用域内 provide 不冲突。
+        CompositionLocalProvider(
+            LocalGlassTabSelect provides tabSelect,
+            LocalGlassTabScale provides {
+                lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
+            }
+        ) {
+            Row(
+                Modifier
+                    .graphicsLayer {
+                        translationX = panelOffset
+                    }
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { Capsule() },
+                        effects = {
+                            vibrancy()
+                            if (blurEnabled) blur(8.dp.toPx())
+                            lens(24.dp.toPx(), 24.dp.toPx())
+                        },
+                        layerBlock = {
+                            val progress = dampedDragAnimation.pressProgress
+                            val scale = lerp(1f, 1f + 16.dp.toPx() / size.width, progress)
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                        onDrawSurface = { drawRect(containerColor) }
+                    )
+                    .then(interactiveHighlight.modifier)
+                    // Bug 4: pill 高度收敛 64→56dp（内容 48dp + 上下 4dp padding）
+                    .height(56.dp)
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = content
+            )
+        }
 
         // —— 第二段：离屏着色 Row（alpha 0，记录进 tabsBackdrop 供指示器折射出选中色）——
         CompositionLocalProvider(

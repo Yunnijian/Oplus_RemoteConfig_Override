@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Bug 3: 图标缓存容量上限——超过后整体清空，下一轮 refresh 只重建当前配置包（内存上限保护）。 */
+private const val MAX_CACHED_ICONS = 200
+
 /**
  * 主 ViewModel — 所有配置以原始 JSON 字符串形式处理。
  *
@@ -52,6 +55,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 预加载的应用图标缓存 — 包名 → Bitmap（IO 线程写、UI 线程读，用并发容器保证安全） */
     private val iconCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+
+    /** Bug 3: 确认未安装（无图标）的包名集合 —— 跳过每轮 refresh 的重复解码尝试。 */
+    private val missingIconPackages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** 公开给 UI 层读取缓存图标 */
     fun getCachedIcon(pkg: String): Bitmap? = iconCache[pkg]
@@ -105,22 +111,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val results = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val densityDpi = context.resources.displayMetrics.density
+            // Bug 3: 容量上限保护——条目超过上限整体清空（下一轮 refresh 只重建当前配置包）
+            if (iconCache.size > MAX_CACHED_ICONS) iconCache.clear()
             configuredPkgs.map { pkg ->
-                try {
-                    val info = pm.getApplicationInfo(pkg, 0)
-                    val label = pm.getApplicationLabel(info).toString()
-                    val drawable = pm.getApplicationIcon(info)
-                    val px = (44 * densityDpi).toInt().coerceAtLeast(48)
-                    val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
-                    val c = Canvas(bmp)
-                    drawable.setBounds(0, 0, px, px)
-                    drawable.draw(c)
-                    iconCache[pkg] = bmp
-                    Triple(pkg, label, true)
-                } catch (_: Exception) {
-                    // ConcurrentHashMap 不接受 null 值：移除旧缓存让 UI 走占位图标
-                    iconCache.remove(pkg)
+                if (missingIconPackages.contains(pkg)) {
+                    // Bug 3: 已知未安装（无图标）——跳过重复解码尝试，直接走占位图标
                     Triple(pkg, pkg, false)
+                } else {
+                    try {
+                        val info = pm.getApplicationInfo(pkg, 0)
+                        val label = pm.getApplicationLabel(info).toString()
+                        // Bug 3: 已缓存图标跳过重建（解码/绘 Bitmap 是主要内存与耗时来源），
+                        // refreshAll 只补新增包；label 查询是廉价 Binder 调用，保持列表名最新
+                        if (!iconCache.containsKey(pkg)) {
+                            val drawable = pm.getApplicationIcon(info)
+                            val px = (44 * densityDpi).toInt().coerceAtLeast(48)
+                            val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+                            val c = Canvas(bmp)
+                            drawable.setBounds(0, 0, px, px)
+                            drawable.draw(c)
+                            iconCache[pkg] = bmp
+                        }
+                        missingIconPackages.remove(pkg)
+                        Triple(pkg, label, true)
+                    } catch (_: Exception) {
+                        // ConcurrentHashMap 不接受 null 值：移除旧缓存让 UI 走占位图标
+                        iconCache.remove(pkg)
+                        missingIconPackages.add(pkg)
+                        Triple(pkg, pkg, false)
+                    }
                 }
             }
         }

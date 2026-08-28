@@ -124,8 +124,9 @@ fun RemoteConfigMaterialTheme(
             style = paletteStyle,
             specVersion = colorSpec.effectiveFor(paletteStyle),
         )
-        // keyColor==0 → 保持原行为：SDK≥S 壁纸取色，否则静态色表回退
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        // Bug 6: enableMonet 门控——keyColor==0 时，开关开启且 SDK≥S 才取系统壁纸动态色；
+        // 关闭则回落到静态色表（不再取壁纸），开关在 Settings 页生效
+        AppSettingsRepository.enableMonet && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> DarkColors
