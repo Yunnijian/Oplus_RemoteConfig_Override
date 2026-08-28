@@ -71,8 +71,10 @@ fun MainScreen(viewModel: MainViewModel) {
     val contentReady = rememberContentReady()
     val scope = rememberCoroutineScope()
     val navigator = LocalNavigator.current
-    // settledPage 本身就是 state，直接读取即可（只在值变化时重组，拖动中不逐帧）
+    // Bug 2: 内容门控（是否加载当前页）仍用 settledPage（停稳才算当前页）；tab 选中高亮
+    // 改用 currentPage（滑动中实时更新，手势滑动时 tab 即时跟随）。
     val settledPage = pagerState.settledPage
+    val currentPage = pagerState.currentPage
     val expanded = isExpandedWidth()
 
     // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
@@ -109,7 +111,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     contentAlignment = Alignment.BottomCenter,
                 ) {
                     GlassBottomBar(
-                        selectedIndex = { settledPage },
+                        selectedIndex = { currentPage },
                         onSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
                         backdrop = glassBackdrop,
                     ) {
