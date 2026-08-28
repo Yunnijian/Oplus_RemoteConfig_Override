@@ -1,29 +1,16 @@
 package com.remoteconfig.override.ui.screens
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
-import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.viewmodel.MainViewModel
-import top.yukonga.miuix.kmp.basic.Text as MiuixText
-import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 
 /**
  * 配置列表页分发器：按当前 UI 风格 [LocalUiMode] 选择 Miuix / Material 实现。
@@ -34,13 +21,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * 导航回调：onGameClick / onNewConfig 由 MainScreen 传入（内部做
  * viewModel.loadConfig / createNewConfig + navigator.push(Route.ConfigEditor(pkg))）。
  *
- * 双窗（Task 12）：宽屏 [isExpandedWidth]（≥840dp）渲染 list-detail 双窗格
- * （左列表 + 右 [ConfigEditorPane]）；窄屏保持整页路由模式。列表实现不感知双窗，
- * 选中项高亮通过 [dualPaneSelected]（可选参数，默认 null = 窄屏不传入）下发。
+ * 双窗（Task 12）：宽屏 [isExpandedWidth]（≥840dp）下编辑器由 MainScreen 作为覆盖层
+ * 渲染在 Pager 外（不参与 Pager 测量 → IME 弹出不影响 currentPage）；本页只渲染
+ * 列表（铺满整页），选中项高亮通过 [dualPaneSelected]（可选参数，默认 null = 窄屏不传入）下发。
  *
  * [bottomInnerPadding]：底栏（悬浮液态玻璃底栏 / 宽屏系统导航栏）占位高度。Pager 不加
  * bottom padding（内容需铺到底栏下方供玻璃采样折射），留白由本页在 LazyColumn 末尾
- * item Spacer + FAB bottom padding 消费；双窗右侧编辑器窗格同样透传。
+ * item Spacer + FAB bottom padding 消费。
  */
 @Composable
 fun ConfigListPage(
@@ -59,52 +46,8 @@ fun ConfigListPage(
         if (hasActivated) viewModel.refreshAll()
     }
 
-    val expanded = isExpandedWidth()
-
-    if (expanded) {
-        // 宽屏：左列表 + 右编辑器双窗格
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth(0.42f)) {
-                ConfigListContentImpl(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
-            }
-            VerticalDivider()
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (dualPaneSelected.isNullOrEmpty()) {
-                    EmptyPaneHint()
-                } else {
-                    ConfigEditorPane(
-                        viewModel = viewModel,
-                        packageName = dualPaneSelected,
-                        bottomInnerPadding = bottomInnerPadding,
-                        onClosed = {
-                            onDualPaneSelect("")
-                            // Bug 3：双窗关闭也清理编辑态，避免编辑态残留跨模式泄漏
-                            viewModel.clearEditingConfig()
-                        },
-                    )
-                }
-            }
-        }
-    } else {
-        ConfigListContentImpl(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected)
-    }
-}
-
-/** 双窗右侧空态提示（按 UI 模式取主题色）。 */
-@Composable
-private fun EmptyPaneHint() {
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> MiuixText(
-            text = "选择左侧应用查看配置",
-            fontSize = 14.sp,
-            color = colorScheme.onSurfaceVariantSummary,
-        )
-        UiMode.Material -> Text(
-            text = "选择左侧应用查看配置",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    // 宽屏：列表铺满整页（编辑器覆盖层由 MainScreen 在 Pager 外渲染，避免 IME 干扰 Pager 测量）
+    ConfigListContentImpl(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
 }
 
 /** 按当前 UI 风格选择列表实现；[dualPaneSelected] 用于宽屏选中行高亮。 */

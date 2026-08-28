@@ -1,5 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -76,9 +78,11 @@ fun MainScreen(viewModel: MainViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { PAGE_COUNT })
     val mainPagerState = rememberMainPagerState(pagerState)
 
-    // 手势滑动 → 实时同步 tab（isNavigating=false 时才生效，点击滚动中被协调器屏蔽）
-    val currentPage = pagerState.currentPage
-    LaunchedEffect(currentPage) {
+    // 手势滑动 → 停稳后同步 tab（syncPage 用 settledPage——真正停稳的页）。
+    // 只监听 settledPage：IME 弹出/窗口 resize 会让 currentPage 抖动但 settledPage 稳定，
+    // 不触发 syncPage，避免 selectedPage 误跳（C1：横屏编辑器弹输入法跳设置页）。
+    // 注意：这牺牲了"滑动中 tab 实时跟手"（停稳才跳），但换来不跳页的稳定性。
+    LaunchedEffect(pagerState.settledPage) {
         mainPagerState.syncPage()
     }
     // 内容门控用 settledPage（停稳才算当前页）
@@ -153,6 +157,28 @@ fun MainScreen(viewModel: MainViewModel) {
                 .only(WindowInsetsSides.Start)
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
+            // 双窗编辑器覆盖层（Pager 外，不参与 Pager 测量 → IME 弹出不影响 currentPage）
+            val dualPaneOverlay: @Composable () -> Unit = {
+                if (expanded && !dualPaneSelected.isNullOrEmpty()) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(surfaceColor)
+                    ) {
+                        ConfigEditorPane(
+                            viewModel = viewModel,
+                            packageName = dualPaneSelected!!,
+                            bottomInnerPadding = navBarBottomPadding,
+                            onClosed = {
+                                dualPaneSelected = null
+                                // Bug 3：双窗关闭也清理编辑态，避免编辑态残留跨模式泄漏
+                                viewModel.clearEditingConfig()
+                            },
+                        )
+                    }
+                }
+            }
+
             when (uiMode) {
                 UiMode.Miuix -> MiuixScaffold { _ ->
                     Row {
@@ -163,6 +189,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)
+                            dualPaneOverlay()
                         }
                     }
                 }
@@ -178,6 +205,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)
+                            dualPaneOverlay()
                         }
                     }
                 }
