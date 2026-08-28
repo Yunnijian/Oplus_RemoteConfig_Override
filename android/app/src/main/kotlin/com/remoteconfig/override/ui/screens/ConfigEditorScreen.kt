@@ -43,11 +43,25 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.remoteconfig.override.settings.UiMode
+import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
+import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 private val DARK_BG = Color(0xFF1E1E1E)
 private val LIGHT_BG = Color(0xFFFFFFFF)
@@ -134,9 +148,24 @@ private fun highlightJson(text: String, dark: Boolean): AnnotatedString {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * 配置编辑器页分发器：按当前 UI 风格 [LocalUiMode] 选择 Miuix / Material 外壳。
+ *
+ * 签名 `(viewModel, onBack)` 保持不变（MainActivity / 列表页调用方不变）。
+ * 编辑器自研核心（语法高亮 / 行号 / 捏合缩放 / IME 跟随 / 校验）完全不动，
+ * 仅 Scaffold / TopAppBar / 结果弹窗 三处外壳按 isMiuix 分支。
+ */
 @Composable
 fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> ConfigEditorContent(viewModel, onBack, isMiuix = true)
+        UiMode.Material -> ConfigEditorContent(viewModel, onBack, isMiuix = false)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun ConfigEditorContent(viewModel: MainViewModel, onBack: () -> Unit, isMiuix: Boolean) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -238,43 +267,32 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     }
 
 
-    Scaffold(
-        // The editor applies IME padding to its scroll viewport below. Do not
-        // let Scaffold consume the keyboard inset before that modifier sees it.
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "返回")
-                    }
-                },
-                actions = {
-                    var showOverflow by remember { mutableStateOf(false) }
-                    IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小") }
-                    IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大") }
-                    IconButton(onClick = { showOverflow = true }) {
-                        Icon(Icons.Filled.MoreVert, "更多操作")
-                        DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
-                            DropdownMenuItem(text = { Text("写入数据库") }, onClick = {
-                                showOverflow = false
-                                viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
-                            })
-                            DropdownMenuItem(text = { Text("导入配置") }, onClick = {
-                                showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
-                            })
-                            DropdownMenuItem(text = { Text("导出配置") }, onClick = {
-                                showOverflow = false
-                                viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
-                            })
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-            )
+    // TopAppBar 操作区（双模式共享）：缩小 / 放大 / 更多（写入数据库 / 导入配置 / 导出配置）。
+    // 菜单项文案与现有 Material 版逐字一致（"注入数据"已改名"写入数据库"，"回退配置"已删除）。
+    val editorActions: @Composable RowScope.() -> Unit = {
+        var showOverflow by remember { mutableStateOf(false) }
+        IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小") }
+        IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大") }
+        IconButton(onClick = { showOverflow = true }) {
+            Icon(Icons.Filled.MoreVert, "更多操作")
+            DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
+                DropdownMenuItem(text = { Text("写入数据库") }, onClick = {
+                    showOverflow = false
+                    viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
+                })
+                DropdownMenuItem(text = { Text("导入配置") }, onClick = {
+                    showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
+                })
+                DropdownMenuItem(text = { Text("导出配置") }, onClick = {
+                    showOverflow = false
+                    viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
+                })
+            }
         }
-    ) { padding ->
+    }
+
+    // 编辑器主体（双模式共享）：自研核心原样保留，仅作为两个 Scaffold 分支共用的 content。
+    val editorBody: @Composable (PaddingValues) -> Unit = { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -464,13 +482,78 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         }
     }
 
+    // ── 外壳（chrome）：Scaffold + TopAppBar 按 UiMode 分支，body/actions 共享 ──
+    if (isMiuix) {
+        // 编辑器自行对滚动视口做 IME padding，Scaffold 不消费键盘 inset。
+        MiuixScaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                MiuixTopAppBar(
+                    title = "JSON 编辑",
+                    navigationIcon = {
+                        MiuixIconButton(onClick = onBack) {
+                            MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回")
+                        }
+                    },
+                    actions = editorActions,
+                )
+            }
+        ) { padding -> editorBody(padding) }
+    } else {
+        Scaffold(
+            // The editor applies IME padding to its scroll viewport below. Do not
+            // let Scaffold consume the keyboard inset before that modifier sees it.
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, "返回")
+                        }
+                    },
+                    actions = editorActions,
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                )
+            }
+        ) { padding -> editorBody(padding) }
+    }
+
+    // ── 结果弹窗（Miuix 用 WindowDialog，Material 保持 AlertDialog，内容一致）──
     if (showResultDialog) {
-        AlertDialog(onDismissRequest = { showResultDialog = false },
-            icon = { Icon(if (resultSuccess) Icons.Default.CheckCircle else Icons.Default.Info, null,
-                tint = if (resultSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp)) },
-            title = { Text(if (resultSuccess) "操作成功" else "操作失败", fontWeight = FontWeight.SemiBold) },
-            text = { Text(resultMessage) },
-            confirmButton = { FilledTonalButton(onClick = { showResultDialog = false }) { Text("确定") } }
-        )
-}
+        if (isMiuix) {
+            WindowDialog(
+                show = true,
+                title = if (resultSuccess) "操作成功" else "操作失败",
+                onDismissRequest = { showResultDialog = false },
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MiuixIcon(
+                            imageVector = if (resultSuccess) MiuixIcons.Ok else Icons.Default.Info,
+                            contentDescription = null,
+                            tint = if (resultSuccess) colorScheme.primary else colorScheme.error,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        MiuixText(resultMessage, fontSize = 14.sp)
+                    }
+                    MiuixTextButton(
+                        text = "确定",
+                        onClick = { showResultDialog = false },
+                        modifier = Modifier.align(Alignment.End).padding(top = 16.dp),
+                        colors = MiuixButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
+            }
+        } else {
+            AlertDialog(onDismissRequest = { showResultDialog = false },
+                icon = { Icon(if (resultSuccess) Icons.Default.CheckCircle else Icons.Default.Info, null,
+                    tint = if (resultSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp)) },
+                title = { Text(if (resultSuccess) "操作成功" else "操作失败", fontWeight = FontWeight.SemiBold) },
+                text = { Text(resultMessage) },
+                confirmButton = { FilledTonalButton(onClick = { showResultDialog = false }) { Text("确定") } }
+            )
+        }
+    }
 }
