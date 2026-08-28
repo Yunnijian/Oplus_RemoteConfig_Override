@@ -85,7 +85,7 @@ fun MainScreen(viewModel: MainViewModel) {
             when (page) {
                 0 -> if (isCurrentPage || contentReady) PlaceholderPage("首页 — Task 8")
                 1 -> if (isCurrentPage || contentReady) PlaceholderPage("配置列表 — Task 9")
-                2 -> if (isCurrentPage || contentReady) PlaceholderPage("设置 — Task 7")
+                2 -> if (isCurrentPage || contentReady) SettingsContent()
             }
         }
     }
