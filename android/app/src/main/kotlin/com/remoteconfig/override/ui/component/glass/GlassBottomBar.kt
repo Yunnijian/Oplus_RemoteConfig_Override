@@ -280,7 +280,8 @@ private fun GlassLiquidBottomTabs(
                     onDrawSurface = { drawRect(containerColor) }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(64.dp)
+                // Bug 4: pill 高度收敛 64→56dp（内容 48dp + 上下 4dp padding）
+                .height(56.dp)
                 .fillMaxWidth()
                 .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -467,7 +468,8 @@ private fun GlassFallbackBottomBar(
             Row(
                 Modifier
                     .background(containerColor, Capsule())
-                    .height(64.dp)
+                    // Bug 4: 降级路径高度同步收敛
+                    .height(56.dp)
                     .fillMaxWidth()
                     .padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically,

@@ -107,7 +107,9 @@ fun MainScreen(viewModel: MainViewModel) {
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding(),
+                    .navigationBarsPadding()
+                    // Bug 4: 底栏底部留白 10dp（手势导航 inset 可能为 0，避免贴底/与边框重叠）
+                    .padding(bottom = 10.dp),
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 GlassBottomBar(
