@@ -7,10 +7,33 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
+
+/**
+ * 预设强调色列表（ARGB Int）— 完整对齐 KernelSU `Colors.kt` 的 keyColorOptions。
+ * 首项「跟随默认」用 keyColor=0 表示，不入此表。
+ */
+val keyColorOptions = listOf(
+    Color(0xFFF44336).toArgb(), // 红色
+    Color(0xFFE91E63).toArgb(), // 粉色
+    Color(0xFF9C27B0).toArgb(), // 紫色
+    Color(0xFF673AB7).toArgb(), // 深紫色
+    Color(0xFF3F51B5).toArgb(), // 靛蓝色
+    Color(0xFF2196F3).toArgb(), // 蓝色
+    Color(0xFF00BCD4).toArgb(), // 青色
+    Color(0xFF009688).toArgb(), // 蓝绿色
+    Color(0xFF4FAF50).toArgb(), // 绿色
+    Color(0xFFFFEB3B).toArgb(), // 黄色
+    Color(0xFFFFC107).toArgb(), // 琥珀色
+    Color(0xFFFF9800).toArgb(), // 橙色
+    Color(0xFF795548).toArgb(), // 棕色
+    Color(0xFF607D8F).toArgb(), // 蓝灰色
+    Color(0xFFFF9CA8).toArgb(), // 樱花色
+)
 
 /** AMOLED 模式：把表面色系全部压成纯黑（对齐 KernelSU ThemeExt.amoledBackground）。 */
 fun ColorScheme.amoledBackground(amoled: Boolean): ColorScheme =
