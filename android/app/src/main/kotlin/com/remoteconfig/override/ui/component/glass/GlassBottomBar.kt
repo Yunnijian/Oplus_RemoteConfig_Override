@@ -169,7 +169,9 @@ private fun GlassLiquidBottomTabs(
 
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
         val animationScope = rememberCoroutineScope()
-        var currentIndex by remember(selectedTabIndex) {
+        // Bug 1: currentIndex 只初始化一次，不再以每次重组都会新建的 lambda 作 key——
+        // 点 tab 后动画期间祖先重组不会把它重置回旧页。
+        var currentIndex by remember {
             mutableIntStateOf(selectedTabIndex())
         }
         val dampedDragAnimation = remember(animationScope) {
@@ -203,10 +205,11 @@ private fun GlassLiquidBottomTabs(
                 }
             )
         }
-        LaunchedEffect(selectedTabIndex) {
+        LaunchedEffect(Unit) {
             snapshotFlow { selectedTabIndex() }
-                .collectLatest { index ->
-                    currentIndex = index
+                .collect { index ->
+                    // 外部（pager 滑动）变化同步；== 时 no-op，防 onTabSelected → pager 滚动 → 回写死循环
+                    if (index != currentIndex) currentIndex = index
                 }
         }
         LaunchedEffect(dampedDragAnimation) {
@@ -382,7 +385,8 @@ private fun GlassFallbackBottomBar(
 
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val animationScope = rememberCoroutineScope()
-    var currentIndex by remember(selectedIndex) {
+    // Bug 1: 降级路径同步修复——selectedIndex 的 lambda 不再作 remember key
+    var currentIndex by remember {
         mutableIntStateOf(selectedIndex())
     }
 
@@ -402,10 +406,10 @@ private fun GlassFallbackBottomBar(
         )
     }
 
-    LaunchedEffect(selectedIndex) {
+    LaunchedEffect(Unit) {
         snapshotFlow { selectedIndex() }
-            .collectLatest { index ->
-                currentIndex = index
+            .collect { index ->
+                if (index != currentIndex) currentIndex = index
             }
     }
     LaunchedEffect(dampedDragAnimation) {
