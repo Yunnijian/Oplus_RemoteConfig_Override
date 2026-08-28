@@ -16,6 +16,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
@@ -94,8 +96,16 @@ class MainActivity : ComponentActivity() {
 
             val navigator = rememberNavigator(Route.Main)
 
+            // 对齐 KernelSU MainActivity.kt:138-141：pageScale 全局缩放 —— 用 Density 缩放
+            // LocalDensity.density，实现整体 UI 缩放（fontScale 保持不变）。
+            val systemDensity = LocalDensity.current
+            val density = remember(systemDensity, settingsRepository.pageScale) {
+                Density(systemDensity.density * settingsRepository.pageScale, systemDensity.fontScale)
+            }
+
             CompositionLocalProvider(
                 LocalNavigator provides navigator,
+                LocalDensity provides density,
                 LocalUiMode provides uiMode,
                 LocalColorMode provides appSettings.colorMode.value,
                 LocalEnableBlur provides settingsRepository.enableBlur,
@@ -103,7 +113,11 @@ class MainActivity : ComponentActivity() {
                 LocalEnableFloatingBottomBarBlur provides settingsRepository.enableFloatingBottomBarBlur,
                 LocalWindowWidthClass provides windowSizeClass.widthSizeClass,
             ) {
-                RemoteConfigTheme(appSettings = appSettings, uiMode = uiMode) {
+                RemoteConfigTheme(
+                    appSettings = appSettings,
+                    uiMode = uiMode,
+                    miuixMonet = settingsRepository.miuixMonet,
+                ) {
                     NavDisplay(
                         backStack = navigator.backStack,
                         onBack = {
