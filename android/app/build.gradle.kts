@@ -90,6 +90,8 @@ dependencies {
 
     // AndroidLiquidGlass (backdrop) — 液态玻璃
     implementation("io.github.kyant0:backdrop:2.0.1")
+    // Capsule 形状（backdrop 的 POM 把 shapes 声明为 runtime scope，编译期不可见，需显式声明）
+    implementation("io.github.kyant0:shapes:1.2.1")
 
     // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
     implementation("com.materialkolor:material-kolor:5.0.0")
