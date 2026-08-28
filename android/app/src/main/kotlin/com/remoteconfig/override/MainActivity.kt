@@ -17,7 +17,7 @@ import com.remoteconfig.override.navigation.Navigator
 import com.remoteconfig.override.navigation.Route
 import com.remoteconfig.override.navigation.rememberNavigator
 import com.remoteconfig.override.settings.AppSettingsRepository
-import com.remoteconfig.override.ui.screens.ColorPaletteScreenPlaceholder
+import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalEnableGlass
@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
                             entry<Route.Main> {
                                 MainScreen(viewModel = viewModel)
                             }
-                            entry<Route.ColorPalette> { ColorPaletteScreenPlaceholder() }
+                            entry<Route.ColorPalette> { ColorPaletteScreen() }
                             entry<Route.ConfigEditor> { key ->
                                 ConfigEditorScreen(
                                     viewModel = viewModel,
