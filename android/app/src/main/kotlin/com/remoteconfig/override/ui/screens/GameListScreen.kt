@@ -196,7 +196,7 @@ fun ConfigListContent(
                                 },
                                 modifier = Modifier.combinedClickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = androidx.compose.material.ripple.rememberRipple(),
+                                    indication = androidx.compose.material3.ripple(),
                                     onClick = { onGameClick(summary.packageName) },
                                     onLongClick = { showDeleteConfirm = summary.packageName }
                                 )
