@@ -300,12 +300,15 @@ private fun ConfigEditorContent(
 
     // TopAppBar 操作区（双模式共享）：缩小 / 放大 / 更多（写入数据库 / 导入配置 / 导出配置）。
     // 菜单项文案与现有 Material 版逐字一致（"注入数据"已改名"写入数据库"，"回退配置"已删除）。
+    // 注：M3 组件在 Miuix TopAppBar 内无 MaterialTheme 包裹，默认 LocalContentColor 为黑；
+    // 深色 Miuix 主题下对比度差，故按当前模式显式取 onSurface 作为 tint。
     val editorActions: @Composable RowScope.() -> Unit = {
         var showOverflow by remember { mutableStateOf(false) }
-        IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小") }
-        IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大") }
+        val actionTint = if (isMiuix) colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
+        IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
+        IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
         IconButton(onClick = { showOverflow = true }) {
-            Icon(Icons.Filled.MoreVert, "更多操作")
+            Icon(Icons.Filled.MoreVert, "更多操作", tint = actionTint)
             DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
                 DropdownMenuItem(text = { Text("写入数据库") }, onClick = {
                     showOverflow = false
@@ -524,12 +527,12 @@ private fun ConfigEditorContent(
                     navigationIcon = {
                         if (showBack) {
                             MiuixIconButton(onClick = onBack) {
-                                MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回")
+                                MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回", tint = colorScheme.onSurface)
                             }
                         } else {
                             // 双窗模式：关闭 X → onClosed
                             MiuixIconButton(onClick = onBack) {
-                                MiuixIcon(imageVector = MiuixIcons.Basic.Close, contentDescription = "关闭")
+                                MiuixIcon(imageVector = MiuixIcons.Basic.Close, contentDescription = "关闭", tint = colorScheme.onSurface)
                             }
                         }
                     },

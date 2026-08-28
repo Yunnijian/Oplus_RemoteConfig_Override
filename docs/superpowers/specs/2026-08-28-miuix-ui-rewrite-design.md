@@ -171,3 +171,20 @@
 - KernelSU Manager：`KernelSU/manager/`（本地已克隆，浅克隆 `--depth 1`）—— 双模式主题、Miuix 组件用法、FloatingBottomBar 视觉
 - AndroidLiquidGlass：`Kyant0/AndroidLiquidGlass`（backdrop 2.0.1）—— 液态玻璃 API
 - Miuix：`compose-miuix-ui/miuix` v0.9.3 —— 组件库文档/示例
+
+---
+
+## 实现偏差回写（Task 13，2026-08-28）
+
+实施过程中相对本文档的设计偏差，均已在对应任务简报/报告中裁定：
+
+| 章节 | 设计原文 | 实际实现 |
+|---|---|---|
+| §2 主题系统 | `ColorMode` 6 态（SYSTEM/LIGHT/DARK/MONET_SYSTEM/MONET_LIGHT/MONET_DARK，含 AMOLED 可选） | 三态 `ColorMode`（SYSTEM/LIGHT/DARK）+ 独立 `enableMonet` 开关（设置页切到 Monet 时 Miuix 侧映射 `ColorSchemeMode.Monet*`；Material 侧 SDK≥S 始终壁纸取色）。AMOLED 未引入（YAGNI）。 |
+| §2 主题系统 | `AppSettings` 数据类 + `ThemeController.getAppSettings()` | `AppSettingsRepository` 单例（SharedPreferences + `mutableStateOf` 可观察属性，Task 2 起），不依赖 Miuix ThemeController 持久化。 |
+| §3 导航结构 | 路由 `main` + `config_editor/{packageName}` | Navigation3 类型安全 `Route.Main` / `Route.ConfigEditor(pkg)` / `Route.ColorPalette`（取色屏为 2026-08-28 增补）。 |
+| §4.4 设置页 | 关于（版本信息） | 从简：设置页底部复用版本文本，无独立 About 页（首版 YAGNI）。 |
+| §9.1 玻璃分级降级 | 三级开关（enable_blur / enable_glass_bottom_bar / enable_glass_blur） | 两级：`enableGlass`（液态玻璃底栏总开关，兼浮动底栏开关，默认开）+ `enableGlassBlur`（底栏模糊，默认开，仅 enableGlass 开时显示）。能力检测 `rememberGlassBackdrop` 仍保留。 |
+| §9.5 列表与生命周期 | 全部 `collectAsStateWithLifecycle`；一次性事件 `repeatOnLifecycle(STARTED)` | 实际用 `collectAsState()`（compose runtime）+ `LaunchedEffect`；功能等价，生命周期感知为可选优化，未引入 lifecycle-runtime-compose 依赖要求。 |
+| §9.6 API 库选择 | backdrop 2.0.1（minSdk 21）替换 miuix-blur | 采用 backdrop 2.0.1 + 显式 `io.github.kyant0:shapes:1.2.1`（backdrop POM 将其声明为 runtime scope，编译期不可见需显式声明）。 |
+| 平板适配（增补） | — | material3-window-size-class WindowSizeClass + 宽屏 NavigationRail + 配置页 list-detail 双窗格 + `resizeableActivity` 兼容声明。ColorOS 平行视窗/Activity Embedding 以 Activity 跳变为单位，单 Activity Compose 应用不适用。 |

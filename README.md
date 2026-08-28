@@ -28,8 +28,8 @@
 
 ### 环境要求
 
-- Android Studio Hedgehog 2023.1+ (JDK 17)
-- Android SDK 34
+- JDK 21（Gradle 运行与 Kotlin/JVM 目标均为 21）
+- Android SDK 37（compileSdk；Compose BOM 2026.08.00 / material-kolor 5.0.0 要求 minCompileSdk 37）
 - Rust stable、Android NDK（需包含 `aarch64-linux-android` 工具链）
 - 目标设备需提供 `/system/lib64/libsqlite.so`（Android 系统 SQLite）。构建机上的库文件如果叫 `libsqlite.so`，需要在同一目录提供 `libsqlite3.so` 这个链接名给 Cargo 的 `-lsqlite3` 查找逻辑。
 
@@ -75,8 +75,11 @@ aapt2 通过参数覆盖：
 
 ## 技术栈
 
-- **UI**: Jetpack Compose + Material 3
-- **导航**: Jetpack Navigation Compose
+- **UI**: Jetpack Compose + Material 3，**双 UI 模式**（Miuix 0.9.3 / Material 3，设置内即时切换，两套主题与页面外壳）
+- **导航**: Navigation3（`androidx.navigation3`，类型安全路由；宽屏与窄屏共用同一导航图）
+- **液态玻璃底栏**: AndroidLiquidGlass（`io.github.kyant0:backdrop` 2.0.1，可在设置内关闭回退纯色底栏）
+- **主题取色**: material-kolor 5.0.0（keyColor / palette style / color spec，对齐 KernelSU ColorPalette）
+- **平板适配**: material3-window-size-class（Google 标准 WindowSizeClass；宽屏 NavigationRail + 配置页 list-detail 双窗格，纯应用内布局，无需 OPPO 平行视窗）
 - **Root 交互**: libsu (topjohnwu)
 - **数据库**: `com.oplus.cosa` SQLite (Rust `rusqlite` 原生工具，通过 Root Shell 操作)
 
@@ -90,24 +93,26 @@ Rust 工具动态链接系统的 `libsqlite.so`，APK 不再携带 SQLite 实现
 ```
 android/app/src/main/kotlin/com/remoteconfig/override/
 ├── App.kt                    # Application 入口
-├── MainActivity.kt           # 主 Activity
+├── MainActivity.kt           # 主 Activity（Navigation3 NavDisplay + 双主题分发）
 ├── data/
 │   └── DatabaseManager.kt    # Root Shell + Rust 数据库工具调用
 ├── model/
 │   └── GameConfig.kt         # 数据模型
 ├── navigation/
-│   └── NavGraph.kt           # 导航图 + 底部导航栏
+│   ├── Navigator.kt          # Navigation3 导航器
+│   └── Routes.kt             # 类型安全路由定义
+├── settings/
+│   ├── AppSettingsRepository.kt # 设置仓库（SharedPreferences + 可观察状态）
+│   ├── ColorMode.kt          # 深浅色模式（跟随系统/浅/深）
+│   └── UiMode.kt             # 双 UI 模式（Miuix / Material）
 ├── ui/
-│   ├── screens/
-│   │   ├── HomeScreen.kt         # 首页
-│   │   ├── GameListScreen.kt     # 配置列表
-│   │   └── ConfigEditorScreen.kt # JSON 编辑器
-│   └── theme/
-│       ├── Color.kt
-│       ├── Theme.kt
-│       └── Type.kt
+│   ├── component/
+│   │   ├── glass/            # 液态玻璃底栏（AndroidLiquidGlass backdrop 封装）
+│   │   └── rememberContentReady.kt # 重内容延迟组装
+│   ├── screens/              # 首页/配置列表/编辑器/取色/设置，每屏 Miuix+Material 双实现 + 分发器
+│   └── theme/                # 双主题（MiuixTheme/MaterialTheme）+ 取色参数消费
 └── viewmodel/
-    └── MainViewModel.kt      # 主 ViewModel
+    └── MainViewModel.kt      # 主 ViewModel（数据层不动）
 rust/
 ├── src/main.rs               # rusqlite 数据库命令行工具
 └── Cargo.toml

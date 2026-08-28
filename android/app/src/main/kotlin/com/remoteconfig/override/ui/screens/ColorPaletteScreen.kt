@@ -1,8 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
 import androidx.compose.runtime.Composable
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamiccolor.ColorSpec
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
@@ -25,13 +23,6 @@ internal val PresetKeyColors: List<Int> = listOf(
     0xFF6741D9.toInt(),
     0xFFC2255C.toInt(),
 )
-
-/** materialkolor 5.0.0 PaletteStyle 全部枚举名（TonalSpot/Neutral/Vibrant/Expressive/Rainbow/FruitSalad/Monochrome/Fidelity/Content）。 */
-internal val PaletteStyleNames: List<String> = PaletteStyle.entries.map { it.name }
-
-/** 颜色规范枚举名（SPEC_2021 / SPEC_2025）。Default 为库内部常量，过滤掉。 */
-internal val ColorSpecNames: List<String> =
-    ColorSpec.SpecVersion.entries.map { it.name }.filter { it != "Default" }
 
 /** PaletteStyle 枚举名 → 中英标签（Miuix / Material 双实现共用）。 */
 private val PaletteStyleLabelMap: Map<String, String> = mapOf(
