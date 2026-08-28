@@ -6,7 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
@@ -28,6 +27,7 @@ import com.remoteconfig.override.ui.theme.LocalEnableGlassBlur
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.LocalWindowWidthClass
 import com.remoteconfig.override.ui.theme.RemoteConfigTheme
+import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
@@ -38,7 +38,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val viewModel: MainViewModel = viewModel()
-            val darkTheme = isSystemInDarkTheme()
+            // Bug 3：系统栏图标明暗必须跟随应用主题（colorMode），而非系统深色。
+            // 若强制 ColorMode 与系统相反，isSystemInDarkTheme() 会导致
+            // 白图标落在浅色背景（或反之）不可见。isInDarkTheme 在组合期
+            // 读取设置（@Composable @ReadOnlyComposable），可直接赋值给变量。
+            val darkTheme = isInDarkTheme()
 
             DisposableEffect(darkTheme) {
                 enableEdgeToEdge(
