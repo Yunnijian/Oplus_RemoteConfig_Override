@@ -14,7 +14,11 @@ class Navigator(initialKey: NavKey) {
     val backStack: SnapshotStateList<NavKey> = mutableStateListOf(initialKey)
 
     fun push(key: NavKey) {
-        backStack.add(key)
+        // Bug 1: 防重复 push——同一路由（如双击同一配置项）只压栈一次，
+        // 避免单次系统返回把两层一起弹出
+        if (backStack.lastOrNull() != key) {
+            backStack.add(key)
+        }
     }
 
     fun pop() {

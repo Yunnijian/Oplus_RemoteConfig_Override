@@ -229,12 +229,18 @@ fun ConfigListContentMiuix(
                 }
                 filteredGames.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"，
+                        // DB 无数据才显示"数据库中暂无配置记录"
                         Text(
-                            text = if (!hasDbData) "数据库中暂无配置记录" else "未找到匹配的应用",
+                            text = when {
+                                qt.isNotEmpty() -> "未找到匹配的应用"
+                                !hasDbData -> "数据库中暂无配置记录"
+                                else -> "未找到匹配的应用"
+                            },
                             fontSize = 14.sp,
                             color = colorScheme.onSurfaceVariantSummary,
                         )
-                        if (!hasDbData && systemStatus.isRooted) {
+                        if (qt.isEmpty() && !hasDbData && systemStatus.isRooted) {
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 text = "点击右下角 + 按钮新建配置",
@@ -301,6 +307,7 @@ fun ConfigListContentMiuix(
     // 新建配置
     if (showNewDialog) {
         var newPkg by remember { mutableStateOf("") }
+        var pkgError by remember { mutableStateOf(false) }
         WindowDialog(
             show = showNewDialog,
             title = "新建配置",
@@ -309,11 +316,20 @@ fun ConfigListContentMiuix(
             Column(Modifier.fillMaxWidth()) {
                 TextField(
                     value = newPkg,
-                    onValueChange = { newPkg = it },
+                    onValueChange = { newPkg = it; pkgError = false },
                     label = "应用包名",
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Bug 2: 包名非法时对话框内红字提示，不关闭对话框、不创建
+                if (pkgError) {
+                    Text(
+                        text = "包名格式无效",
+                        fontSize = 12.sp,
+                        color = colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -326,10 +342,13 @@ fun ConfigListContentMiuix(
                     TextButton(
                         text = "创建",
                         onClick = {
-                            if (newPkg.isNotBlank()) {
+                            val trimmed = newPkg.trim()
+                            if (isValidPackageName(trimmed)) {
                                 showNewDialog = false
-                                onNewConfig(newPkg.trim())
-                                searchQuery = newPkg.trim()
+                                onNewConfig(trimmed)
+                                searchQuery = trimmed
+                            } else {
+                                pkgError = true
                             }
                         },
                         modifier = Modifier.weight(1f),

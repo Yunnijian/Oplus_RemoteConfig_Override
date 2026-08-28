@@ -141,9 +141,16 @@ fun ConfigListContentMaterial(
             } else if (filteredGames.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (!hasDbData) "数据库中暂无配置记录" else "未找到匹配的应用",
+                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"，
+                        // DB 无数据才显示"数据库中暂无配置记录"
+                        Text(
+                            when {
+                                qt.isNotEmpty() -> "未找到匹配的应用"
+                                !hasDbData -> "数据库中暂无配置记录"
+                                else -> "未找到匹配的应用"
+                            },
                             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (!hasDbData && systemStatus.isRooted) {
+                        if (qt.isEmpty() && !hasDbData && systemStatus.isRooted) {
                             Spacer(Modifier.height(8.dp))
                             Text("点击右下角 + 按钮新建配置", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -221,11 +228,34 @@ fun ConfigListContentMaterial(
 
     if (showNewDialog) {
         var newPkg by remember { mutableStateOf("") }
+        var pkgError by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showNewDialog = false },
             title = { Text("新建配置") },
-            text = { OutlinedTextField(value = newPkg, onValueChange = { newPkg = it }, label = { Text("应用包名") }, placeholder = { Text("例如 com.example.game") }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = { TextButton(onClick = { if (newPkg.isNotBlank()) { showNewDialog = false; onNewConfig(newPkg.trim()); searchQuery = newPkg.trim() } }) { Text("创建") } },
+            text = {
+                Column {
+                    OutlinedTextField(value = newPkg,
+                        onValueChange = { newPkg = it; pkgError = false },
+                        label = { Text("应用包名") },
+                        placeholder = { Text("例如 com.example.game") },
+                        singleLine = true,
+                        isError = pkgError,
+                        modifier = Modifier.fillMaxWidth())
+                    // Bug 2: 包名非法时对话框内红字提示，不关闭对话框、不创建
+                    if (pkgError) {
+                        Text("包名格式无效", color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                val trimmed = newPkg.trim()
+                if (isValidPackageName(trimmed)) {
+                    showNewDialog = false; onNewConfig(trimmed); searchQuery = trimmed
+                } else {
+                    pkgError = true
+                }
+            }) { Text("创建") } },
             dismissButton = { TextButton(onClick = { showNewDialog = false }) { Text("取消") } }
         )
     }
