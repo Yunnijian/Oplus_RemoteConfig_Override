@@ -42,6 +42,7 @@ fun ConfigListContentMaterial(
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
+    onDualPaneSelect: (String) -> Unit = {},
 ) {
     val gameList by viewModel.gameList.collectAsState()
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -244,7 +245,11 @@ fun ConfigListContentMaterial(
             text = { Text("确定要清除应用增强服务数据吗？\n清除后游戏配置将恢复默认。") },
             confirmButton = { TextButton(onClick = {
                 showClearConfirm = false
-                viewModel.clearGameData { _, msg -> resultMsg = msg; showResultDialog = true }
+                viewModel.clearGameData { success, msg ->
+                    // Bug 4：清除成功后右窗格指向的包已被清 → 清空选中
+                    if (success && dualPaneSelected != null) onDualPaneSelect("")
+                    resultMsg = msg; showResultDialog = true
+                }
             }) { Text("确定") } },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
         )
@@ -256,7 +261,11 @@ fun ConfigListContentMaterial(
             text = { Text("确定要从数据库删除 ${showDeleteConfirm} 的配置吗？") },
             confirmButton = { TextButton(onClick = {
                 val pkg = showDeleteConfirm ?: ""; showDeleteConfirm = null
-                viewModel.deleteConfig(pkg) { s, msg -> resultMsg = msg; showResultDialog = true }
+                viewModel.deleteConfig(pkg) { success, msg ->
+                    // Bug 4：删除成功且右窗格正显示该包 → 清空选中，避免残留已删 JSON
+                    if (success && pkg == dualPaneSelected) onDualPaneSelect("")
+                    resultMsg = msg; showResultDialog = true
+                }
             }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("取消") } }
         )

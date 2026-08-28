@@ -101,6 +101,7 @@ fun ConfigListContentMiuix(
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
+    onDualPaneSelect: (String) -> Unit = {},
 ) {
     val gameList by viewModel.gameList.collectAsState()
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -390,7 +391,11 @@ fun ConfigListContentMiuix(
                         text = "确定",
                         onClick = {
                             showClearConfirm = false
-                            viewModel.clearGameData { _, msg -> resultMsg = msg; showResultDialog = true }
+                            viewModel.clearGameData { success, msg ->
+                                // Bug 4：清除成功后右窗格指向的包已被清 → 清空选中
+                                if (success && dualPaneSelected != null) onDualPaneSelect("")
+                                resultMsg = msg; showResultDialog = true
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -422,7 +427,11 @@ fun ConfigListContentMiuix(
                         text = "删除",
                         onClick = {
                             val pkg = showDeleteConfirm ?: ""; showDeleteConfirm = null
-                            viewModel.deleteConfig(pkg) { _, msg -> resultMsg = msg; showResultDialog = true }
+                            viewModel.deleteConfig(pkg) { success, msg ->
+                                // Bug 4：删除成功且右窗格正显示该包 → 清空选中，避免残留已删 JSON
+                                if (success && pkg == dualPaneSelected) onDualPaneSelect("")
+                                resultMsg = msg; showResultDialog = true
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColors(textColor = colorScheme.error),
