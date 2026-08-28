@@ -84,10 +84,11 @@ fun MainScreen(viewModel: MainViewModel) {
     if (expanded) {
         // ── 宽屏（Expanded ≥840dp）：左侧导航 rail + 右侧 pager（无底栏）──
         Row(Modifier.fillMaxSize()) {
+            // Bug 4: rail 选中高亮用 currentPage（即时），内容门控仍用 settledPage
             if (LocalUiMode.current == UiMode.Miuix) {
-                MiuixNavRail(selectedPage = settledPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
+                MiuixNavRail(selectedPage = currentPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
             } else {
-                MaterialNavRail(selectedPage = settledPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
+                MaterialNavRail(selectedPage = currentPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
             }
             MainPager(
                 pagerState = pagerState,
@@ -117,9 +118,16 @@ fun MainScreen(viewModel: MainViewModel) {
                     onSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
                     backdrop = glassBackdrop,
                 ) {
-                    GlassTab(0, Icons.Filled.Home, "首页")
-                    GlassTab(1, Icons.AutoMirrored.Filled.List, "配置")
-                    GlassTab(2, Icons.Filled.Settings, "设置")
+                    // Bug 1: tab 图标按 UiMode 选源（Miuix 用 MiuixIcons，Material 用 M3 icons）
+                    if (LocalUiMode.current == UiMode.Miuix) {
+                        GlassTab(0, MiuixIcons.Home, "首页")
+                        GlassTab(1, MiuixIcons.ListView, "配置")
+                        GlassTab(2, MiuixIcons.Settings, "设置")
+                    } else {
+                        GlassTab(0, Icons.Filled.Home, "首页")
+                        GlassTab(1, Icons.AutoMirrored.Filled.List, "配置")
+                        GlassTab(2, Icons.Filled.Settings, "设置")
+                    }
                 }
             }
         }
@@ -306,12 +314,22 @@ fun RowScope.GlassTab(index: Int, icon: ImageVector, label: String) {
         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            modifier = Modifier.size(24.dp),
-            tint = contentColor,
-        )
+        // Bug 1: 图标组件按 UiMode 分支——Miuix 用 miuix Icon（HyperOS 风格），Material 用 M3 Icon
+        if (LocalUiMode.current == UiMode.Miuix) {
+            top.yukonga.miuix.kmp.basic.Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(24.dp),
+                tint = contentColor,
+            )
+        } else {
+            Icon(
+                icon,
+                contentDescription = label,
+                modifier = Modifier.size(24.dp),
+                tint = contentColor,
+            )
+        }
         Text(label, style = labelStyle, color = contentColor)
     }
 }

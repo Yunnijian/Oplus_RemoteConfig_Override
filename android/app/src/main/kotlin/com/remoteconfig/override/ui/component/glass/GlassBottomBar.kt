@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -227,13 +228,18 @@ private fun GlassLiquidBottomTabs(
                 }
             )
         }
+        // 外部（pager 滑动/翻页）变化：只驱动指示器动画跟随，不写 currentIndex、
+        // 不触发 onTabSelected——否则手势滑动中每个 currentPage 都会反向
+        // animateScrollToPage，与手指打架（Bug 2）。点击 tab 走 tabSelect → currentIndex 链。
         LaunchedEffect(Unit) {
             snapshotFlow { selectedTabIndex() }
                 .collect { index ->
-                    // 外部（pager 滑动）变化同步；== 时 no-op，防 onTabSelected → pager 滚动 → 回写死循环
-                    if (index != currentIndex) currentIndex = index
+                    if (index != currentIndex) {
+                        dampedDragAnimation.animateToValue(index.toFloat())
+                    }
                 }
         }
+        // 用户点击 tab → tabSelect 写 currentIndex → 动画 + onTabSelected（驱动 pager 滚动）
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { currentIndex }
                 .drop(1)
@@ -442,6 +448,10 @@ private fun GlassFallbackBottomBar(
         )
     }
 
+    // 外部（pager 滑动）变化：只跟随指示器（indicatorOffset 由 currentIndex 驱动，
+    // 直接更新 currentIndex 即可），不触发 onSelected——防手势滑动中反向滚动（Bug 2）。
+    // 用户点击 tab → tabSelect 写 currentIndex（置 clickPending=true）→ onSelected。
+    var clickPending by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         snapshotFlow { selectedIndex() }
             .collect { index ->
@@ -453,7 +463,10 @@ private fun GlassFallbackBottomBar(
             .drop(1)
             .collectLatest { index ->
                 dampedDragAnimation.animateToValue(index.toFloat())
-                onSelected(index)
+                if (clickPending) {
+                    clickPending = false
+                    onSelected(index)
+                }
             }
     }
 
@@ -472,7 +485,12 @@ private fun GlassFallbackBottomBar(
             label = "glassFallbackIndicatorOffset"
         )
 
-        val tabSelect: (Int) -> Unit = { index -> currentIndex = index }
+        // 用户点击 tab：置 clickPending → onSelected 触发（驱动 pager 滚动）。
+        // 外部滑动同步（上方 LaunchedEffect）不置 clickPending，只跟随指示器。
+        val tabSelect: (Int) -> Unit = { index ->
+            clickPending = true
+            currentIndex = index
+        }
         CompositionLocalProvider(
             LocalGlassTabSelect provides tabSelect,
             LocalGlassTabScale provides {
