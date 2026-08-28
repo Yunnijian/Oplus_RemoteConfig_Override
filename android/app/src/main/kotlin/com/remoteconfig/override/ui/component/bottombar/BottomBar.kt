@@ -126,14 +126,15 @@ fun rememberMainPagerState(
 }
 
 /**
- * 宽屏是否用左侧导航 rail（Expanded + 双窗）。
- * 对齐 KernelSU useNavigationRail 的判定语义：平板/宽屏（分屏双窗）用 rail，
- * 此时不显示底部栏；其余用底栏。
+ * 宽屏是否用左侧导航 rail。
+ *
+ * 遵循 Google 官方自适应布局规范（WindowSizeClass）：宽度 Expanded（≥840dp）用
+ * navigation rail，Compact/Medium 用底部栏。判定只看窗口尺寸类，**不受**"悬浮底栏"
+ * 外观开关影响——KernelSU 在 Miuix + 悬浮底栏时豁免 rail 是其产品选择，
+ * 与 Google 规范冲突（横屏平板应切 rail），故此处不移植该豁免。
  */
 @Composable
-fun useNavigationRail(enableFloatingBottomBar: Boolean): Boolean {
-    return isExpandedWidth() && !(LocalUiMode.current == UiMode.Miuix && enableFloatingBottomBar)
-}
+fun useNavigationRail(): Boolean = isExpandedWidth()
 
 @Composable
 fun BottomBar(

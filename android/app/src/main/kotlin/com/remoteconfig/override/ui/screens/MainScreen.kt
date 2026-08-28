@@ -97,7 +97,7 @@ fun MainScreen(viewModel: MainViewModel) {
         drawContent()
     }
 
-    val useRail = useNavigationRail(enableFloatingBottomBar)
+    val useRail = useNavigationRail()
 
     CompositionLocalProvider(LocalMainPagerState provides mainPagerState) {
         val pagerContent: @Composable (Dp) -> Unit = { bottomInnerPadding ->
