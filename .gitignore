@@ -31,6 +31,7 @@ android/wechat_icon.svg
 /.reasonix/
 
 # Third-party reference projects
+/KernelSU/
 /KernelSU-Next-dev/
 /ReSukiSU-main/
 
