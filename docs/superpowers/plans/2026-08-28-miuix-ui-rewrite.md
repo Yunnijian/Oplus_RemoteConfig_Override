@@ -120,6 +120,12 @@ dependencies {
     // AndroidLiquidGlass (backdrop) — 液态玻璃
     implementation("io.github.kyant0:backdrop:2.0.1")
 
+    // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
+    implementation("com.materialkolor:material-kolor:5.0.0")
+
+    // 平板/大屏适配（Google 标准 WindowSizeClass）
+    implementation("androidx.compose.material3:material3-window-size-class")
+
     // Navigation3
     implementation("androidx.navigation3:navigation3-runtime:1.1.6")
 
@@ -188,7 +194,7 @@ git commit -m "build: upgrade toolchain for Miuix/backdrop (Kotlin 2.4.10, AGP 9
 - Produces:
   - `enum class UiMode(val value: Int) { Miuix(0), Material(1) }` + `companion object { fun fromValue(v: Int): UiMode }`
   - `enum class ColorMode(val value: Int) { SYSTEM(0), LIGHT(1), DARK(2) }` + `fromValue`、`val isDark: Boolean`
-  - `object AppSettingsRepository`：`fun init(context: Context)`；`var uiMode: UiMode`、`var colorMode: ColorMode`、`var enableMonet: Boolean`、`var enableGlass: Boolean`、`var enableGlassBlur: Boolean`（均为 Compose `mutableStateOf` 支撑的可观察属性，读写同步 SharedPreferences）
+  - `object AppSettingsRepository`：`fun init(context: Context)`；`var uiMode: UiMode`、`var colorMode: ColorMode`、`var enableMonet: Boolean`、`var enableGlass: Boolean`、`var enableGlassBlur: Boolean`、`var keyColor: Int`（0=默认）、`var paletteStyle: String`（默认 `"TonalSpot"`）、`var colorSpec: String`（默认 `"SPEC_2025"`）——均为 Compose `mutableStateOf` 支撑的可观察属性，读写同步 SharedPreferences
 
 - [ ] **Step 1: 写失败的单测**
 
@@ -287,12 +293,18 @@ object AppSettingsRepository {
     private val _enableMonet = mutableStateOf(false)
     private val _enableGlass = mutableStateOf(true)
     private val _enableGlassBlur = mutableStateOf(true)
+    private val _keyColor = mutableStateOf(0)
+    private val _paletteStyle = mutableStateOf("TonalSpot")
+    private val _colorSpec = mutableStateOf("SPEC_2025")
 
     val uiMode: UiMode get() = _uiMode.value
     val colorMode: ColorMode get() = _colorMode.value
     val enableMonet: Boolean get() = _enableMonet.value
     val enableGlass: Boolean get() = _enableGlass.value
     val enableGlassBlur: Boolean get() = _enableGlassBlur.value
+    val keyColor: Int get() = _keyColor.value
+    val paletteStyle: String get() = _paletteStyle.value
+    val colorSpec: String get() = _colorSpec.value
 
     private var prefs: android.content.SharedPreferences? = null
 
@@ -304,6 +316,9 @@ object AppSettingsRepository {
         _enableMonet.value = p.getBoolean("enable_monet", false)
         _enableGlass.value = p.getBoolean("enable_glass", true)
         _enableGlassBlur.value = p.getBoolean("enable_glass_blur", true)
+        _keyColor.value = p.getInt("key_color", 0)
+        _paletteStyle.value = p.getString("palette_style", "TonalSpot") ?: "TonalSpot"
+        _colorSpec.value = p.getString("color_spec", "SPEC_2025") ?: "SPEC_2025"
     }
 
     fun setUiMode(mode: UiMode) {
@@ -329,6 +344,21 @@ object AppSettingsRepository {
     fun setEnableGlassBlur(enabled: Boolean) {
         _enableGlassBlur.value = enabled
         prefs?.edit()?.putBoolean("enable_glass_blur", enabled)?.apply()
+    }
+
+    fun setKeyColor(color: Int) {
+        _keyColor.value = color
+        prefs?.edit()?.putInt("key_color", color)?.apply()
+    }
+
+    fun setPaletteStyle(style: String) {
+        _paletteStyle.value = style
+        prefs?.edit()?.putString("palette_style", style)?.apply()
+    }
+
+    fun setColorSpec(spec: String) {
+        _colorSpec.value = spec
+        prefs?.edit()?.putString("color_spec", spec)?.apply()
     }
 }
 ```
@@ -370,6 +400,7 @@ git commit -m "feat(settings): UiMode/ColorMode models and observable AppSetting
   - `val LocalEnableGlass: ProvidableCompositionLocal<Boolean>`、`val LocalEnableGlassBlur: ProvidableCompositionLocal<Boolean>`（默认 false——必须显式 provide）
   - `@Composable fun RemoteConfigTheme(content: @Composable () -> Unit)`（内部读 AppSettingsRepository）
   - `@Composable fun isInDarkTheme(): Boolean`
+  - 主题取色（Task 2 仓库新增字段在此消费）：`keyColor: Int`（0=默认蓝）、`paletteStyle: String`（materialkolor `PaletteStyle` 名，默认 `"TonalSpot"`）、`colorSpec: String`（`"SPEC_2021"`/`"SPEC_2025"`）——Miuix 侧映射为 `ThemePaletteStyle`/`ThemeColorSpec`（参照 KernelSU `MiuixTheme.kt:33-43` 的 valueOf+try-catch 模式），Material 侧用 materialkolor `dynamicColorScheme(seedColor, paletteStyle, specVersion, ...)` 替换原 dynamicColorScheme 分支（对齐 KernelSU `MaterialTheme.kt`）。
 
 - [ ] **Step 1: ThemeLocals.kt**
 
@@ -515,7 +546,7 @@ git commit -m "feat(theme): dual-mode theme system (Miuix blue default + Materia
 **Interfaces:**
 - Consumes: Task 3 的 `RemoteConfigTheme`/`LocalUiMode`/`LocalEnableGlass`/`LocalEnableGlassBlur`。
 - Produces:
-  - `sealed interface Route : NavKey`：`data object Main : Route`、`data class ConfigEditor(val packageName: String) : Route`（@Parcelize）
+  - `sealed interface Route : NavKey`：`data object Main : Route`、`data object ColorPalette : Route`、`data class ConfigEditor(val packageName: String) : Route`（@Parcelize）
   - `class Navigator(initialKey: NavKey)`：`val backStack: SnapshotStateList<NavKey>`、`fun push(key: NavKey)`、`fun pop()`、`fun current(): NavKey?`、`companion object { val Saver }`
   - `@Composable fun rememberNavigator(startRoute: NavKey): Navigator`
   - `val LocalNavigator: ProvidableCompositionLocal<Navigator>`
@@ -535,7 +566,33 @@ sealed interface Route : NavKey, Parcelable {
     data object Main : Route
 
     @Parcelize
+    data object ColorPalette : Route
+
+    @Parcelize
     data class ConfigEditor(val packageName: String) : Route
+}
+```
+
+同时在 Task 4 的 MainActivity `entryProvider` 中加入（Step 3 代码相应扩展）：
+```kotlin
+entry<Route.ColorPalette> { ColorPaletteScreenPlaceholder() }
+```
+并创建临时占位 `ui/screens/ColorPaletteScreen.kt`（Task 11 替换为完整实现）：
+```kotlin
+package com.remoteconfig.override.ui.screens
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+
+@Composable
+fun ColorPaletteScreenPlaceholder() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("主题取色 — Task 11")
+    }
 }
 ```
 
@@ -1143,6 +1200,11 @@ fun SettingsContentMiuix() {
                         checked = AppSettingsRepository.enableMonet,
                         onCheckedChange = { AppSettingsRepository.setEnableMonet(it) },
                     )
+                    ArrowPreference(
+                        title = "主题取色",
+                        summary = "自定义强调色与调色板风格",
+                        onClick = { LocalNavigator.current.push(Route.ColorPalette) },
+                    )
                 }
                 // 液态玻璃
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
@@ -1521,7 +1583,248 @@ git commit -m "feat(editor): dual-mode editor chrome, self-contained highlightin
 
 ---
 
-### Task 11: 终验 + 文档
+### Task 11: ColorPalette 主题取色屏（双实现）
+
+**Files:**
+- Replace: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/ColorPaletteScreen.kt`（占位 → 分发器）
+- Create: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/ColorPaletteMiuix.kt`
+- Create: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/ColorPaletteMaterial.kt`
+
+**Interfaces:**
+- Consumes: Task 2 仓库的 `keyColor`/`paletteStyle`/`colorSpec` 及其 setter；Task 4 `Route.ColorPalette`/`LocalNavigator`；materialkolor 5.0.0 的 `PaletteStyle`/`ColorSpec.SpecVersion`。
+- Produces: `@Composable fun ColorPaletteScreen()`（完整实现，替换占位）。
+- 参考实现：`KernelSU/manager/.../screen/colorpalette/`（ColorPaletteScreen.kt 分发器 + UiState + 双实现，本地已克隆）。
+
+- [ ] **Step 1: 分发器 + 顶栏返回**
+
+```kotlin
+package com.remoteconfig.override.ui.screens
+
+import androidx.compose.runtime.Composable
+import com.remoteconfig.override.navigation.LocalNavigator
+import com.remoteconfig.override.settings.UiMode
+import com.remoteconfig.override.ui.theme.LocalUiMode
+
+@Composable
+fun ColorPaletteScreen() {
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> ColorPaletteContentMiuix(onBack = { LocalNavigator.current.pop() })
+        UiMode.Material -> ColorPaletteContentMaterial(onBack = { LocalNavigator.current.pop() })
+    }
+}
+```
+
+- [ ] **Step 2: 数据模型（对齐 KernelSU ColorPaletteUiState.kt）**
+
+```kotlin
+// 预设强调色板（与 KernelSU 预设色卡对齐，含恢复默认）
+val PresetKeyColors = listOf(
+    0xFF3482FF, // Miuix 默认蓝
+    0xFFBA1A1A, 0xFFE8590C, 0xFFF08C00, 0xFF2B8A3E,
+    0xFF0B7285, 0xFF1971C2, 0xFF6741D9, 0xFFC2255C,
+)
+val PaletteStyleNames = listOf(
+    "TonalSpot", "Neutral", "Vibrant", "Expressive", "Rainbow", "FruitSalad", "Monochromatic",
+)
+```
+说明：materialkolor 的 `PaletteStyle.valueOf(name)` 直接解析以上名称；`Monochromatic` 若编译报错改为 `Monochrome`（以 5.0.0 实际枚举为准，参照 KernelSU 用法）。
+
+- [ ] **Step 3: ColorPaletteMiuix.kt**
+
+对齐 KernelSU `ColorPaletteScreenMiuix.kt` 的结构（`Scaffold + TopAppBar(返回键) + Card 分组`）：
+
+```kotlin
+@Composable
+fun ColorPaletteContentMiuix(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("主题取色") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { /* 返回箭头 Icon */ }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(Modifier.padding(innerPadding).verticalScroll(rememberScrollState())) {
+            // ── 强调色卡组：Card { 预设色圆形色卡 FlowRow/Grid，点击 → AppSettingsRepository.setKeyColor(color) }
+            //    首项「跟随默认」(keyColor=0)；当前选中项描边高亮
+            // ── 调色板风格组：Card { SuperDropdown(PaletteStyleNames) → setPaletteStyle(name) }
+            // ── 颜色规范组：Card { SuperDropdown(listOf("SPEC_2021", "SPEC_2025")) → setColorSpec(name) }
+            // ── 恢复默认：Card { TextButton("恢复默认取色") → setKeyColor(0); setPaletteStyle("TonalSpot"); setColorSpec("SPEC_2025") }
+        }
+    }
+}
+```
+要点：色卡用 `Box(Modifier.size(40.dp).clip(CircleShape).background(Color(key)).border(...选中描边...))`，`Modifier.selectable` 包裹；所有写入直接调 `AppSettingsRepository`（主题即时响应，无需确认）。
+
+- [ ] **Step 4: ColorPaletteMaterial.kt**
+
+同样的四个分组用 M3 重写：`Scaffold + TopAppBar(返回) + ElevatedCard`；色卡 `FlowRow`；下拉用 `ExposedDropdownMenuBox` 或 `SegmentedButton`；行为与 Miuix 版逐字一致。
+
+- [ ] **Step 5: 编译 + Commit**
+
+```bash
+cd android && ./gradlew :app:assembleDebug
+git add -A
+git commit -m "feat(theme): ColorPalette screen — preset key colors, palette style, color spec (dual-mode)"
+```
+
+---
+
+### Task 12: 平板适配 — WindowSizeClass + NavigationRail + 双窗视图
+
+**Files:**
+- Modify: `android/app/src/main/AndroidManifest.xml`
+- Modify: `android/app/src/main/kotlin/com/remoteconfig/override/MainActivity.kt`
+- Modify: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/MainScreen.kt`
+- Modify: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/ConfigListScreen.kt`
+- Modify: `android/app/src/main/kotlin/com/remoteconfig/override/ui/screens/ConfigEditorScreen.kt`
+
+**Interfaces:**
+- Produces:
+  - `val LocalWindowWidthClass: ProvidableCompositionLocal<WindowWidthSizeClass>`（MainActivity 计算并 provide）
+  - `@Composable fun isExpandedWidth(): Boolean`（≥840dp）
+  - ConfigListPage 扩展可选参数：`dualPaneSelected: String? = null, onDualPaneSelect: (String) -> Unit = {}`（宽屏双窗模式，null = 窄屏路由模式）
+  - ConfigEditorContent 扩展可选参数：`showBack: Boolean = true`（双窗模式右侧窗格隐藏返回键）
+
+**背景（OPPO ColorOS 平板双窗视图调研结论）**：
+- ColorOS「平行视窗/双窗视图」有两种系统侧方案：OPPO 自研 `EasyGoClient` + `assets/easygo.json`、以及 Google 原生 Activity Embedding（`res/xml` SplitPairRule）。两者均以 **Activity 跳转**为分屏单位。
+- 本 app 是**单 Activity + Compose Navigation3**，列表→编辑器是同 Activity 内路由切换，系统无法感知两级页面 → 两种系统方案均不适用。
+- 因此按 Google 标准方法**应用内实现双窗格（list-detail）**：`material3-window-size-class` 判宽，Expanded(≥840dp) 时配置页分栏（左列表 + 右编辑器）。
+- 兼容基础（OPPO 指导书要求）：显式 `android:resizeableActivity="true"` + 不锁方向 + Compose 响应式布局，保证在系统分屏/平行视窗/自由窗口中正确重布局。
+
+- [ ] **Step 1: AndroidManifest.xml 兼容声明**
+
+`<application>` 标签加（若无）：
+```xml
+android:resizeableActivity="true"
+```
+确认 `<activity android:name=".MainActivity">` **没有** `android:screenOrientation`（不锁方向）。当前 Manifest 已满足不锁方向，只需补 resizeableActivity。
+
+- [ ] **Step 2: MainActivity 计算 WindowSizeClass**
+
+```kotlin
+// onCreate 中：
+val windowSize = calculateWindowSizeClass(this)
+setContent {
+    CompositionLocalProvider(
+        LocalWindowWidthClass provides windowSize.widthSizeClass,
+        // ...其余 provider 不变...
+    ) { ... }
+}
+```
+import：`androidx.compose.material3.windowsizeclass.calculateWindowSizeClass`、`WindowWidthSizeClass`。注意 `calculateWindowSizeClass` 是 `@OptIn(ExperimentalMaterial3WindowSizeClassApi::class)`。
+
+`ui/theme/ThemeLocals.kt` 追加：
+```kotlin
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+
+val LocalWindowWidthClass = staticCompositionLocalOf { WindowWidthSizeClass.Compact }
+
+@Composable
+fun isExpandedWidth(): Boolean = LocalWindowWidthClass.current == WindowWidthSizeClass.Expanded
+```
+
+- [ ] **Step 3: MainScreen 宽屏 NavigationRail**
+
+`MainScreen` 顶部读 `isExpandedWidth()`：
+- **Expanded**：布局改为
+```kotlin
+Row {
+    // 宽屏左侧导航 rail（替代底栏），双模式：
+    if (isMiuix) MiuixNavRail(selectedPage = settledPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
+    else NavigationRail { /* 三个 NavigationRailItem，同底部栏 */ }
+    HorizontalPager(Modifier.weight(1f), ...) { ... }
+}
+```
+`MiuixNavRail`：用 miuix `NavigationRail` 组件（top.yukonga.miuix.kmp.basic.NavigationRail，参照 KernelSU `NavigationRailMiuix.kt`；若组件名不同以 KernelSU import 为准）。
+- **Medium/Compact**：保持现有底栏（玻璃/降级）不变。
+- Scaffold 的 `bottomBar` 仅在非 Expanded 时提供。
+
+- [ ] **Step 4: 配置页双窗视图（list-detail）**
+
+MainScreen 中 ConfigList 分支扩展（宽屏双窗，窄屏路由不变）：
+```kotlin
+var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
+val expanded = isExpandedWidth()
+
+1 -> if (isCurrentPage || contentReady) ConfigListPage(
+    viewModel, isCurrentPage,
+    onGameClick = { pkg ->
+        if (expanded) dualPaneSelected = pkg   // 宽屏：选中，右侧窗格显示
+        else {
+            viewModel.loadConfig(pkg)
+            navigator.push(Route.ConfigEditor(pkg))
+        }
+    },
+    onNewConfig = { pkg ->
+        viewModel.createNewConfig(pkg)
+        if (expanded) dualPaneSelected = pkg else navigator.push(Route.ConfigEditor(pkg))
+    },
+    dualPaneSelected = if (expanded) dualPaneSelected else null,
+    onDualPaneSelect = { dualPaneSelected = it },
+)
+```
+
+`ConfigListPage`/两个实现的可选参数处理：
+```kotlin
+@Composable
+fun ConfigListPage(
+    viewModel: MainViewModel,
+    isCurrentPage: Boolean,
+    onGameClick: (String) -> Unit,
+    onNewConfig: (String) -> Unit,
+    dualPaneSelected: String? = null,
+    onDualPaneSelect: (String) -> Unit = {},
+) {
+    // 窄屏：照旧整页渲染
+    // 宽屏（dualPaneSelected != null 判定不可靠——改用 isExpandedWidth()）：
+    //   Row(Modifier.fillMaxSize()) {
+    //       Box(Modifier.fillMaxWidth(0.42f)) { ConfigListContentXxx(viewModel, onGameClick, onNewConfig) }
+    //       VerticalDivider()  // miuix HorizontalDivider 或 M3 VerticalDivider
+    //       Box(Modifier.fillMaxSize()) {
+    //           if (dualPaneSelected == null) 空态提示("选择左侧应用查看配置")
+    //           else ConfigEditorPane(viewModel, dualPaneSelected, onClosed = { onDualPaneSelect("") })
+    //       }
+    //   }
+}
+```
+注意：宽屏点列表项时由 MainScreen 回调决定选中；列表实现内部**不感知**双窗（`onGameClick` 语义由 MainScreen 定义）。选中项视觉高亮：把 `dualPaneSelected` 传入列表实现，行内 `if (summary.packageName == dualPaneSelected) 容器色高亮`（可选参数，默认 null）。
+
+- [ ] **Step 5: ConfigEditorScreen 抽出可复用窗格**
+
+Task 10 已有 `ConfigEditorContent(viewModel, onBack, isMiuix)`。扩展：
+```kotlin
+@Composable
+fun ConfigEditorPane(viewModel: MainViewModel, packageName: String, onClosed: () -> Unit) {
+    // 双窗右侧窗格：进入时加载配置（仿 ConfigEditorScreen 打开路径：
+    // LaunchedEffect(packageName) { viewModel.loadConfig(packageName) } —
+    // 注意 loadConfig 是异步挂起函数，需在协程中调用）
+    // 顶栏 showBack=false（无返回箭头，有关闭 X → onClosed）
+    // 内部复用 ConfigEditorContent 的全部编辑器逻辑
+}
+```
+实现要点：`ConfigEditorContent` 增加 `packageName: String? = null` 可选参数（非空 = 双窗模式，由调用方已 loadConfig；空 = 路由模式，签名/行为与 Task 10 完全一致），保证窄屏路径零回归。
+
+- [ ] **Step 6: 编译 + 平板验证 + Commit**
+
+```bash
+cd android && ./gradlew :app:assembleDebug
+```
+设备验证（平板/自由窗口，或手机横屏 + `adb shell wm size 1200x2400` 模拟）：
+- 宽屏：左侧 rail 导航、配置页左列表右编辑器双窗、点列表右侧即时切换
+- 窄屏：行为与之前完全一致
+- 系统分屏/平行视窗/自由窗口模式下重布局正常（不崩溃不拉伸）
+
+```bash
+git add -A
+git commit -m "feat(tablet): WindowSizeClass adaptive layout — navigation rail + config list-detail dual pane (Google standard, OPPO 双窗兼容)"
+```
+
+---
+
+### Task 13: 终验 + 文档
 
 **Files:**
 - Modify: `README.md`（截图说明、技术栈段、双模式描述）
@@ -1562,6 +1865,9 @@ git commit -m "docs: update README for Miuix dual-mode UI; final verification pa
 
 ## 自审记录
 
-- **规格覆盖**：工具链(§1→Task1)、主题(§2→Task2/3)、导航(§3→Task4/5)、屏幕(§4→Task7-10)、玻璃(§5→Task6)、逻辑不动(§6→全计划约束)、性能(§9→Task5/6 内嵌+全局约束)、验证(§7→Task1 Step1/Task11)——全覆盖。§4.4 设置页"关于"从简（复用版本文本，无独立 About 页）——首版 YAGNI。
-- **占位符**：无 TBD/TODO；Task 6/8/9 的"参照移植"均给出确切源文件路径与行号，代码骨架完整。
-- **类型一致性**：`MainScreen(viewModel)`(T4→T5)、`HomePage(viewModel, isCurrentPage)`(T5→T8)、`ConfigListPage(viewModel, isCurrentPage, onGameClick, onNewConfig)`(T5→T9)、`ConfigEditorScreen(viewModel, onBack)`(T4→T10)、`rememberGlassBackdrop(enabled): LayerBackdrop?`(T6)、`AppSettingsRepository.*`(T2→T3/7) 签名已对齐。
+- **规格覆盖**：工具链(§1→Task1)、主题(§2→Task2/3)、导航(§3→Task4/5)、屏幕(§4→Task7-10)、玻璃(§5→Task6)、逻辑不动(§6→全计划约束)、性能(§9→Task5/6 内嵌+全局约束)、验证(§7→Task1 Step1/Task13)——全覆盖。§4.4 设置页"关于"从简（复用版本文本，无独立 About 页）——首版 YAGNI。
+- **增补（2026-08-28 用户指令）**：
+  - 主题风格切换 + 取色（对齐 KernelSU ColorPalette）：Task 1 依赖加 material-kolor 5.0.0；Task 2 仓库加 keyColor/paletteStyle/colorSpec；Task 3 双主题消费取色参数；Task 4 路由加 ColorPalette；Task 7 设置页加入口；Task 11 取色屏双实现。
+  - 平板适配（Google 标准方法）：Task 1 依赖加 material3-window-size-class；Task 12 = WindowSizeClass + 宽屏 NavigationRail + 配置页 list-detail 双窗格 + OPPO 双窗（平行视窗）兼容声明。调研结论：ColorOS 平行视窗（easygo.json / Activity Embedding）均以 Activity 跳变为分屏单位，单 Activity Compose 应用不适用，故采用应用内 list-detail + resizeableActivity 兼容路线。
+- **占位符**：无 TBD/TODO；Task 6/8/9/11 的"参照移植"均给出确切源文件路径，代码骨架完整。
+- **类型一致性**：`MainScreen(viewModel)`(T4→T5)、`HomePage(viewModel, isCurrentPage)`(T5→T8)、`ConfigListPage(viewModel, isCurrentPage, onGameClick, onNewConfig, dualPaneSelected?, onDualPaneSelect?)`(T5→T9→T12)、`ConfigEditorScreen(viewModel, onBack)`(T4→T10)、`ConfigEditorPane(viewModel, packageName, onClosed)`(T12)、`ColorPaletteScreen()`(T4 占位→T11)、`rememberGlassBackdrop(enabled): LayerBackdrop?`(T6)、`AppSettingsRepository.*`(T2→T3/7/11) 签名已对齐。
