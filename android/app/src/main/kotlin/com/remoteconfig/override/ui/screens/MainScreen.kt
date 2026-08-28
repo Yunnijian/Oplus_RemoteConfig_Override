@@ -154,12 +154,15 @@ fun MainScreen(viewModel: MainViewModel) {
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
             when (uiMode) {
-                UiMode.Miuix -> MiuixScaffold { _ ->
+                UiMode.Miuix -> MiuixScaffold { innerPadding ->
                     Row {
                         SideRail()
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                // 应用 Scaffold 的 top/bottom inset（状态栏/导航栏不重叠），
+                                // 左侧 rail 的 start inset 由 consumeWindowInsets 处理
+                                .padding(top = innerPadding.calculateTopPadding())
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)
@@ -169,12 +172,13 @@ fun MainScreen(viewModel: MainViewModel) {
 
                 UiMode.Material -> MaterialScaffold(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ) {
+                ) { innerPadding ->
                     Row {
                         SideRail()
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .padding(top = innerPadding.calculateTopPadding())
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)

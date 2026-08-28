@@ -94,7 +94,9 @@ fun SettingsContentMiuix(
                 )
             }
         },
-        popupHost = { },
+        // popupHost 用默认 MiuixPopupHost()（不传 {}）：OverlayDropdownPreference（界面风格）
+        // 的 OverlayDialog 依赖 popupHost 渲染 dialogStates；传 {} 会导致下拉无法弹出
+        // （对齐 ColorPaletteMiuix 的修复）。
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {

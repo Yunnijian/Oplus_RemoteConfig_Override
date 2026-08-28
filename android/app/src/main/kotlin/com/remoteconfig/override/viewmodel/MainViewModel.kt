@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.DatabaseManager
 import com.remoteconfig.override.model.GameConfigSummary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -155,17 +156,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── 搜索 ─────────────────────────────────────────────────
     // ── 配置编辑 ─────────────────────────────────────────────
 
+    // 上次 loadConfig 的任务：快速切换包时取消上一次，避免并发覆盖（P1-2 竞态）
+    private var loadConfigJob: Job? = null
+
     /**
      * 从数据库加载指定包名的 JSON 配置，字段顺序由 Rust 工具按表结构保留。
      */
     fun loadConfig(packageName: String) {
-        viewModelScope.launch {
+        loadConfigJob?.cancel()
+        loadConfigJob = viewModelScope.launch {
             _isEditorLoading.value = true
             _editingPackageName.value = packageName
             try {
-                _editingJson.value = withContext(Dispatchers.IO) { dbManager.loadConfig(packageName) }
+                val json = withContext(Dispatchers.IO) { dbManager.loadConfig(packageName) }
+                // 校验包名：若加载期间用户又切到别的包，本次结果丢弃（防 A 配置写入 B 包）
+                if (_editingPackageName.value == packageName) {
+                    _editingJson.value = json
+                }
             } catch (_: Exception) {
-                _editingJson.value = null
+                if (_editingPackageName.value == packageName) {
+                    _editingJson.value = null
+                }
             } finally {
                 _isEditorLoading.value = false
             }
