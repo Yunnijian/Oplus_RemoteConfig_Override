@@ -149,7 +149,9 @@ fun ColorPaletteContentMiuix(
                 )
             }
         },
-        popupHost = { },
+        // popupHost 用默认 MiuixPopupHost()（不传 {}）：OverlayDropdownPreference 的
+        // OverlayDialog 依赖 popupHost 渲染 dialogStates；本页是独立 NavDisplay entry
+        // （父级 root dialog states 为 null），传 {} 会导致强调色下拉无法弹出（Bug 2）。
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
@@ -207,36 +209,39 @@ fun ColorPaletteContentMiuix(
                             }
                         )
 
-                        AnimatedVisibility(
-                            visible = uiState.miuixMonet
-                        ) {
-                            Column {
-                                val colorItems = KeyColorNames
-                                val colorValues = listOf(0) + keyColorOptions
-                                OverlayDropdownPreference(
-                                    title = "强调色",
-                                    items = colorItems,
-                                    startAction = {
-                                        Icon(
-                                            Icons.Rounded.Colorize,
-                                            modifier = Modifier.padding(end = 6.dp),
-                                            contentDescription = "强调色",
-                                            tint = colorScheme.onBackground
-                                        )
-                                    },
-                                    selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
-                                    onSelectedIndexChange = { index ->
-                                        actions.onSetKeyColor(colorValues[index])
-                                    }
-                                )
+                        // 强调色始终显示（不包 AnimatedVisibility）：
+                        // AnimatedVisibility 内的 OverlayDropdownPreference 弹出锚点异常，
+                        // 下拉无法展开（Bug 2）。移出动画容器后始终可展开。
+                        // 色彩风格/色彩标准（keyColor!=0 时）同理保持可见。
+                        Column {
+                            val colorItems = KeyColorNames
+                            val colorValues = listOf(0) + keyColorOptions
+                            OverlayDropdownPreference(
+                                title = "强调色",
+                                summary = "自定义应用的强调色",
+                                items = colorItems,
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.Colorize,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = "强调色",
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
+                                onSelectedIndexChange = { index ->
+                                    actions.onSetKeyColor(colorValues[index])
+                                }
+                            )
 
-                                AnimatedVisibility(
-                                    visible = uiState.keyColor != 0
+                            AnimatedVisibility(
+                                visible = uiState.keyColor != 0
                                 ) {
                                     Column {
                                         val styles = PaletteStyle.entries
                                         OverlayDropdownPreference(
                                             title = "色彩风格",
+                                            summary = "选择色彩风格",
                                             startAction = {
                                                 Icon(
                                                     Icons.Rounded.Style,
@@ -255,6 +260,7 @@ fun ColorPaletteContentMiuix(
                                         val specs = ColorSpec.SpecVersion.entries
                                         OverlayDropdownPreference(
                                             title = "色彩标准",
+                                            summary = "选择色彩标准",
                                             startAction = {
                                                 Icon(
                                                     Icons.Rounded.DesignServices,
@@ -273,7 +279,6 @@ fun ColorPaletteContentMiuix(
                                 }
                             }
                         }
-                    }
 
                     // 第二组：效果
                     Card(
@@ -333,22 +338,6 @@ fun ColorPaletteContentMiuix(
                                 }
                             )
                         }
-                        SwitchPreference(
-                            title = "导航栏角标",
-                            summary = "在导航栏显示已授权应用和已启用模块数量",
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Pin,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "导航栏角标",
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.enableNavigationBadge,
-                            onCheckedChange = {
-                                actions.onSetEnableNavigationBadge(it)
-                            }
-                        )
                     }
 
                     // 第三组：其他

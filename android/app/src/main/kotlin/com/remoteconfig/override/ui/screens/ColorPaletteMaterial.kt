@@ -269,15 +269,6 @@ fun ColorPaletteContentMaterial(
                                 onCheckedChange = actions.onSetEnableFloatingBottomBarBlur,
                             )
                         }
-                        item {
-                            SegmentedSwitchItem(
-                                icon = Icons.Rounded.Pin,
-                                title = "导航栏角标",
-                                summary = "在导航栏显示已授权应用和已启用模块数量",
-                                checked = uiState.enableNavigationBadge,
-                                onCheckedChange = actions.onSetEnableNavigationBadge,
-                            )
-                        }
                     }
                 )
 
