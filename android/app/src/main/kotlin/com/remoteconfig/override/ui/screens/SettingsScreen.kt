@@ -46,10 +46,14 @@ fun SettingsContent(bottomInnerPadding: Dp = 0.dp) {
                 )
             }
             VerticalDivider()
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // contentAlignment=TopStart（不能用 Center）：Center 会让 pane 内容居中且
+            // 高度取内容尺寸 → LazyColumn 不填满 Box → 无滚动约束 → 无法滑动（右侧 pane 滑动失效）。
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
                 when (selectedPane) {
                     "theme" -> ThemePane()
-                    else -> EmptyPaneHint(text = "选择左侧设置项查看详情")
+                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        EmptyPaneHint(text = "选择左侧设置项查看详情")
+                    }
                 }
             }
         }

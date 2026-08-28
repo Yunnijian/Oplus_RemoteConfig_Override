@@ -118,7 +118,11 @@ fun ColorPaletteContentMiuix(
     actions: ColorPaletteScreenActions,
     showTopBar: Boolean = true,
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    // pane 模式（showTopBar=false）无 TopAppBar：不创建 scrollBehavior（创建也没顶栏去
+    // 折叠），更不能把它的 nestedScrollConnection 挂到 LazyColumn —— ExitUntilCollapsed
+    // 的 onPreScroll 在无顶栏时 heightOffsetLimit 保持默认 -Float.MAX_VALUE，
+    // 会上拉滚动无限吞掉，导致 pane 无法滚动（横屏双窗右侧滑不动）。
+    val scrollBehavior = if (showTopBar) MiuixScrollBehavior() else null
     val enableBlurState = LocalEnableBlur.current
     // pane 模式（showTopBar=false）不创建自己的模糊背景层：外层 MainScreen 已对 Pager
     // 内容铺 layerBackdrop，嵌套 RenderEffect 层会导致重复采样/渲染伪影（对齐配置双窗行为）。
@@ -168,7 +172,11 @@ fun ColorPaletteContentMiuix(
                     .fillMaxHeight()
                     .scrollEndHaptic()
                     .overScrollVertical()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    // 仅全屏路由（有 TopAppBar 可折叠）挂载 appbar 的 nestedScrollConnection；
+                    // pane（无顶栏）挂上会把上拉滚动全部吞掉导致无法滚动。
+                    .then(
+                        scrollBehavior?.let { Modifier.nestedScroll(it.nestedScrollConnection) } ?: Modifier
+                    )
                     .padding(horizontal = 12.dp),
                 contentPadding = innerPadding,
                 overscrollEffect = null,
