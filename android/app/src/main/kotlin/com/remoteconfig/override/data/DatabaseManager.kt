@@ -59,10 +59,29 @@ class DatabaseManager(context: Context) {
         }
     }
 
-    fun exportConfig(packageName: String): WriteResult {
+    /**
+     * 导出配置到内部存储：原样落盘 [json]（当前编辑器文本），不读数据库。
+     * 写临时文件 → root shell `mkdir -p $EXPORT_DIR && cp && chmod 644` → 删临时文件。
+     */
+    fun exportConfig(packageName: String, json: String): WriteResult {
         if (!validPackage(packageName)) return WriteResult(false, "包名格式无效")
-        val result = run("read", packageName, "$EXPORT_DIR/$packageName.json")
-        return WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已导出" else "导出失败"))
+        if (json.isBlank()) return WriteResult(false, "JSON 内容为空")
+        val temporary = File(appContext.cacheDir, "export-${UUID.randomUUID()}.json")
+        return try {
+            temporary.writeText(json)
+            val exportPath = "$EXPORT_DIR/$packageName.json"
+            val command = listOf(
+                "mkdir -p ${quote(EXPORT_DIR)}",
+                "cp ${quote(temporary.absolutePath)} ${quote(exportPath)}",
+                "chmod 644 ${quote(exportPath)}",
+            ).joinToString(" && ")
+            val result = Shell.cmd(command).exec()
+            WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已导出" else "导出失败"))
+        } catch (error: Exception) {
+            WriteResult(false, "导出失败: ${error.message ?: "无法创建临时文件"}")
+        } finally {
+            temporary.delete()
+        }
     }
 
     fun writeConfig(packageName: String, json: String): WriteResult {
