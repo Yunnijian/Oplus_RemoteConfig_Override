@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -32,6 +31,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.kyant.shapes.Capsule
+import com.remoteconfig.override.navigation.LocalNavigator
+import com.remoteconfig.override.navigation.Route
 import com.remoteconfig.override.ui.component.glass.GlassBottomBar
 import com.remoteconfig.override.ui.component.glass.LocalGlassTabScale
 import com.remoteconfig.override.ui.component.glass.LocalGlassTabSelect
@@ -49,6 +50,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { PAGE_COUNT })
     val contentReady = rememberContentReady()
     val scope = rememberCoroutineScope()
+    val navigator = LocalNavigator.current
     // settledPage 本身就是 state，直接读取即可（只在值变化时重组，拖动中不逐帧）
     val settledPage = pagerState.settledPage
 
@@ -84,7 +86,17 @@ fun MainScreen(viewModel: MainViewModel) {
             val isCurrentPage = page == settledPage
             when (page) {
                 0 -> if (isCurrentPage || contentReady) HomePage(viewModel, isCurrentPage)
-                1 -> if (isCurrentPage || contentReady) PlaceholderPage("配置列表 — Task 9")
+                1 -> if (isCurrentPage || contentReady) ConfigListPage(
+                    viewModel, isCurrentPage,
+                    onGameClick = { pkg ->
+                        viewModel.loadConfig(pkg)
+                        navigator.push(Route.ConfigEditor(pkg))
+                    },
+                    onNewConfig = { pkg ->
+                        viewModel.createNewConfig(pkg)
+                        navigator.push(Route.ConfigEditor(pkg))
+                    },
+                )
                 2 -> if (isCurrentPage || contentReady) SettingsContent()
             }
         }
@@ -130,12 +142,5 @@ fun RowScope.GlassTab(index: Int, icon: ImageVector, label: String) {
             tint = contentColor,
         )
         Text(label, style = MaterialTheme.typography.labelSmall, color = contentColor)
-    }
-}
-
-@Composable
-private fun PlaceholderPage(label: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(label)
     }
 }

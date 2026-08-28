@@ -28,15 +28,19 @@ import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.model.GameConfigSummary
 import com.remoteconfig.override.viewmodel.MainViewModel
 
+/**
+ * 配置列表 — Material 实现。
+ *
+ * 由原 GameListScreen.kt 的 ConfigListContent 迁入，仅改名并去掉 MainScreen 不再使用的
+ * `onBack`/`isActive`/`modifier` 参数；`onGameClick`/`onNewConfig` 只回调不内部导航
+ * （导航由 MainScreen 的 ConfigListPage 回调完成，见 Step 4）。
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun ConfigListContent(
+fun ConfigListContentMaterial(
     viewModel: MainViewModel,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
-    onBack: () -> Unit = {},
-    isActive: Boolean = true,
-    modifier: Modifier = Modifier
 ) {
     val gameList by viewModel.gameList.collectAsState()
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -128,7 +132,7 @@ fun ConfigListContent(
             }
         }
     ) { innerPadding ->
-        Box(modifier = modifier.fillMaxSize().padding(innerPadding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
 
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
