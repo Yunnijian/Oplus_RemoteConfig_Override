@@ -8,8 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +26,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -416,15 +416,14 @@ private fun ConfigEditorContent(
                                 }
                             }
                             var gestureScale by remember { mutableFloatStateOf(1f) }
-                            val transformState = rememberTransformableState { zoomChange, _, _ ->
-                                if (zoomChange != 1f) {
-                                    // Keep the gesture on the GPU layer. Re-measuring the
-                                    // complete document for every touch event causes jank.
-                                    gestureScale = (gestureScale * zoomChange).coerceIn(0.65f, 2.5f)
-                                }
-                            }
-                            LaunchedEffect(transformState.isTransformInProgress) {
-                                if (!transformState.isTransformInProgress && gestureScale != 1f) {
+                            // 缩放手势是否进行中（detectTransformGestures 无 isTransformInProgress，
+                            // 手动维护：多指捏合开始置 true，最后一指抬起置 false）
+                            var gestureInProgress by remember { mutableStateOf(false) }
+                            // Bug 6: 用 detectTransformGestures 替代 transformable——只在≥2指针时回调，
+                            // 单指横向拖动完全放行给外层 Pager 翻页/横向滚动，避免手势竞争
+                            // （横屏/双窗窄栏时 transformable 与 Pager 抢单指，误触发缩放或翻页失败）。
+                            LaunchedEffect(gestureInProgress) {
+                                if (!gestureInProgress && gestureScale != 1f) {
                                     val appliedScale = gestureScale
                                     gestureScale = 1f
                                     fontSize = (fontSize * appliedScale).coerceIn(8f, 32f)
@@ -470,11 +469,27 @@ private fun ConfigEditorContent(
                                         Modifier
                                             .weight(1f)
                                             .horizontalScroll(horizontalScroll)
-                                            .transformable(
-                                                state = transformState,
-                                                canPan = { false },
-                                                lockRotationOnZoomPan = true
-                                            )
+                                            // Bug 6: 缩放手势只在多指（捏合）时激活——detectTransformGestures
+                                            // 只在≥2指针时回调，单指横向拖动完全放行给外层 Pager 翻页/滚动，
+                                            // 避免 transformable 与 Pager 的手势竞争（横屏/双窗窄栏误触发缩放）。
+                                            // while(true) 让手势结束后持续监听；finally 置 false 触发字号落定。
+                                            .pointerInput(Unit) {
+                                                while (true) {
+                                                    try {
+                                                        detectTransformGestures(
+                                                            panZoomLock = true,
+                                                            onGesture = { _, _, zoom, _ ->
+                                                                if (zoom != 1f) {
+                                                                    gestureInProgress = true
+                                                                    gestureScale = (gestureScale * zoom).coerceIn(0.65f, 2.5f)
+                                                                }
+                                                            },
+                                                        )
+                                                    } finally {
+                                                        gestureInProgress = false
+                                                    }
+                                                }
+                                            }
                                     ) {
                                         BasicTextField(
                                             value = fieldValue,
