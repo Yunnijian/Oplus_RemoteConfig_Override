@@ -213,6 +213,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val result = withContext(Dispatchers.IO) { dbManager.clearGameData() }
+                if (result.success) {
+                    // Bug 1：清除成功后刷新列表/状态，避免 gameList/hasDbData/configuredCount 残留旧值
+                    refreshAll()
+                    // pm clear 清空整个 cosa 库：当前编辑包（若存在）已被清除 → 清空编辑态，
+                    // 避免编辑器/双窗窗格残留已删配置的旧 JSON
+                    if (_editingPackageName.value != null) clearEditingConfig()
+                }
                 onComplete(result.success, result.message)
             } catch (e: Exception) {
                 onComplete(false, "清除失败: ${e.message ?: "未知错误"}")
@@ -222,15 +229,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 导出当前配置到内部存储 */
+    /** 导出当前编辑器文本到内部存储（Bug 2：导出 _editingJson 而非 DB 旧值） */
     fun exportConfig(onComplete: (Boolean, String) -> Unit) {
         val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
-        if (_editingJson.value == null) {
-            onComplete(false, "无可导出的配置")
-            return
-        }
+        val json = _editingJson.value ?: run { onComplete(false, "无可导出的配置"); return }
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { dbManager.exportConfig(pkg) }
+            val result = withContext(Dispatchers.IO) { dbManager.exportConfig(pkg, json) }
             onComplete(result.success, result.message)
         }
     }
