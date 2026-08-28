@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.ImeAction
@@ -443,6 +444,9 @@ private fun AppIcon(pkg: String, viewModel: MainViewModel) {
         Icon(
             bitmap = iconBitmap,
             contentDescription = null,
+            // miuix Icon 默认 tint = LocalContentColor.current（浅色 = 深色 onBackground），
+            // 会把彩色 App 图标整体染黑。传 Unspecified 取消着色（对齐 Material 版 Image 无 tint）。
+            tint = Color.Unspecified,
             modifier = Modifier.size(40.dp),
         )
     } else {
