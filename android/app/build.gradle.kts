@@ -14,7 +14,8 @@ android {
 
     defaultConfig {
         applicationId = "com.remoteconfig.override"
-        minSdk = 26
+        // minSdk 33：KernelSU 悬浮底栏/液态玻璃用 miuix-blur（要求 API 33+），完整对齐 KernelSU
+        minSdk = 33
         targetSdk = 36
         versionCode = 2
         versionName = "1.2.1"
@@ -90,11 +91,8 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:$miuix")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:$miuix")
     implementation("top.yukonga.miuix.kmp:miuix-icons-android:$miuix")
-
-    // AndroidLiquidGlass (backdrop) — 液态玻璃
-    implementation("io.github.kyant0:backdrop:2.0.1")
-    // Capsule 形状（backdrop 的 POM 把 shapes 声明为 runtime scope，编译期不可见，需显式声明）
-    implementation("io.github.kyant0:shapes:1.2.1")
+    // miuix-blur：KernelSU 悬浮底栏/液态玻璃依赖（minSdk 33，R0 已提升）——替代自研 backdrop 方案
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:$miuix")
 
     // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
     // 排除 material-kolor 的 CMP material3 传递依赖：它会把 androidx material3 抬到
