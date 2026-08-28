@@ -18,6 +18,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold as MaterialScaffold
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -157,24 +158,44 @@ fun MainScreen(viewModel: MainViewModel) {
                 .only(WindowInsetsSides.Start)
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
-            // 双窗编辑器覆盖层（Pager 外，不参与 Pager 测量 → IME 弹出不影响 currentPage）
-            val dualPaneOverlay: @Composable () -> Unit = {
-                if (expanded && !dualPaneSelected.isNullOrEmpty()) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(surfaceColor)
-                    ) {
-                        ConfigEditorPane(
-                            viewModel = viewModel,
-                            packageName = dualPaneSelected!!,
-                            bottomInnerPadding = navBarBottomPadding,
-                            onClosed = {
-                                dualPaneSelected = null
-                                // Bug 3：双窗关闭也清理编辑态，避免编辑态残留跨模式泄漏
-                                viewModel.clearEditingConfig()
-                            },
-                        )
+            // 宽屏双窗内容（Pager 外，不参与 Pager 测量 → IME 弹出不影响 currentPage）：
+            // 配置页（settledPage==1）时用 左列表 + 右编辑器 同框替代 Pager 的 page 1。
+            // 编辑器与列表同框（不是全屏覆盖），且 tab 切换不受影响（仅配置页走双窗）。
+            val dualPaneContent: @Composable () -> Unit = {
+                if (expanded && settledPage == 1) {
+                    Row(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxWidth(0.42f)) {
+                            ConfigListPage(
+                                viewModel = viewModel,
+                                bottomInnerPadding = navBarBottomPadding,
+                                isCurrentPage = true,
+                                onGameClick = { pkg ->
+                                    dualPaneSelected = pkg
+                                },
+                                onNewConfig = { pkg ->
+                                    viewModel.createNewConfig(pkg)
+                                    dualPaneSelected = pkg
+                                },
+                                dualPaneSelected = dualPaneSelected,
+                                onDualPaneSelect = { dualPaneSelected = it },
+                            )
+                        }
+                        VerticalDivider()
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (dualPaneSelected.isNullOrEmpty()) {
+                                EmptyPaneHint()
+                            } else {
+                                ConfigEditorPane(
+                                    viewModel = viewModel,
+                                    packageName = dualPaneSelected!!,
+                                    bottomInnerPadding = navBarBottomPadding,
+                                    onClosed = {
+                                        dualPaneSelected = null
+                                        viewModel.clearEditingConfig()
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -188,8 +209,11 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .weight(1f)
                                 .consumeWindowInsets(startInsets)
                         ) {
-                            pagerContent(navBarBottomPadding)
-                            dualPaneOverlay()
+                            dualPaneContent()
+                            // Pager 只在非配置页（首页/设置页）或非 expanded 时显示
+                            if (!(expanded && settledPage == 1)) {
+                                pagerContent(navBarBottomPadding)
+                            }
                         }
                     }
                 }
@@ -204,8 +228,10 @@ fun MainScreen(viewModel: MainViewModel) {
                                 .weight(1f)
                                 .consumeWindowInsets(startInsets)
                         ) {
-                            pagerContent(navBarBottomPadding)
-                            dualPaneOverlay()
+                            dualPaneContent()
+                            if (!(expanded && settledPage == 1)) {
+                                pagerContent(navBarBottomPadding)
+                            }
                         }
                     }
                 }

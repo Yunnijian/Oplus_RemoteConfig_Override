@@ -1,5 +1,7 @@
 package com.remoteconfig.override.ui.screens
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -8,9 +10,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.viewmodel.MainViewModel
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 
 /**
  * 配置列表页分发器：按当前 UI 风格 [LocalUiMode] 选择 Miuix / Material 实现。
@@ -63,5 +68,22 @@ private fun ConfigListContentImpl(
     when (LocalUiMode.current) {
         UiMode.Miuix -> ConfigListContentMiuix(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
         UiMode.Material -> ConfigListContentMaterial(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
+    }
+}
+
+/** 双窗右侧空态提示（MainScreen 双窗布局用，按 UI 模式取主题色）。 */
+@Composable
+internal fun EmptyPaneHint() {
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> MiuixText(
+            text = "选择左侧应用查看配置",
+            fontSize = 14.sp,
+            color = colorScheme.onSurfaceVariantSummary,
+        )
+        UiMode.Material -> Text(
+            text = "选择左侧应用查看配置",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
