@@ -77,7 +77,14 @@ class MainActivity : ComponentActivity() {
                 RemoteConfigTheme {
                     NavDisplay(
                         backStack = navigator.backStack,
-                        onBack = { navigator.pop() },
+                        onBack = {
+                            // Bug 3：系统返回键退出编辑器时先清理编辑态，避免残留跨模式泄漏
+                            // （顶栏返回箭头已在 ConfigEditorScreen 的 onBack 内 clearEditingConfig）
+                            if (navigator.backStack.lastOrNull() is Route.ConfigEditor) {
+                                viewModel.clearEditingConfig()
+                            }
+                            navigator.pop()
+                        },
                         entryProvider = entryProvider {
                             entry<Route.Main> {
                                 MainScreen(viewModel = viewModel)

@@ -58,7 +58,7 @@ fun ConfigListPage(
         // 宽屏：左列表 + 右编辑器双窗格
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth(0.42f)) {
-                ConfigListContentImpl(viewModel, onGameClick, onNewConfig, dualPaneSelected)
+                ConfigListContentImpl(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
             }
             VerticalDivider()
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -68,7 +68,11 @@ fun ConfigListPage(
                     ConfigEditorPane(
                         viewModel = viewModel,
                         packageName = dualPaneSelected,
-                        onClosed = { onDualPaneSelect("") },
+                        onClosed = {
+                            onDualPaneSelect("")
+                            // Bug 3：双窗关闭也清理编辑态，避免编辑态残留跨模式泄漏
+                            viewModel.clearEditingConfig()
+                        },
                     )
                 }
             }
@@ -102,9 +106,10 @@ private fun ConfigListContentImpl(
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
+    onDualPaneSelect: (String) -> Unit = {},
 ) {
     when (LocalUiMode.current) {
-        UiMode.Miuix -> ConfigListContentMiuix(viewModel, onGameClick, onNewConfig, dualPaneSelected)
-        UiMode.Material -> ConfigListContentMaterial(viewModel, onGameClick, onNewConfig, dualPaneSelected)
+        UiMode.Miuix -> ConfigListContentMiuix(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
+        UiMode.Material -> ConfigListContentMaterial(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
     }
 }
