@@ -119,7 +119,12 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
 
     // Unit tests
-    testImplementation(kotlin("test"))
+    // NOTE: AGP 9 内置 Kotlin 下 `kotlin("test")` 的变体属性（androidJvm/android）与
+    // kotlin-test MPP 变体（jvm/standard-jvm）不匹配，junit 传递依赖不会进入测试编译类路径，
+    // 导致 `kotlin.test.Test` 无法解析。显式声明 JVM 测试构件作为最小化修复。
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlin:kotlin-test:2.4.10")
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.4.10")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
