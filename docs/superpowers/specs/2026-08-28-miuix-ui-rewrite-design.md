@@ -130,6 +130,42 @@
 - **M3 屏幕重写**：首页 / 配置列表 / 配置编辑器双实现
 - **M4 打磨**：对话框/菜单/动画对齐、深色与 Monet 验证、完整构建验证
 
+## 9. 性能预算与优化策略（源自 KernelSU Manager 实战）
+
+目标：动画不掉帧、模糊不拖累续航。以下模式全部来自 KernelSU Manager 源码分析，实施时强制遵循。
+
+### 9.1 模糊/液态玻璃分级降级（功耗保底）
+- **三级设置开关**：`enable_blur`（总）、`enable_glass_bottom_bar`（浮动底栏）、`enable_glass_blur`（底栏模糊），各自独立。与 KernelSU 不同的是**默认值**：KernelSU 全默认关；本 app 因液态玻璃是核心视觉，`enable_glass_bottom_bar` 默认开，但 `enable_blur`/`enable_glass_blur` 默认开的同时必须提供关闭开关。
+- **能力检测**：`rememberGlassBackdrop` 先查 RenderEffect 支持（backdrop/miuix 提供 `isRenderEffectSupported()`），不支持返回 `null`，下游自动走无模糊路径。
+- **零成本降级分支**：`.then(if (enabled) Modifier.drawBackdrop(...) else Modifier.background(color, shape))` — 关闭时零 shader 开销。
+
+### 9.2 重内容延迟组装（防转场掉帧）
+- 移植 `rememberContentReady()` 模式：导航转场结束 + 1 帧后才组装重内容；粘性值（true 后不回退）。
+- 3 个 tab 用 HorizontalPager：`beyondViewportPageCount = if (contentReady) 1 else 0`；`overscrollEffect = null`。
+- **`isCurrentPage` 粘性激活**：tab 首次成为当前页才触发 `viewModel.refresh()`；后台 tab 不刷数据。
+- 配置编辑器（重内容）：大 JSON 文档沿用现有「先加载态后组装 + withFrameNanos」策略，与 contentReady 模式一致。
+
+### 9.3 动画：绘制期读状态，零重组
+- 所有动画值只在 `graphicsLayer {}` lambda、`drawBackdrop` 的 `effects`/`layerBlock`/`onDrawSurface` 中读取 → 只重绘不重组。
+- Animatable 全部显式设置 `visibilityThreshold`（0.001f 级）让 spring 提前收敛，禁止无限振荡。
+- `snapshotFlow + collectLatest` 事件驱动；`derivedStateOf` 缓存中间量；`MutatorMutex` 防互踩；`VelocityTracker` 喂真实速度。
+- 按压反馈自绘（`indication = null`），不用 ripple。
+
+### 9.4 图层/着色器
+- backdrop 层先垫不透明 surface 色再画内容：`rememberLayerBackdrop { drawRect(surface); drawContent() }`。
+- tab 内容离屏复用：`alpha(0f) + clearAndSetSemantics + layerBackdrop` 供透镜采样，一次绘制两处使用。
+- Lens 用 `downscaleFactor` 降采样再折射。
+- 高光用 AGSL RuntimeShader + `drawWithContent`。
+- `dropShadow` modifier 代替 elevation。
+
+### 9.5 列表与生命周期
+- 所有 LazyColumn `items(key = …, contentType = …)`。
+- 全部 `collectAsStateWithLifecycle`；一次性事件用 `repeatOnLifecycle(STARTED)`。
+- 重计算一律 `Dispatchers.IO`。
+
+### 9.6 API 库选择注意
+- KernelSU 液态玻璃用的是 **miuix-blur**（要求 minSdk 33），本 app minSdk 26 → **必须用 backdrop 2.0.1**（minSdk 21）。两库 API 同源（`drawBackdrop`/`lens`/`vibrancy`/`layerBackdrop`），移植 FloatingBottomBar 时替换 import 即可。
+
 ## 参考实现
 
 - KernelSU Manager：`KernelSU/manager/`（本地已克隆，浅克隆 `--depth 1`）—— 双模式主题、Miuix 组件用法、FloatingBottomBar 视觉
