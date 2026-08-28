@@ -30,6 +30,9 @@ android/wechat_icon.svg
 /.codegraph/
 /.reasonix/
 
+# SDD work artifacts (batch reports)
+/.superpowers/
+
 # Third-party reference projects
 /KernelSU/
 /KernelSU-Next-dev/
