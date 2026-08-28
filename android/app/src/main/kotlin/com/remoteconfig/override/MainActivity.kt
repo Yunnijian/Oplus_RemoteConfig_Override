@@ -31,7 +31,6 @@ import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
-import com.remoteconfig.override.ui.screens.DualPaneEditorScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
@@ -40,7 +39,6 @@ import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBarBlur
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.LocalWindowWidthClass
 import com.remoteconfig.override.ui.theme.RemoteConfigTheme
-import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.ui.theme.ThemeController
 import com.remoteconfig.override.viewmodel.MainViewModel
 
@@ -144,27 +142,13 @@ class MainActivity : ComponentActivity() {
                                         viewModel.loadConfig(key.packageName)
                                     }
                                 }
-                                // 宽屏（Expanded）：双窗同框（左配置列表 + 右编辑器）。
-                                // 编辑器在路由页（Pager 外）→ IME 不干扰 Pager currentPage（不跳页）。
-                                // 窄屏：全屏编辑器（现状）。
-                                if (isExpandedWidth()) {
-                                    DualPaneEditorScreen(
-                                        viewModel = viewModel,
-                                        packageName = key.packageName,
-                                        onBack = {
-                                            viewModel.clearEditingConfig()
-                                            navigator.pop()
-                                        },
-                                    )
-                                } else {
-                                    ConfigEditorScreen(
-                                        viewModel = viewModel,
-                                        onBack = {
-                                            viewModel.clearEditingConfig()
-                                            navigator.pop()
-                                        },
-                                    )
-                                }
+                                ConfigEditorScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        viewModel.clearEditingConfig()
+                                        navigator.pop()
+                                    },
+                                )
                             }
                         },
                     )

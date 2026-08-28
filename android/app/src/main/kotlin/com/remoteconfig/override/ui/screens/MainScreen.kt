@@ -1,6 +1,5 @@
 package com.remoteconfig.override.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -78,15 +76,16 @@ fun MainScreen(viewModel: MainViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { PAGE_COUNT })
     val mainPagerState = rememberMainPagerState(pagerState)
 
-    // 手势滑动 → 停稳后同步 tab（syncPage 用 settledPage——真正停稳的页）。
-    // 只监听 settledPage：IME 弹出/窗口 resize 会让 currentPage 抖动但 settledPage 稳定，
-    // 不触发 syncPage，避免 selectedPage 误跳（C1：横屏编辑器弹输入法跳设置页）。
-    // 注意：这牺牲了"滑动中 tab 实时跟手"（停稳才跳），但换来不跳页的稳定性。
-    LaunchedEffect(pagerState.settledPage) {
+    // 手势滑动 → 实时同步 tab（isNavigating=false 时才生效，点击滚动中被协调器屏蔽）
+    val currentPage = pagerState.currentPage
+    LaunchedEffect(currentPage) {
         mainPagerState.syncPage()
     }
     // 内容门控用 settledPage（停稳才算当前页）
     val settledPage = pagerState.settledPage
+
+    // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
+    var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
 
     val surfaceColor = when (uiMode) {
         UiMode.Material -> MaterialTheme.colorScheme.surface // Blur is not used in Material, this is just a placeholder
@@ -126,16 +125,21 @@ fun MainScreen(viewModel: MainViewModel) {
                             bottomInnerPadding = bottomInnerPadding,
                             isCurrentPage = isCurrentPage,
                             onGameClick = { pkg ->
-                                // 宽屏也走路由：ConfigEditor 路由页在 expanded 时渲染
-                                // Row{列表|编辑器} 双窗同框；窄屏全屏编辑器。
-                                // 编辑器在路由页（Pager 外）→ IME 不干扰 Pager currentPage。
-                                viewModel.loadConfig(pkg)
-                                navigator.push(Route.ConfigEditor(pkg))
+                                if (expanded) {
+                                    // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
+                                    dualPaneSelected = pkg
+                                } else {
+                                    viewModel.loadConfig(pkg)
+                                    navigator.push(Route.ConfigEditor(pkg))
+                                }
                             },
                             onNewConfig = { pkg ->
                                 viewModel.createNewConfig(pkg)
-                                navigator.push(Route.ConfigEditor(pkg))
+                                if (expanded) dualPaneSelected = pkg
+                                else navigator.push(Route.ConfigEditor(pkg))
                             },
+                            dualPaneSelected = if (expanded) dualPaneSelected else null,
+                            onDualPaneSelect = { dualPaneSelected = it },
                         )
 
                         2 -> if (isCurrentPage || contentReady) SettingsContent(bottomInnerPadding)
@@ -149,9 +153,6 @@ fun MainScreen(viewModel: MainViewModel) {
                 .only(WindowInsetsSides.Start)
             val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding()
 
-            // Pager 正常渲染 3 tab（含 spring 动画）。双窗编辑器走 Route.ConfigEditor
-            // 路由页（宽屏时该页渲染 Row{列表|编辑器} 同框），编辑器在 Pager 外，
-            // IME 不干扰 Pager currentPage；Navigation3 管理转场（无闪烁）。
             when (uiMode) {
                 UiMode.Miuix -> MiuixScaffold { _ ->
                     Row {
