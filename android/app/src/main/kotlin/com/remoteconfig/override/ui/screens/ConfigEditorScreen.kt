@@ -199,7 +199,8 @@ private fun ConfigEditorContent(
 ) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
+    // 编辑器/窗格加载状态：与列表刷新（isLoading）分离，双窗下点列表项不影响左列表
+    val isEditorLoading by viewModel.isEditorLoading.collectAsState()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
 
@@ -247,10 +248,12 @@ private fun ConfigEditorContent(
             if (nextRect != cursorRect) cursorRect = nextRect
         }
     }
-    LaunchedEffect(isLoading, editingPackageName) {
-        if (isLoading) {
+    // Bug 3：editorVisible 纳入 currentText 判定——空文档（DB 无记录/全选删除后）也可编辑；
+    // 导入文件（updateEditingJson）会改变 currentText 触发本效果重新运行，保证导入后可见。
+    LaunchedEffect(isEditorLoading, editingPackageName, currentText) {
+        if (isEditorLoading) {
             editorVisible = false
-        } else if (currentText.isNotEmpty()) {
+        } else if (!editorVisible) {
             // Let the loading state commit one frame before composing the large
             // editor tree, then reveal it without a first-frame jump.
             withFrameNanos { }
@@ -328,7 +331,7 @@ private fun ConfigEditorContent(
     // 编辑器主体（双模式共享）：自研核心原样保留，仅作为两个 Scaffold 分支共用的 content。
     val editorBody: @Composable (PaddingValues) -> Unit = { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            if (isLoading) {
+            if (isEditorLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(); Spacer(Modifier.height(12.dp))
@@ -338,11 +341,9 @@ private fun ConfigEditorContent(
             } else {
                 val text = currentText
                 val lineCount = remember(text) { text.count { it == '\n' } + 1 }
-                if (text.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("数据库中无此记录，请输入 JSON 后写入", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
+                // Bug 3：空文档与有内容文档共用同一编辑器（含可编辑输入框）。
+                // "数据库中无此记录"等引导文案由状态栏/placeholder 承担，不再替代输入框。
+                val editorPane: @Composable () -> Unit = {
                     if (!editorVisible) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -358,7 +359,10 @@ private fun ConfigEditorContent(
                                 Modifier.fillMaxWidth().background(statusBg).padding(horizontal = 12.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (error != null) {
+                                if (text.isEmpty()) {
+                                    Text("数据库中无此记录，请输入 JSON 后写入", style = TextStyle(fontSize = 11.sp, color = textColor.copy(alpha = 0.6f)),
+                                        maxLines = 1, modifier = Modifier.weight(1f))
+                                } else if (error != null) {
                                     Text("⚠ ${error!!.take(60)}", style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.error),
                                         maxLines = 1, modifier = Modifier.weight(1f))
                                 } else {
@@ -502,6 +506,18 @@ private fun ConfigEditorContent(
                                                             lineHeight = (fontSize * 1.5f).sp
                                                         )
                                                     )
+                                                    if (text.isEmpty()) {
+                                                        // Bug 3：空文档占位提示（不拦截输入，仅引导）
+                                                        Text(
+                                                            text = "请输入 JSON",
+                                                            style = TextStyle(
+                                                                fontFamily = FontFamily.Monospace,
+                                                                fontSize = fontSize.sp,
+                                                                lineHeight = (fontSize * 1.5f).sp,
+                                                                color = lineColor.copy(alpha = 0.5f)
+                                                            )
+                                                        )
+                                                    }
                                                     innerTextField()
                                                 }
                                             }
@@ -512,6 +528,7 @@ private fun ConfigEditorContent(
                         }
                     }
                 }
+                editorPane()
             }
         }
     }

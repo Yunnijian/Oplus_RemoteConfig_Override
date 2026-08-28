@@ -39,14 +39,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _editingPackageName = MutableStateFlow<String?>(null)
     val editingPackageName: StateFlow<String?> = _editingPackageName.asStateFlow()
 
+    /** 列表刷新 loading —— 仅 refreshAll 置位（列表型操作共用） */
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    /** 编辑器/窗格加载 loading —— 仅 loadConfig 置位（与列表刷新分离，避免双窗串扰） */
+    private val _isEditorLoading = MutableStateFlow(false)
+    val isEditorLoading: StateFlow<Boolean> = _isEditorLoading.asStateFlow()
 
     private val _hasDbData = MutableStateFlow(false)
     val hasDbData: StateFlow<Boolean> = _hasDbData.asStateFlow()
 
-    /** 预加载的应用图标缓存 — 包名 → Bitmap */
-    private val iconCache = mutableMapOf<String, Bitmap?>()
+    /** 预加载的应用图标缓存 — 包名 → Bitmap（IO 线程写、UI 线程读，用并发容器保证安全） */
+    private val iconCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
 
     /** 公开给 UI 层读取缓存图标 */
     fun getCachedIcon(pkg: String): Bitmap? = iconCache[pkg]
@@ -68,25 +73,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun checkSystemStatus() {
-        val isRooted = try { dbManager.checkRoot() } catch (_: Exception) { false }
-        val dbAvailable = try { isRooted && dbManager.checkDatabase() } catch (_: Exception) { false }
-        val configuredCount = if (dbAvailable) {
-            try { dbManager.countConfiguredPackages() } catch (_: Exception) { 0 }
-        } else 0
-
-        _systemStatus.value = SystemStatus(isRooted, dbAvailable, configuredCount)
-
-        // 获取 cosa 版本
-        if (isRooted) {
-            _cosaVersion.value = try { dbManager.getCosaVersion() } catch (_: Exception) { "未知" }
+        // 所有 Root Shell / 数据库调用放到 IO 线程，避免阻塞主线程导致 ANR。
+        val (status, version) = withContext(Dispatchers.IO) {
+            val isRooted = try { dbManager.checkRoot() } catch (_: Exception) { false }
+            val dbAvailable = try { isRooted && dbManager.checkDatabase() } catch (_: Exception) { false }
+            val configuredCount = if (dbAvailable) {
+                try { dbManager.countConfiguredPackages() } catch (_: Exception) { 0 }
+            } else 0
+            val ver = if (isRooted) {
+                try { dbManager.getCosaVersion() } catch (_: Exception) { "未知" }
+            } else ""
+            SystemStatus(isRooted, dbAvailable, configuredCount) to ver
+        }
+        _systemStatus.value = status
+        if (status.isRooted) {
+            _cosaVersion.value = version
         }
     }
 
     private suspend fun loadGameList() {
         val context = getApplication<Application>()
         val configuredPkgs = try {
-            if (_systemStatus.value.dbAvailable) dbManager.listConfiguredPackages()
-            else emptyList()
+            if (_systemStatus.value.dbAvailable) {
+                withContext(Dispatchers.IO) { dbManager.listConfiguredPackages() }
+            } else emptyList()
         } catch (_: Exception) { emptyList() }
 
         _hasDbData.value = configuredPkgs.isNotEmpty()
@@ -108,7 +118,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     iconCache[pkg] = bmp
                     Triple(pkg, label, true)
                 } catch (_: Exception) {
-                    iconCache[pkg] = null
+                    // ConcurrentHashMap 不接受 null 值：移除旧缓存让 UI 走占位图标
+                    iconCache.remove(pkg)
                     Triple(pkg, pkg, false)
                 }
             }
@@ -130,14 +141,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun loadConfig(packageName: String) {
         viewModelScope.launch {
-            _isLoading.value = true
+            _isEditorLoading.value = true
             _editingPackageName.value = packageName
             try {
-                _editingJson.value = dbManager.loadConfig(packageName)
+                _editingJson.value = withContext(Dispatchers.IO) { dbManager.loadConfig(packageName) }
             } catch (_: Exception) {
                 _editingJson.value = null
             } finally {
-                _isLoading.value = false
+                _isEditorLoading.value = false
             }
         }
     }
@@ -166,7 +177,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             try {
                 val result = if (_systemStatus.value.isRooted) {
-                    dbManager.writeConfig(pkg, json)
+                    withContext(Dispatchers.IO) { dbManager.writeConfig(pkg, json) }
                 } else {
                     DatabaseManager.WriteResult(false, "未授予 Root 权限")
                 }
@@ -185,7 +196,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onComplete(false, "未授予 Root 权限")
                     return@launch
                 }
-                val result = dbManager.deleteConfig(packageName)
+                val result = withContext(Dispatchers.IO) { dbManager.deleteConfig(packageName) }
                 if (!result.success) {
                     onComplete(false, result.message)
                     return@launch
@@ -201,7 +212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val result = dbManager.clearGameData()
+                val result = withContext(Dispatchers.IO) { dbManager.clearGameData() }
                 onComplete(result.success, result.message)
             } catch (e: Exception) {
                 onComplete(false, "清除失败: ${e.message ?: "未知错误"}")
@@ -219,10 +230,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            _isLoading.value = true
-            val result = dbManager.exportConfig(pkg)
+            val result = withContext(Dispatchers.IO) { dbManager.exportConfig(pkg) }
             onComplete(result.success, result.message)
-            _isLoading.value = false
         }
     }
 
