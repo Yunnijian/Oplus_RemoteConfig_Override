@@ -112,19 +112,19 @@ fun RemoteConfigMaterialTheme(
 ) {
     val context = LocalContext.current
     val keyColor = AppSettingsRepository.keyColor
-    val enableMonet = AppSettingsRepository.enableMonet
     val paletteStyle = parsePaletteStyle(AppSettingsRepository.paletteStyle)
     val colorSpec = parseColorSpec(AppSettingsRepository.colorSpec)
 
     val colorScheme = when {
-        // 用户指定自定义取色种子（且未开启壁纸取色）→ materialkolor 按 paletteStyle/spec 生成
-        keyColor != 0 && !enableMonet -> rememberDynamicColorScheme(
+        // 用户指定自定义取色种子 → 无条件 materialkolor 按 paletteStyle/spec 生成
+        // （对齐 KernelSU dynamicColor = keyColor == 0 语义及 Miuix 侧：keyColor 优先于壁纸取色）
+        keyColor != 0 -> rememberDynamicColorScheme(
             seedColor = Color(keyColor),
             isDark = darkTheme,
             style = paletteStyle,
             specVersion = colorSpec.effectiveFor(paletteStyle),
         )
-        // keyColor==0 或 enableMonet → 保持原行为：SDK≥S 壁纸取色，否则静态色表回退
+        // keyColor==0 → 保持原行为：SDK≥S 壁纸取色，否则静态色表回退
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
