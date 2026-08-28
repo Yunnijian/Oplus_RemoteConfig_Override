@@ -13,6 +13,9 @@ package com.remoteconfig.override.settings
  * - [enableBlur]：液态玻璃/模糊总开关
  * - [enableFloatingBottomBar]：悬浮底栏开关
  * - [enableFloatingBottomBarBlur]：悬浮底栏实时模糊
+ * - [enablePredictiveBack]：预测性返回手势开关
+ * - [pageScale]：全局界面缩放比例（0.8f..1.1f）
+ * - [enableNavigationBadge]：导航栏角标开关
  */
 interface SettingsRepository {
     var uiMode: String
@@ -24,4 +27,7 @@ interface SettingsRepository {
     var enableBlur: Boolean
     var enableFloatingBottomBar: Boolean
     var enableFloatingBottomBarBlur: Boolean
+    var enablePredictiveBack: Boolean
+    var pageScale: Float
+    var enableNavigationBadge: Boolean
 }
