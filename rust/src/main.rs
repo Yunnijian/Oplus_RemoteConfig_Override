@@ -243,6 +243,114 @@ fn cmd_read(package: &str, output: Option<&str>) -> Result<bool> {
     Ok(false)
 }
 
+fn write_one(
+    db: &Path,
+    package: &str,
+    object: &Map<String, Value>,
+    skipped: &mut BTreeSet<String>,
+) -> Result<()> {
+    let conn = Connection::open(db)?;
+    let cols = columns(&conn)?;
+    let package_name = package_column(&cols)?;
+    let from_server = column(&cols, "from_server");
+    let mut fields: Vec<(String, SqlValue, bool)> = Vec::new();
+    let mut has_from_server = false;
+
+    for (key, value) in object {
+        let Some(actual) = column(&cols, key) else {
+            skipped.insert(key.clone());
+            continue;
+        };
+        if actual.eq_ignore_ascii_case(&package_name) {
+            // Keep the package column at its JSON position, but never trust
+            // a package value from the editable document.
+            fields.push((actual, SqlValue::Text(package.to_owned()), true));
+        } else if from_server
+            .as_ref()
+            .is_some_and(|name| actual.eq_ignore_ascii_case(name))
+        {
+            // A written document always becomes a local configuration.
+            fields.push((actual, SqlValue::Integer(0), false));
+            has_from_server = true;
+        } else {
+            fields.push((actual, to_sql(value), false));
+        }
+    }
+    if let Some(from_server) = from_server.filter(|_| !has_from_server) {
+        // New documents may omit the marker; append it without disturbing
+        // the order of fields that were present in the document.
+        fields.push((from_server, SqlValue::Integer(0), false));
+    }
+    if fields.iter().all(|(_, _, is_package)| *is_package) {
+        return Err("没有匹配到任何列".into());
+    }
+
+    let table = quote_identifier(TABLE);
+    let package_column = quote_identifier(&package_name);
+    let update_fields: Vec<_> = fields
+        .iter()
+        .filter(|(_, _, is_package)| !is_package)
+        .collect();
+    let assignments = update_fields
+        .iter()
+        .map(|(name, _, _)| format!("{} = ?", quote_identifier(name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let existing: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {table} WHERE {package_column} = ?"),
+        [package],
+        |row| row.get(0),
+    )?;
+    let mut update_params: Vec<SqlValue> = update_fields
+        .iter()
+        .map(|(_, value, _)| (*value).clone())
+        .collect();
+    update_params.push(SqlValue::Text(package.to_owned()));
+    if existing > 0 {
+        conn.execute(
+            &format!("UPDATE {table} SET {assignments} WHERE {package_column} = ?"),
+            params_from_iter(update_params),
+        )?;
+    } else {
+        let mut insert_fields = fields;
+        if !insert_fields.iter().any(|(_, _, is_package)| *is_package) {
+            insert_fields.push((
+                package_name.clone(),
+                SqlValue::Text(package.to_owned()),
+                true,
+            ));
+        }
+        let insert_columns = insert_fields
+            .iter()
+            .map(|(name, _, _)| quote_identifier(name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let placeholders = std::iter::repeat_n("?", insert_fields.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let insert_params: Vec<SqlValue> = insert_fields
+            .into_iter()
+            .map(|(_, value, _)| value)
+            .collect();
+        conn.execute(
+            &format!("INSERT INTO {table} ({insert_columns}) VALUES ({placeholders})"),
+            params_from_iter(insert_params),
+        )?;
+    }
+
+    let exists: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {table} WHERE {package_column} = ?"),
+        [package],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        return Err(format!("写入后未找到包名: {package}").into());
+    }
+    install_protection(&conn, &cols)?;
+    finish(conn, db);
+    Ok(())
+}
+
 fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
     let json: Value = serde_json::from_str(&fs::read_to_string(json_path)?)?;
     let object = json.as_object().ok_or("JSON 顶层必须是对象")?;
@@ -255,107 +363,14 @@ fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
         return Err("未找到数据库".into());
     }
 
+    // 逐库独立执行：任一库失败不影响其他库的写入与结果收集；
+    // 整体失败时错误信息标明具体失败的库，便于定位双库不一致。
     let mut skipped = BTreeSet::new();
+    let mut failures: Vec<String> = Vec::new();
     for db in &dbs {
-        let conn = Connection::open(db)?;
-        let cols = columns(&conn)?;
-        let package_name = package_column(&cols)?;
-        let from_server = column(&cols, "from_server");
-        let mut fields: Vec<(String, SqlValue, bool)> = Vec::new();
-        let mut has_from_server = false;
-
-        for (key, value) in object {
-            let Some(actual) = column(&cols, key) else {
-                skipped.insert(key.clone());
-                continue;
-            };
-            if actual.eq_ignore_ascii_case(&package_name) {
-                // Keep the package column at its JSON position, but never trust
-                // a package value from the editable document.
-                fields.push((actual, SqlValue::Text(package.to_owned()), true));
-            } else if from_server
-                .as_ref()
-                .is_some_and(|name| actual.eq_ignore_ascii_case(name))
-            {
-                // A written document always becomes a local configuration.
-                fields.push((actual, SqlValue::Integer(0), false));
-                has_from_server = true;
-            } else {
-                fields.push((actual, to_sql(value), false));
-            }
+        if let Err(err) = write_one(db, package, object, &mut skipped) {
+            failures.push(format!("write failed on {}: {}", db.display(), err));
         }
-        if let Some(from_server) = from_server.filter(|_| !has_from_server) {
-            // New documents may omit the marker; append it without disturbing
-            // the order of fields that were present in the document.
-            fields.push((from_server, SqlValue::Integer(0), false));
-        }
-        if fields.iter().all(|(_, _, is_package)| *is_package) {
-            return Err("没有匹配到任何列".into());
-        }
-
-        let table = quote_identifier(TABLE);
-        let package_column = quote_identifier(&package_name);
-        let update_fields: Vec<_> = fields
-            .iter()
-            .filter(|(_, _, is_package)| !is_package)
-            .collect();
-        let assignments = update_fields
-            .iter()
-            .map(|(name, _, _)| format!("{} = ?", quote_identifier(name)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let existing: i64 = conn.query_row(
-            &format!("SELECT COUNT(*) FROM {table} WHERE {package_column} = ?"),
-            [package],
-            |row| row.get(0),
-        )?;
-        let mut update_params: Vec<SqlValue> = update_fields
-            .iter()
-            .map(|(_, value, _)| (*value).clone())
-            .collect();
-        update_params.push(SqlValue::Text(package.to_owned()));
-        if existing > 0 {
-            conn.execute(
-                &format!("UPDATE {table} SET {assignments} WHERE {package_column} = ?"),
-                params_from_iter(update_params),
-            )?;
-        } else {
-            let mut insert_fields = fields;
-            if !insert_fields.iter().any(|(_, _, is_package)| *is_package) {
-                insert_fields.push((
-                    package_name.clone(),
-                    SqlValue::Text(package.to_owned()),
-                    true,
-                ));
-            }
-            let insert_columns = insert_fields
-                .iter()
-                .map(|(name, _, _)| quote_identifier(name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let placeholders = std::iter::repeat_n("?", insert_fields.len())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let insert_params: Vec<SqlValue> = insert_fields
-                .into_iter()
-                .map(|(_, value, _)| value)
-                .collect();
-            conn.execute(
-                &format!("INSERT INTO {table} ({insert_columns}) VALUES ({placeholders})"),
-                params_from_iter(insert_params),
-            )?;
-        }
-
-        let exists: i64 = conn.query_row(
-            &format!("SELECT COUNT(*) FROM {table} WHERE {package_column} = ?"),
-            [package],
-            |row| row.get(0),
-        )?;
-        if exists == 0 {
-            return Err(format!("写入后未找到包名: {package}").into());
-        }
-        install_protection(&conn, &cols)?;
-        finish(conn, db);
     }
 
     if !skipped.is_empty() {
@@ -363,6 +378,10 @@ fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
             "已忽略未知字段: {}",
             skipped.into_iter().collect::<Vec<_>>().join(", ")
         );
+    }
+
+    if !failures.is_empty() {
+        return Err(failures.join("\n").into());
     }
     println!("{package} 配置写入成功");
     Ok(true)
@@ -378,14 +397,19 @@ fn cmd_delete(package: &str) -> Result<bool> {
         let cols = columns(&conn)?;
         let package_name = package_column(&cols)?;
         conn.execute_batch("DROP TRIGGER IF EXISTS protect_local_pkg_delete")?;
-        conn.execute(
+        if let Err(err) = conn.execute(
             &format!(
                 "DELETE FROM {} WHERE {} = ?",
                 quote_identifier(TABLE),
                 quote_identifier(&package_name)
             ),
             [package],
-        )?;
+        ) {
+            // DELETE 前已 DROP 保护触发器，失败时必须立即恢复，
+            // 避免该库的本地配置保护被永久破坏。
+            let _ = install_protection(&conn, &cols);
+            return Err(format!("delete failed on {}: {}", db.display(), err).into());
+        }
         install_protection(&conn, &cols)?;
         finish(conn, db);
     }
