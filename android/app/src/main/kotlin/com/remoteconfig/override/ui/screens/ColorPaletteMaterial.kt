@@ -51,12 +51,8 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -74,9 +70,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,6 +86,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.remoteconfig.override.R
 import com.remoteconfig.override.settings.ColorMode
+import com.remoteconfig.override.ui.component.material.SegmentedDropdownItem
 import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.ui.theme.keyColorOptions
 import com.remoteconfig.override.ui.theme.rememberRemoteConfigColorScheme
@@ -509,10 +503,9 @@ private fun ColorButtonMaterial(
 }
 
 /**
- * 下拉选择行 — 对齐 KernelSU Material 版 `SegmentedDropdownItem` 的功能，
- * 用 M3 `ExposedDropdownMenuBox` + `ListItem` 实现（前导图标 + 标题 + 当前值 + 菜单）。
+ * 下拉选择行 — 对齐 KernelSU Material 版 `SegmentedDropdownItem`
+ * （前导图标 + 标题 + 当前值 + 分段锚定下拉菜单）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DropdownRow(
     icon: ImageVector,
@@ -521,54 +514,11 @@ private fun DropdownRow(
     selectedIndex: Int,
     onSelectedIndexChange: (Int) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        ListItem(
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
-            leadingContent = {
-                Icon(
-                    icon,
-                    contentDescription = title,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-            trailingContent = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = items.getOrElse(selectedIndex) { "" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 4.dp),
-                    )
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            items.forEachIndexed { index, item ->
-                DropdownMenuItem(
-                    text = { Text(item) },
-                    trailingIcon = if (index == selectedIndex) {
-                        { Icon(Icons.Rounded.Check, contentDescription = null) }
-                    } else {
-                        null
-                    },
-                    onClick = {
-                        expanded = false
-                        onSelectedIndexChange(index)
-                    },
-                )
-            }
-        }
-    }
+    SegmentedDropdownItem(
+        icon = icon,
+        title = title,
+        items = items,
+        selectedIndex = selectedIndex,
+        onItemSelected = onSelectedIndexChange,
+    )
 }

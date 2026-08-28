@@ -79,10 +79,11 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    // 锁定 material3 稳定版 1.4.0（BOM 2026.08.00 也是 1.4.0）。
-    // 不锁的话，miuix 0.9.3 的 CMP material3 传递依赖会把 androidx material3 抬到
-    // 1.5.0-alpha17 → 编译期(1.4.0)/运行期(1.5.0-alpha17) ABI 不一致 → AbstractMethodError
-    implementation("androidx.compose.material3:material3:1.4.0")
+    // material3 显式声明 1.5.0-alpha26（对齐 KernelSU libs.versions.toml）。
+    // 必须显式声明并高于任何传递依赖带来的 alpha 版本：CMP material3（miuix / material-kolor
+    // 的传递依赖）会把 androidx material3 抬到 1.5.0-alpha17（atomic group 强制同版本）；
+    // 冲突解析取最高版本 → alpha26 同时是编译期与运行期版本，ABI 一致（不再 AbstractMethodError）。
+    implementation("androidx.compose.material3:material3:1.5.0-alpha26")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
 
@@ -95,12 +96,9 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:$miuix")
 
     // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
-    // 排除 material-kolor 的 CMP material3 传递依赖：它会把 androidx material3 抬到
-    // 1.5.0-alpha17（atomic group 强制同版本）→ 编译期(1.4.0)/运行期(1.5.0-alpha17)
-    // ABI 不一致 → AbstractMethodError。material-kolor 只用其 PaletteStyle/ColorSpec 枚举。
-    implementation("com.materialkolor:material-kolor:5.0.0") {
-        exclude(group = "org.jetbrains.compose.material3", module = "material3")
-    }
+    // 对齐 KernelSU：不排除任何传递依赖。其 CMP material3 会解析出 androidx material3
+    // 1.5.0-alpha17，低于本模块显式声明的 alpha26，冲突解析统一取 alpha26。
+    implementation("com.materialkolor:material-kolor:5.0.0")
 
     // 平板/大屏适配（Google 标准 WindowSizeClass，版本由 BOM 管理）
     implementation("androidx.compose.material3:material3-window-size-class")
