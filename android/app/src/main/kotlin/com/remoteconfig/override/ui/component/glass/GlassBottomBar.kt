@@ -69,8 +69,8 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.remoteconfig.override.settings.UiMode
-import com.remoteconfig.override.ui.theme.LocalEnableGlass
-import com.remoteconfig.override.ui.theme.LocalEnableGlassBlur
+import com.remoteconfig.override.ui.theme.LocalEnableBlur
+import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBarBlur
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isInDarkTheme
 import kotlinx.coroutines.flow.collectLatest
@@ -125,8 +125,8 @@ fun GlassBottomBar(
     tabsCount: Int = 3,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val enableGlass = LocalEnableGlass.current
-    val enableBlur = LocalEnableGlassBlur.current
+    val enableGlass = LocalEnableBlur.current
+    val enableBlur = LocalEnableFloatingBottomBarBlur.current
 
     if (backdrop != null && enableGlass) {
         GlassLiquidBottomTabs(

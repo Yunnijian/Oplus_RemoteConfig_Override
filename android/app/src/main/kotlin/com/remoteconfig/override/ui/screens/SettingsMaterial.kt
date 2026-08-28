@@ -37,8 +37,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
-import com.remoteconfig.override.settings.AppSettingsRepository
 import com.remoteconfig.override.settings.ColorMode
+import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 
 private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
@@ -46,7 +46,7 @@ private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
 /**
  * 设置页 — Material 3 实现。
  *
- * 与 [SettingsContentMiuix] 行为一致、读同一 [AppSettingsRepository]；
+ * 与 [SettingsContentMiuix] 行为一致、读同一 [com.remoteconfig.override.settings.SettingsRepositoryImpl]；
  * 结构对齐简报 Step 3：外观卡（Switch + 三选项 SegmentedButton + Switch）+
  * 液态玻璃卡（两个 Switch）+ 关于项（ListItem + ChevronRight）。
  * 关于弹窗使用 Material3 [AlertDialog]。
@@ -57,6 +57,8 @@ fun SettingsContentMaterial() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val navigator = LocalNavigator.current
     var showAbout by remember { mutableStateOf(false) }
+    // R1：数据源换为 KernelSU 风格 SettingsRepository（设置页 UI 不重写，R3 再做）
+    val repo = remember { SettingsRepositoryImpl() }
 
     Scaffold(
         topBar = {
@@ -83,24 +85,22 @@ fun SettingsContentMaterial() {
                         supportingContent = { Text("切换 Miuix / Material 设计风格") },
                         trailingContent = {
                             Switch(
-                                checked = AppSettingsRepository.uiMode == UiMode.Miuix,
+                                checked = repo.uiMode == UiMode.Miuix.value,
                                 onCheckedChange = { miuix ->
-                                    AppSettingsRepository.setUiMode(
-                                        if (miuix) UiMode.Miuix else UiMode.Material
-                                    )
+                                    repo.uiMode = if (miuix) UiMode.Miuix.value else UiMode.Material.value
                                 },
                             )
                         },
                     )
-                    ColorModeSegmentedRow()
+                    ColorModeSegmentedRow(repo)
                     ListItem(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         headlineContent = { Text("动态取色 (Monet)", style = MaterialTheme.typography.titleMedium) },
                         supportingContent = { Text("跟随系统壁纸取色") },
                         trailingContent = {
                             Switch(
-                                checked = AppSettingsRepository.enableMonet,
-                                onCheckedChange = { AppSettingsRepository.setEnableMonet(it) },
+                                checked = repo.miuixMonet,
+                                onCheckedChange = { repo.miuixMonet = it },
                             )
                         },
                     )
@@ -131,20 +131,20 @@ fun SettingsContentMaterial() {
                         supportingContent = { Text("关闭后使用普通底栏（更省电）") },
                         trailingContent = {
                             Switch(
-                                checked = AppSettingsRepository.enableGlass,
-                                onCheckedChange = { AppSettingsRepository.setEnableGlass(it) },
+                                checked = repo.enableBlur,
+                                onCheckedChange = { repo.enableBlur = it },
                             )
                         },
                     )
-                    if (AppSettingsRepository.enableGlass) {
+                    if (repo.enableBlur) {
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             headlineContent = { Text("底栏实时模糊", style = MaterialTheme.typography.titleMedium) },
                             supportingContent = { Text("关闭后保留玻璃质感但更省电") },
                             trailingContent = {
                                 Switch(
-                                    checked = AppSettingsRepository.enableGlassBlur,
-                                    onCheckedChange = { AppSettingsRepository.setEnableGlassBlur(it) },
+                                    checked = repo.enableFloatingBottomBarBlur,
+                                    onCheckedChange = { repo.enableFloatingBottomBarBlur = it },
                                 )
                             },
                         )
@@ -187,7 +187,7 @@ fun SettingsContentMaterial() {
 
 /** 深色模式三选项 SegmentedButton（跟随系统 / 浅色 / 深色）。 */
 @Composable
-private fun ColorModeSegmentedRow() {
+private fun ColorModeSegmentedRow(repo: SettingsRepositoryImpl) {
     val options = listOf(
         "跟随系统" to ColorMode.SYSTEM,
         "浅色" to ColorMode.LIGHT,
@@ -206,8 +206,8 @@ private fun ColorModeSegmentedRow() {
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
             options.forEachIndexed { index, (label, mode) ->
                 SegmentedButton(
-                    selected = AppSettingsRepository.colorMode == mode,
-                    onClick = { AppSettingsRepository.setColorMode(mode) },
+                    selected = ColorMode.fromValue(repo.themeMode).toNonMonetMode() == mode.value,
+                    onClick = { repo.themeMode = mode.value },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                 ) {
                     Text(label)

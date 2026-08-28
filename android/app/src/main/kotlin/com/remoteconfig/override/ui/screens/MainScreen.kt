@@ -52,7 +52,7 @@ import com.remoteconfig.override.ui.component.glass.LocalGlassTabSelect
 import com.remoteconfig.override.ui.component.glass.glassContentColor
 import com.remoteconfig.override.ui.component.glass.rememberGlassBackdrop
 import com.remoteconfig.override.ui.component.rememberContentReady
-import com.remoteconfig.override.ui.theme.LocalEnableGlass
+import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -162,7 +162,7 @@ fun MainScreen(viewModel: MainViewModel) {
         }
     } else {
         // ── 窄屏（Compact/Medium）：保持既有 3 tab Pager + 底栏 ──
-        val glassBackdrop = rememberGlassBackdrop(enabled = LocalEnableGlass.current)
+        val glassBackdrop = rememberGlassBackdrop(enabled = LocalEnableBlur.current)
         val bottomBar: @Composable () -> Unit = {
             Box(
                 Modifier

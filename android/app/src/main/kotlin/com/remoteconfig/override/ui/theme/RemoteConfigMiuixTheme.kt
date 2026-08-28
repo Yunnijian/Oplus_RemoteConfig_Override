@@ -1,80 +1,93 @@
 package com.remoteconfig.override.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowInsetsControllerCompat
 import com.materialkolor.dynamiccolor.ColorSpec
-import com.remoteconfig.override.settings.AppSettingsRepository
 import com.remoteconfig.override.settings.ColorMode
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemeController
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /**
- * Miuix 风格主题：按 ColorMode/enableMonet 选择 ColorSchemeMode，
- * 并消费 Task 2 仓库的取色参数（keyColor/paletteStyle/colorSpec）。
- * ThemeController 具名参数写法对齐 KernelSU MiuixTheme.kt:54-67（miuix 0.9.3）。
+ * Miuix 风格主题 — 对齐 KernelSU MiuixKernelSUTheme（裁剪 MonetColorsProvider 等 KernelSU
+ * 特有功能）。读 [AppSettings]（已由 ThemeController 完成 colorMode 的 Monet 转换）：
+ * - colorMode → ColorSchemeMode（六态完整映射）
+ * - keyColor=0 且 Monet → 取系统壁纸动态色 primary 作为取色种子
+ * - paletteStyle/colorSpec 经 valueOf + effectiveFor 降级映射到 miuix 对应枚举
  */
 @Composable
 fun RemoteConfigMiuixTheme(
-    colorMode: ColorMode,
-    enableMonet: Boolean,
-    darkTheme: Boolean,
+    appSettings: AppSettings,
     content: @Composable () -> Unit
 ) {
-    val mode = when {
-        enableMonet && colorMode == ColorMode.SYSTEM -> ColorSchemeMode.MonetSystem
-        enableMonet && colorMode == ColorMode.LIGHT -> ColorSchemeMode.MonetLight
-        enableMonet && colorMode == ColorMode.DARK -> ColorSchemeMode.MonetDark
-        colorMode == ColorMode.LIGHT -> ColorSchemeMode.Light
-        colorMode == ColorMode.DARK -> ColorSchemeMode.Dark
-        else -> ColorSchemeMode.System
-    }
+    val context = LocalContext.current
+    val systemDarkTheme = isSystemInDarkTheme()
+    val darkTheme = appSettings.colorMode.isDark || (appSettings.colorMode.isSystem && systemDarkTheme)
+    val colorStyle = appSettings.paletteStyle
+    val colorSpec = appSettings.colorSpec
 
-    // 取色参数消费（对齐 KernelSU MiuixTheme.kt:33-43 的 valueOf+try-catch 模式）
-    val paletteStyle = parsePaletteStyle(AppSettingsRepository.paletteStyle)
-    val colorSpec = parseColorSpec(AppSettingsRepository.colorSpec)
-
-    // ThemePaletteStyle 与 materialkolor PaletteStyle 枚举名一致，valueOf 失败时回退 TonalSpot
     val miuixPaletteStyle = try {
-        ThemePaletteStyle.valueOf(paletteStyle.name)
+        ThemePaletteStyle.valueOf(colorStyle.name)
     } catch (_: Exception) {
         ThemePaletteStyle.TonalSpot
     }
 
-    val miuixColorSpec = if (colorSpec.effectiveFor(paletteStyle) == ColorSpec.SpecVersion.SPEC_2025) {
+    val miuixColorSpec = if (colorSpec.effectiveFor(colorStyle) == ColorSpec.SpecVersion.SPEC_2025) {
         ThemeColorSpec.Spec2025
     } else {
         ThemeColorSpec.Spec2021
     }
 
-    // 0 = 使用 Miuix 默认蓝（传 null 由库内部取默认）
-    val resolvedKeyColor: Color? = AppSettingsRepository.keyColor
-        .takeIf { it != 0 }
-        ?.let { Color(it) }
+    val resolvedKeyColor: Color? = when {
+        appSettings.keyColor != 0 -> Color(appSettings.keyColor)
+        appSettings.colorMode.isMonet ->
+            if (darkTheme) dynamicDarkColorScheme(context).primary
+            else dynamicLightColorScheme(context).primary
+
+        else -> null
+    }
 
     val controller = ThemeController(
-        mode,
+        when (appSettings.colorMode) {
+            ColorMode.SYSTEM -> ColorSchemeMode.System
+            ColorMode.LIGHT -> ColorSchemeMode.Light
+            ColorMode.DARK -> ColorSchemeMode.Dark
+            ColorMode.MONET_SYSTEM -> ColorSchemeMode.MonetSystem
+            ColorMode.MONET_LIGHT -> ColorSchemeMode.MonetLight
+            ColorMode.MONET_DARK, ColorMode.DARK_AMOLED -> ColorSchemeMode.MonetDark
+        },
         keyColor = resolvedKeyColor,
         isDark = darkTheme,
         paletteStyle = miuixPaletteStyle,
         colorSpec = miuixColorSpec,
     )
 
-    MiuixTheme(controller = controller) {
-        val context = LocalContext.current
-        LaunchedEffect(darkTheme) {
-            val window = (context as? Activity)?.window ?: return@LaunchedEffect
-            WindowInsetsControllerCompat(window, window.decorView).apply {
-                isAppearanceLightStatusBars = !darkTheme
-                isAppearanceLightNavigationBars = !darkTheme
+    MiuixTheme(
+        controller = controller,
+        content = {
+            LaunchedEffect(darkTheme) {
+                val window = (context as? Activity)?.window ?: return@LaunchedEffect
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !darkTheme
+                    isAppearanceLightNavigationBars = !darkTheme
+                }
+            }
+            CompositionLocalProvider(
+                LocalContentColor provides MiuixTheme.colorScheme.onBackground,
+            ) {
+                content()
             }
         }
-        content()
-    }
+    )
 }

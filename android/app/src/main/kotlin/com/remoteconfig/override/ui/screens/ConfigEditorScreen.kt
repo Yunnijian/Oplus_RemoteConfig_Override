@@ -203,7 +203,7 @@ private fun ConfigEditorContent(
     val isEditorLoading by viewModel.isEditorLoading.collectAsState()
     val context = LocalContext.current
     // Bug 2：编辑器配色（背景/正文/行号/高亮色表/光标/状态栏）必须跟随应用主题
-    // （AppSettingsRepository.colorMode），而非系统深色。SYSTEM 模式回落系统。
+    // （LocalColorMode，SYSTEM/Monet-SYSTEM 回落系统），而非系统深色。
     val dark = isInDarkTheme()
 
     val appLabel = remember(editingPackageName) {

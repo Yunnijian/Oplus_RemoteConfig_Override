@@ -94,6 +94,13 @@ dependencies {
     // miuix-blur：KernelSU 悬浮底栏/液态玻璃依赖（minSdk 33，R0 已提升）——替代自研 backdrop 方案
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:$miuix")
 
+    // AndroidLiquidGlass (backdrop) — 液态玻璃。
+    // R0(aa12d3b) 移除了本依赖但 glass 组件尚未迁移到 miuix-blur（R5 才替换底栏实现），
+    // 先恢复以保持编译通过；R5 完成 KernelSU 底栏替换后随组件一并删除。
+    implementation("io.github.kyant0:backdrop:2.0.1")
+    // Capsule 形状（backdrop 的 POM 把 shapes 声明为 runtime scope，编译期不可见，需显式声明）
+    implementation("io.github.kyant0:shapes:1.2.1")
+
     // Material 取色（PaletteStyle/ColorSpec，供 Material 主题与取色屏使用）
     // 排除 material-kolor 的 CMP material3 传递依赖：它会把 androidx material3 抬到
     // 1.5.0-alpha17（atomic group 强制同版本）→ 编译期(1.4.0)/运行期(1.5.0-alpha17)

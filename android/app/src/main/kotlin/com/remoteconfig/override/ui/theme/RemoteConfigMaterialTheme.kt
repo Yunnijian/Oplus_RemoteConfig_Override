@@ -1,156 +1,55 @@
 package com.remoteconfig.override.ui.theme
 
 import android.app.Activity
-import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamiccolor.ColorSpec
-import com.materialkolor.rememberDynamicColorScheme
-import com.remoteconfig.override.settings.AppSettingsRepository
+import androidx.core.view.WindowInsetsControllerCompat
 
-internal val LightColors = lightColorScheme(
-    primary = Color(0xFFCC0000),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDAD4),
-    onPrimaryContainer = Color(0xFF410000),
-    secondary = Color(0xFF775652),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFFDAD4),
-    onSecondaryContainer = Color(0xFF2C1512),
-    tertiary = Color(0xFF705C2E),
-    onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFCE0A6),
-    onTertiaryContainer = Color(0xFF241A00),
-    error = Color(0xFFBA1A1A),
-    onError = Color.White,
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    background = Color(0xFFFFF8F6),
-    onBackground = Color(0xFF231918),
-    surface = Color(0xFFFFF8F6),
-    onSurface = Color(0xFF231918),
-    surfaceVariant = Color(0xFFF5DDDA),
-    onSurfaceVariant = Color(0xFF534341),
-    outline = Color(0xFF857371),
-    outlineVariant = Color(0xFFD8C2BE)
-)
-
-internal val DarkColors = darkColorScheme(
-    primary = Color(0xFFFFB4A8),
-    onPrimary = Color(0xFF690005),
-    primaryContainer = Color(0xFF93000A),
-    onPrimaryContainer = Color(0xFFFFDAD4),
-    secondary = Color(0xFFE7BDB7),
-    onSecondary = Color(0xFF442926),
-    secondaryContainer = Color(0xFF5D3F3B),
-    onSecondaryContainer = Color(0xFFFFDAD4),
-    tertiary = Color(0xFFDFC48C),
-    onTertiary = Color(0xFF3C2E04),
-    tertiaryContainer = Color(0xFF564419),
-    onTertiaryContainer = Color(0xFFFCE0A6),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF1A1110),
-    onBackground = Color(0xFFF0DFDB),
-    surface = Color(0xFF1A1110),
-    onSurface = Color(0xFFF0DFDB),
-    surfaceVariant = Color(0xFF534341),
-    onSurfaceVariant = Color(0xFFD8C2BE),
-    outline = Color(0xFFA08C89),
-    outlineVariant = Color(0xFF534341)
-)
-
-/** paletteStyle 字符串 → materialkolor [PaletteStyle]（非法值回退 TonalSpot）。 */
-internal fun parsePaletteStyle(style: String): PaletteStyle =
-    try {
-        PaletteStyle.valueOf(style)
-    } catch (_: Exception) {
-        PaletteStyle.TonalSpot
-    }
-
-/** colorSpec 字符串 → materialkolor [ColorSpec.SpecVersion]（非法值回退 SPEC_2025）。 */
-internal fun parseColorSpec(spec: String): ColorSpec.SpecVersion =
-    try {
-        ColorSpec.SpecVersion.valueOf(spec)
-    } catch (_: Exception) {
-        ColorSpec.SpecVersion.SPEC_2025
-    }
-
-/** 仅这些样式支持 2025 动态取色规范（对齐 KernelSU Theme.kt supportsSpec2025）。 */
-internal val PaletteStyle.supportsSpec2025: Boolean
-    get() = this == PaletteStyle.TonalSpot ||
-            this == PaletteStyle.Neutral ||
-            this == PaletteStyle.Vibrant ||
-            this == PaletteStyle.Expressive
-
-/** 不支持 2025 规范的样式自动降级到 SPEC_2021（对齐 KernelSU Theme.kt effectiveFor）。 */
-internal fun ColorSpec.SpecVersion.effectiveFor(style: PaletteStyle): ColorSpec.SpecVersion =
-    if (this == ColorSpec.SpecVersion.SPEC_2025 && !style.supportsSpec2025) {
-        ColorSpec.SpecVersion.SPEC_2021
-    } else {
-        this
-    }
-
-/** Material 风格主题：迁移自旧 RemoteConfigTheme，darkTheme 改为参数传入。 */
+/**
+ * Material 风格主题 — 对齐 KernelSU MaterialKernelSUTheme（裁剪 MonetColorsProvider）。
+ * 读 [AppSettings]：keyColor=0 → 动态取色（materialkolor rememberDynamicColorScheme）；
+ * colorMode 六态（含 AMOLED 纯黑）；主题色切换带 spring 动画（ColorScheme.animateAsState）。
+ *
+ * 注：KernelSU 用 MaterialExpressiveTheme/MotionScheme.expressive()，但它们在锁定版
+ * material3 1.4.0 中为 internal（KernelSU 用 1.5.0-alpha26 才公开）——为保留 1.4.0 锁定
+ * （R0/R1 硬约束），这里回落到标准 MaterialTheme，动画取色不变。
+ */
 @Composable
 fun RemoteConfigMaterialTheme(
-    darkTheme: Boolean,
+    appSettings: AppSettings,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val keyColor = AppSettingsRepository.keyColor
-    val paletteStyle = parsePaletteStyle(AppSettingsRepository.paletteStyle)
-    val colorSpec = parseColorSpec(AppSettingsRepository.colorSpec)
+    val systemDarkTheme = isSystemInDarkTheme()
+    val darkTheme = appSettings.colorMode.isDark || (appSettings.colorMode.isSystem && systemDarkTheme)
+    val amoledMode = appSettings.colorMode.isAmoled
+    val dynamicColor = appSettings.keyColor == 0
 
-    val colorScheme = when {
-        // 用户指定自定义取色种子 → 无条件 materialkolor 按 paletteStyle/spec 生成
-        // （对齐 KernelSU dynamicColor = keyColor == 0 语义及 Miuix 侧：keyColor 优先于壁纸取色）
-        keyColor != 0 -> rememberDynamicColorScheme(
-            seedColor = Color(keyColor),
-            isDark = darkTheme,
-            style = paletteStyle,
-            specVersion = colorSpec.effectiveFor(paletteStyle),
-        )
-        // Bug 6: enableMonet 门控——keyColor==0 时，开关开启且 SDK≥S 才取系统壁纸动态色；
-        // 关闭则回落到静态色表（不再取壁纸），开关在 Settings 页生效
-        AppSettingsRepository.enableMonet && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColors
-        else -> LightColors
-    }
+    val colorScheme = rememberRemoteConfigColorScheme(
+        seedColor = if (dynamicColor) Color.Unspecified else Color(appSettings.keyColor),
+        isDark = darkTheme,
+        isAmoled = amoledMode,
+        paletteStyle = appSettings.paletteStyle,
+        colorSpec = appSettings.colorSpec,
+    )
 
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            val surfaceArgb = colorScheme.surface.toArgb()
-            window.statusBarColor = surfaceArgb
-            window.navigationBarColor = surfaceArgb
-            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(surfaceArgb))
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !darkTheme
-                isAppearanceLightNavigationBars = !darkTheme
-            }
+    LaunchedEffect(darkTheme) {
+        val window = (context as? Activity)?.window ?: return@LaunchedEffect
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
         }
     }
+
+    val animatedColorScheme = colorScheme.animateAsState()
 
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = animatedColorScheme,
         typography = Typography,
-        content = content
+        content = content,
     )
 }

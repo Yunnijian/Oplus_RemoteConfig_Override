@@ -1,7 +1,7 @@
 package com.remoteconfig.override
 
 import android.app.Application
-import com.remoteconfig.override.settings.AppSettingsRepository
+import com.remoteconfig.override.settings.initSettingsRepository
 import com.topjohnwu.superuser.Shell
 
 /**
@@ -15,7 +15,7 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        AppSettingsRepository.init(this)
+        initSettingsRepository(this)
         configureShell()
     }
 

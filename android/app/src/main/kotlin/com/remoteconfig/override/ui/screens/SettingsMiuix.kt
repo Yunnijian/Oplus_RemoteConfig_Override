@@ -14,8 +14,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
-import com.remoteconfig.override.settings.AppSettingsRepository
 import com.remoteconfig.override.settings.ColorMode
+import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -46,6 +46,8 @@ fun SettingsContentMiuix() {
     val scrollBehavior = MiuixScrollBehavior()
     val navigator = LocalNavigator.current
     var showAbout by remember { mutableStateOf(false) }
+    // R1：数据源换为 KernelSU 风格 SettingsRepository（设置页 UI 不重写，R3 再做）
+    val repo = remember { SettingsRepositoryImpl() }
 
     Scaffold(
         topBar = {
@@ -68,27 +70,26 @@ fun SettingsContentMiuix() {
                     SwitchPreference(
                         title = "MIUI 风格 (Miuix)",
                         summary = "切换 Miuix / Material 设计风格",
-                        checked = AppSettingsRepository.uiMode == UiMode.Miuix,
+                        checked = repo.uiMode == UiMode.Miuix.value,
                         onCheckedChange = { miuix ->
-                            AppSettingsRepository.setUiMode(
-                                if (miuix) UiMode.Miuix else UiMode.Material
-                            )
+                            repo.uiMode = if (miuix) UiMode.Miuix.value else UiMode.Material.value
                         },
                     )
                     OverlayDropdownPreference(
                         title = "深色模式",
                         summary = "跟随系统 / 浅色 / 深色",
                         items = listOf("跟随系统", "浅色", "深色"),
-                        selectedIndex = AppSettingsRepository.colorMode.value,
+                        // Monet 态（3-5）/AMOLED(6) 映射回对应非 Monet 三态显示
+                        selectedIndex = ColorMode.fromValue(repo.themeMode).toNonMonetMode(),
                         onSelectedIndexChange = { idx ->
-                            AppSettingsRepository.setColorMode(ColorMode.fromValue(idx))
+                            repo.themeMode = idx
                         },
                     )
                     SwitchPreference(
                         title = "动态取色 (Monet)",
                         summary = "跟随系统壁纸取色",
-                        checked = AppSettingsRepository.enableMonet,
-                        onCheckedChange = { AppSettingsRepository.setEnableMonet(it) },
+                        checked = repo.miuixMonet,
+                        onCheckedChange = { repo.miuixMonet = it },
                     )
                     ArrowPreference(
                         title = "主题取色",
@@ -104,15 +105,15 @@ fun SettingsContentMiuix() {
                     SwitchPreference(
                         title = "液态玻璃底栏",
                         summary = "关闭后使用普通底栏（更省电）",
-                        checked = AppSettingsRepository.enableGlass,
-                        onCheckedChange = { AppSettingsRepository.setEnableGlass(it) },
+                        checked = repo.enableBlur,
+                        onCheckedChange = { repo.enableBlur = it },
                     )
-                    if (AppSettingsRepository.enableGlass) {
+                    if (repo.enableBlur) {
                         SwitchPreference(
                             title = "底栏实时模糊",
                             summary = "关闭后保留玻璃质感但更省电",
-                            checked = AppSettingsRepository.enableGlassBlur,
-                            onCheckedChange = { AppSettingsRepository.setEnableGlassBlur(it) },
+                            checked = repo.enableFloatingBottomBarBlur,
+                            onCheckedChange = { repo.enableFloatingBottomBarBlur = it },
                         )
                     }
                 }

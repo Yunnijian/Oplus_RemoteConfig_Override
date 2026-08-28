@@ -47,12 +47,12 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
-import com.remoteconfig.override.settings.AppSettingsRepository
+import com.remoteconfig.override.settings.SettingsRepositoryImpl
 
 /**
  * 主题取色屏 — Material 3 实现。
  *
- * 与 [ColorPaletteContentMiuix] 行为一致、读同一 [AppSettingsRepository]：
+ * 与 [ColorPaletteContentMiuix] 行为一致、读同一 [com.remoteconfig.override.settings.SettingsRepositoryImpl]：
  * `Scaffold + LargeTopAppBar(返回键) + Column(verticalScroll) + ElevatedCard`。
  * 四组内容：预设强调色卡（跟随默认 + 色板，选中描边）/ 调色板风格（ExposedDropdownMenuBox）/
  * 颜色规范（ExposedDropdownMenuBox）/ 恢复默认。写入即生效，主题即时响应。
@@ -61,6 +61,8 @@ import com.remoteconfig.override.settings.AppSettingsRepository
 @Composable
 fun ColorPaletteContentMaterial(onBack: () -> Unit) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    // R1：数据源换为 KernelSU 风格 SettingsRepository（取色页 UI 不重写，R4 再做）
+    val repo = remember { SettingsRepositoryImpl() }
 
     Scaffold(
         topBar = {
@@ -97,10 +99,10 @@ fun ColorPaletteContentMaterial(onBack: () -> Unit) {
                     PaletteStyleDropdown(
                         items = styles.map { paletteStyleLabel(it.name) },
                         selectedIndex = styles
-                            .indexOfFirst { it.name == AppSettingsRepository.paletteStyle }
+                            .indexOfFirst { it.name == repo.colorStyle }
                             .coerceAtLeast(0),
                         onSelectedIndexChange = { index ->
-                            AppSettingsRepository.setPaletteStyle(styles[index].name)
+                            repo.colorStyle = styles[index].name
                         },
                     )
                 }
@@ -113,10 +115,10 @@ fun ColorPaletteContentMaterial(onBack: () -> Unit) {
                     ColorSpecDropdown(
                         items = specs.map { colorSpecLabel(it.name) },
                         selectedIndex = specs
-                            .indexOfFirst { it.name == AppSettingsRepository.colorSpec }
+                            .indexOfFirst { it.name == repo.colorSpec }
                             .coerceAtLeast(0),
                         onSelectedIndexChange = { index ->
-                            AppSettingsRepository.setColorSpec(specs[index].name)
+                            repo.colorSpec = specs[index].name
                         },
                     )
                 }
@@ -141,9 +143,9 @@ fun ColorPaletteContentMaterial(onBack: () -> Unit) {
                     )
                     TextButton(
                         onClick = {
-                            AppSettingsRepository.setKeyColor(0)
-                            AppSettingsRepository.setPaletteStyle("TonalSpot")
-                            AppSettingsRepository.setColorSpec("SPEC_2025")
+                            repo.keyColor = 0
+                            repo.colorStyle = "TonalSpot"
+                            repo.colorSpec = "SPEC_2025"
                         },
                     ) {
                         Text("恢复默认取色")
@@ -158,7 +160,8 @@ fun ColorPaletteContentMaterial(onBack: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PresetColorGridMaterial(modifier: Modifier = Modifier) {
-    val currentKeyColor = AppSettingsRepository.keyColor
+    val repo = remember { SettingsRepositoryImpl() }
+    val currentKeyColor = repo.keyColor
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -167,13 +170,13 @@ private fun PresetColorGridMaterial(modifier: Modifier = Modifier) {
         KeyColorSwatchMaterial(
             keyColor = 0,
             selected = currentKeyColor == 0,
-            onClick = { AppSettingsRepository.setKeyColor(0) },
+            onClick = { repo.keyColor = 0 },
         )
         PresetKeyColors.forEach { color ->
             KeyColorSwatchMaterial(
                 keyColor = color,
                 selected = currentKeyColor == color,
-                onClick = { AppSettingsRepository.setKeyColor(color) },
+                onClick = { repo.keyColor = color },
             )
         }
     }

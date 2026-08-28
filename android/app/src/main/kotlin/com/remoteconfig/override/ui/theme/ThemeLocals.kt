@@ -7,9 +7,9 @@ import com.remoteconfig.override.settings.UiMode
 
 val LocalUiMode = staticCompositionLocalOf { UiMode.Miuix }
 
-// 性能开关：默认必须为 false，由 MainActivity 显式 provide（对齐 KernelSU Theme.kt:135-139）
-val LocalEnableGlass = staticCompositionLocalOf { false }
-val LocalEnableGlassBlur = staticCompositionLocalOf { false }
+// 性能开关（LocalEnableBlur / LocalEnableFloatingBottomBar / LocalEnableFloatingBottomBarBlur /
+// LocalEnableNavigationBadge）定义在 Theme.kt（对齐 KernelSU Theme.kt:133-141），
+// 默认必须为 false，由 MainActivity 显式 provide。
 
 /**
  * 窗口宽度尺寸类（Google 标准 WindowSizeClass，Task 12）。
@@ -24,4 +24,3 @@ val LocalWindowWidthClass = staticCompositionLocalOf { WindowWidthSizeClass.Comp
 @Composable
 fun isExpandedWidth(): Boolean =
     LocalWindowWidthClass.current == WindowWidthSizeClass.Expanded
-

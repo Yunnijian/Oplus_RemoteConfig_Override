@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
-import com.remoteconfig.override.settings.AppSettingsRepository
+import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -45,10 +46,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * 对齐 KernelSU `ColorPaletteScreenMiuix.kt` 结构：
  * `Scaffold + TopAppBar(返回键) + Card 分组`。四组内容：
  * 预设强调色卡（首项「跟随默认」keyColor=0，选中描边高亮）/ 调色板风格 /
- * 颜色规范 / 恢复默认。所有写入即时调 [AppSettingsRepository] setter，主题即时响应。
+ * 颜色规范 / 恢复默认。所有写入即时调 [com.remoteconfig.override.settings.SettingsRepositoryImpl] setter，主题即时响应。
  */
 @Composable
 fun ColorPaletteContentMiuix(onBack: () -> Unit) {
+    // R1：数据源换为 KernelSU 风格 SettingsRepository（取色页 UI 不重写，R4 再做）
+    val repo = remember { SettingsRepositoryImpl() }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -86,13 +89,13 @@ fun ColorPaletteContentMiuix(onBack: () -> Unit) {
                 val styles = PaletteStyle.entries
                 OverlayDropdownPreference(
                     title = "调色板风格",
-                    summary = paletteStyleLabel(AppSettingsRepository.paletteStyle),
+                    summary = paletteStyleLabel(repo.colorStyle),
                     items = styles.map { paletteStyleLabel(it.name) },
                     selectedIndex = styles
-                        .indexOfFirst { it.name == AppSettingsRepository.paletteStyle }
+                        .indexOfFirst { it.name == repo.colorStyle }
                         .coerceAtLeast(0),
                     onSelectedIndexChange = { index ->
-                        AppSettingsRepository.setPaletteStyle(styles[index].name)
+                        repo.colorStyle = styles[index].name
                     },
                 )
             }
@@ -102,13 +105,13 @@ fun ColorPaletteContentMiuix(onBack: () -> Unit) {
                 val specs = ColorSpec.SpecVersion.entries.filter { it.name != "Default" }
                 OverlayDropdownPreference(
                     title = "颜色规范",
-                    summary = colorSpecLabel(AppSettingsRepository.colorSpec),
+                    summary = colorSpecLabel(repo.colorSpec),
                     items = specs.map { colorSpecLabel(it.name) },
                     selectedIndex = specs
-                        .indexOfFirst { it.name == AppSettingsRepository.colorSpec }
+                        .indexOfFirst { it.name == repo.colorSpec }
                         .coerceAtLeast(0),
                     onSelectedIndexChange = { index ->
-                        AppSettingsRepository.setColorSpec(specs[index].name)
+                        repo.colorSpec = specs[index].name
                     },
                 )
             }
@@ -133,9 +136,9 @@ fun ColorPaletteContentMiuix(onBack: () -> Unit) {
                     TextButton(
                         text = "恢复默认取色",
                         onClick = {
-                            AppSettingsRepository.setKeyColor(0)
-                            AppSettingsRepository.setPaletteStyle("TonalSpot")
-                            AppSettingsRepository.setColorSpec("SPEC_2025")
+                            repo.keyColor = 0
+                            repo.colorStyle = "TonalSpot"
+                            repo.colorSpec = "SPEC_2025"
                         },
                         colors = MiuixButtonDefaults.textButtonColorsPrimary(),
                     )
@@ -149,7 +152,8 @@ fun ColorPaletteContentMiuix(onBack: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PresetColorGridMiuix(modifier: Modifier = Modifier) {
-    val currentKeyColor = AppSettingsRepository.keyColor
+    val repo = remember { SettingsRepositoryImpl() }
+    val currentKeyColor = repo.keyColor
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -158,13 +162,13 @@ private fun PresetColorGridMiuix(modifier: Modifier = Modifier) {
         KeyColorSwatchMiuix(
             keyColor = 0,
             selected = currentKeyColor == 0,
-            onClick = { AppSettingsRepository.setKeyColor(0) },
+            onClick = { repo.keyColor = 0 },
         )
         PresetKeyColors.forEach { color ->
             KeyColorSwatchMiuix(
                 keyColor = color,
                 selected = currentKeyColor == color,
-                onClick = { AppSettingsRepository.setKeyColor(color) },
+                onClick = { repo.keyColor = color },
             )
         }
     }
