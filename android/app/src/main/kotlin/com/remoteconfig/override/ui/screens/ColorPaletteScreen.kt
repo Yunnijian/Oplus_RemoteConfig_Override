@@ -11,36 +11,6 @@ import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
 
-/** 强调色下拉预设名（与 keyColorOptions 一一对应；首项「跟随默认」= keyColor 0）。 */
-internal val KeyColorNames: List<String> = listOf(
-    "跟随默认",
-    "红色", "粉色", "紫色", "深紫色", "靛蓝色", "蓝色", "青色", "蓝绿色",
-    "绿色", "黄色", "琥珀色", "橙色", "棕色", "蓝灰色", "樱花色",
-)
-
-/** PaletteStyle 枚举名 → 中文标签（Miuix / Material 双实现共用）。 */
-private val PaletteStyleLabelMap: Map<String, String> = mapOf(
-    "TonalSpot" to "主色调",
-    "Neutral" to "中性色",
-    "Vibrant" to "活力色",
-    "Expressive" to "表现色",
-    "Rainbow" to "彩虹",
-    "FruitSalad" to "水果沙拉",
-    "Monochrome" to "单色",
-    "Fidelity" to "保真色",
-    "Content" to "内容色",
-)
-
-/** 颜色规范枚举名 → 中文标签。 */
-private val ColorSpecLabelMap: Map<String, String> = mapOf(
-    "SPEC_2021" to "规范 2021",
-    "SPEC_2025" to "规范 2025",
-)
-
-internal fun paletteStyleLabel(name: String): String = PaletteStyleLabelMap[name] ?: name
-
-internal fun colorSpecLabel(name: String): String = ColorSpecLabelMap[name] ?: name
-
 /**
  * 取色屏状态 — 对齐 KernelSU `ColorPaletteUiState.kt`。
  * 字段来自 [com.remoteconfig.override.settings.SettingsRepository]（SharedPreferences 即时读写）。
@@ -52,6 +22,12 @@ data class ColorPaletteUiState(
     val keyColor: Int,
     val colorStyle: String,
     val colorSpec: String,
+    val enableBlur: Boolean,
+    val enableFloatingBottomBar: Boolean,
+    val enableFloatingBottomBarBlur: Boolean,
+    val enableNavigationBadge: Boolean,
+    val enablePredictiveBack: Boolean,
+    val pageScale: Float,
     val currentColorMode: ColorMode,
     val currentPaletteStyle: PaletteStyle,
     val currentColorSpec: ColorSpec.SpecVersion,
@@ -71,6 +47,12 @@ data class ColorPaletteScreenActions(
     val onSetColorMode: (ColorMode) -> Unit,
     val onSetColorStyle: (String) -> Unit,
     val onSetColorSpec: (String) -> Unit,
+    val onSetEnableBlur: (Boolean) -> Unit,
+    val onSetEnableFloatingBottomBar: (Boolean) -> Unit,
+    val onSetEnableFloatingBottomBarBlur: (Boolean) -> Unit,
+    val onSetEnableNavigationBadge: (Boolean) -> Unit,
+    val onSetEnablePredictiveBack: (Boolean) -> Unit,
+    val onSetPageScale: (Float) -> Unit,
 )
 
 /**
@@ -90,6 +72,12 @@ fun ColorPaletteScreen() {
         keyColor = repo.keyColor,
         colorStyle = repo.colorStyle,
         colorSpec = repo.colorSpec,
+        enableBlur = repo.enableBlur,
+        enableFloatingBottomBar = repo.enableFloatingBottomBar,
+        enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur,
+        enableNavigationBadge = repo.enableNavigationBadge,
+        enablePredictiveBack = repo.enablePredictiveBack,
+        pageScale = repo.pageScale,
         currentColorMode = ColorMode.fromValue(repo.themeMode),
         currentPaletteStyle = try {
             PaletteStyle.valueOf(repo.colorStyle)
@@ -111,6 +99,12 @@ fun ColorPaletteScreen() {
             onSetColorMode = { repo.themeMode = it.value },
             onSetColorStyle = { repo.colorStyle = it },
             onSetColorSpec = { repo.colorSpec = it },
+            onSetEnableBlur = { repo.enableBlur = it },
+            onSetEnableFloatingBottomBar = { repo.enableFloatingBottomBar = it },
+            onSetEnableFloatingBottomBarBlur = { repo.enableFloatingBottomBarBlur = it },
+            onSetEnableNavigationBadge = { repo.enableNavigationBadge = it },
+            onSetEnablePredictiveBack = { repo.enablePredictiveBack = it },
+            onSetPageScale = { repo.pageScale = it },
         )
     }
     when (LocalUiMode.current) {

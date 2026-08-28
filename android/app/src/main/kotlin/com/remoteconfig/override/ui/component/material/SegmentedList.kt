@@ -2,10 +2,17 @@
 
 package com.remoteconfig.override.ui.component.material
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenuItem
@@ -21,22 +28,44 @@ import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 
 val LocalListItemShapes = compositionLocalOf<ListItemShapes?> { null }
+
+private val SegmentedOuterRadius = 16.dp
+private val SegmentedInnerRadius = 4.dp
+private const val SegmentedSpringStiffness = 800f
+private const val SegmentedSpringDamping = 0.9f
+
+@DslMarker
+annotation class SegmentedColumnDsl
 
 @Composable
 private fun defaultSegmentedColors(): ListItemColors = ListItemDefaults.segmentedColors(
@@ -226,4 +255,208 @@ fun SegmentedDropdownItem(
             }
         }
     }
+}
+
+/**
+ * 分段列（静态版）— 对齐 KernelSU `SegmentedColumn`。
+ * [visibleLen] 用于控制分组中「可见」项的 shape 计算（0 = 全部可见）。
+ */
+@Composable
+fun SegmentedColumn(
+    modifier: Modifier = Modifier,
+    title: String = "",
+    visibleLen: Int = 0,
+    content: List<@Composable () -> Unit>,
+) {
+    if (content.isEmpty()) return
+
+    Column(modifier = modifier) {
+        if (title.isNotEmpty()) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = colorScheme.primary,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            content.forEachIndexed { index, itemContent ->
+                CompositionLocalProvider(
+                    LocalListItemShapes provides defaultSingleSegmentedShape(
+                        index = index,
+                        count = if (visibleLen > 0) visibleLen else content.size
+                    ),
+                ) {
+                    itemContent()
+                }
+            }
+        }
+    }
+}
+
+/** 分段列 DSL 作用域 — 对齐 KernelSU `SegmentedColumnScope`（支持按 visible 动画）。 */
+@SegmentedColumnDsl
+class SegmentedColumnScope {
+    internal data class Entry(
+        val key: Any?,
+        val visible: Boolean,
+        val content: @Composable () -> Unit,
+    )
+
+    internal val entries = mutableListOf<Entry>()
+
+    fun item(
+        key: Any? = null,
+        visible: Boolean = true,
+        content: @Composable () -> Unit,
+    ) {
+        entries.add(Entry(key ?: entries.size, visible, content))
+    }
+}
+
+/**
+ * 分段列（动态版）— 对齐 KernelSU `SegmentedColumn`。
+ * 项按 `visible` 以 spring 动画伸缩（首/末可见项为大圆角，隐藏项压缩）。
+ */
+@Composable
+fun SegmentedColumn(
+    modifier: Modifier = Modifier,
+    title: String = "",
+    content: SegmentedColumnScope.() -> Unit,
+) {
+    val entries = SegmentedColumnScope().apply(content).entries
+    if (entries.isEmpty()) return
+
+    Column(modifier = modifier) {
+        if (title.isNotEmpty()) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = colorScheme.primary,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+            )
+        }
+
+        val floatSpring = spring<Float>(SegmentedSpringDamping, SegmentedSpringStiffness)
+        val dpSpring = spring<Dp>(SegmentedSpringDamping, SegmentedSpringStiffness)
+
+        val progresses = entries.mapIndexed { index, entry ->
+            key(entry.key ?: index) {
+                animateFloatAsState(
+                    targetValue = if (entry.visible) 1f else 0f,
+                    animationSpec = floatSpring,
+                    label = "SegmentedProgress"
+                )
+            }
+        }
+
+        val firstVisible = entries.indexOfFirst { it.visible }
+        val lastVisible = entries.indexOfLast { it.visible }
+
+        Layout(
+            content = {
+                entries.forEachIndexed { index, entry ->
+                    key(entry.key ?: index) {
+                        val isFirst = if (firstVisible == -1) index == 0 else index == firstVisible
+                        val isLast = if (lastVisible == -1) index == entries.lastIndex else index == lastVisible
+
+                        val topRadius by animateDpAsState(
+                            if (isFirst) SegmentedOuterRadius else SegmentedInnerRadius,
+                            dpSpring, label = "SegmentedTopRadius"
+                        )
+                        val bottomRadius by animateDpAsState(
+                            if (isLast) SegmentedOuterRadius else SegmentedInnerRadius,
+                            dpSpring, label = "SegmentedBottomRadius"
+                        )
+                        val gap by animateDpAsState(
+                            if (isFirst) 0.dp else ListItemDefaults.SegmentedGap,
+                            dpSpring, label = "SegmentedGap"
+                        )
+
+                        val shape = RoundedCornerShape(
+                            topStart = topRadius, topEnd = topRadius,
+                            bottomStart = bottomRadius, bottomEnd = bottomRadius
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .zIndex(if (entry.visible) (entries.size - index).toFloat() else -index.toFloat())
+                                .graphicsLayer {
+                                    val progress = progresses[index].value.coerceAtLeast(0f)
+                                    clip = true
+                                    this.shape = object : Shape {
+                                        override fun createOutline(
+                                            size: Size,
+                                            layoutDirection: LayoutDirection,
+                                            density: Density,
+                                        ): Outline = Outline.Rectangle(Rect(0f, 0f, size.width, size.height * progress))
+                                    }
+                                    alpha = (progress * 1.5f).coerceIn(0f, 1f)
+                                }
+                        ) {
+                            CompositionLocalProvider(
+                                LocalListItemShapes provides ListItemDefaults.segmentedShapes(0, 1).copy(shape = shape)
+                            ) {
+                                Column(modifier = Modifier.padding(top = gap)) {
+                                    entry.content()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ) { measurables, constraints ->
+            val placeables = measurables.map { it.measure(constraints) }
+            val positions = IntArray(placeables.size)
+            var y = 0f
+            placeables.forEachIndexed { index, placeable ->
+                positions[index] = y.roundToInt()
+                y += placeable.height * progresses[index].value.coerceAtLeast(0f)
+            }
+            layout(constraints.maxWidth, y.roundToInt().coerceAtLeast(0)) {
+                placeables.forEachIndexed { index, placeable ->
+                    placeable.placeRelative(0, positions[index])
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 分段开关项 — 对齐 KernelSU `SegmentedSwitchItem`：
+ * 前导图标 + 标题/摘要 + 末尾 [ExpressiveSwitch]，整行点击切换。
+ */
+@Composable
+fun SegmentedSwitchItem(
+    icon: ImageVector? = null,
+    title: String,
+    summary: String? = null,
+    colors: ListItemColors = defaultSegmentedColors(),
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+
+    SegmentedListItem(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            onCheckedChange(!checked)
+        },
+        enabled = enabled,
+        interactionSource = interactionSource,
+        colors = colors,
+        headlineContent = { Text(title) },
+        leadingContent = icon?.let { { Icon(it, title) } },
+        trailingContent = {
+            ExpressiveSwitch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = null,
+                interactionSource = interactionSource,
+            )
+        },
+        supportingContent = summary?.let { { Text(it) } }
+    )
 }

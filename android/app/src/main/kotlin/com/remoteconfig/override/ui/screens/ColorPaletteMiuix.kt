@@ -1,6 +1,7 @@
 package com.remoteconfig.override.ui.screens
 
 import android.annotation.SuppressLint
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,11 +32,23 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.MenuOpen
+import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.DesignServices
+import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,27 +75,39 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
- * 主题取色屏 — Miuix 实现（完整对齐 KernelSU `ColorPaletteScreenMiuix.kt` 结构）。
+ * 强调色下拉预设名 — 完整对齐 KernelSU `ColorPaletteScreenMiuix.kt` 的 colorItems
+ * （strings.xml 中文文案硬编码，顺序与 keyColorOptions 一一对应；首项「默认」= keyColor 0）。
+ */
+private val KeyColorNames: List<String> = listOf(
+    "默认",
+    "红色", "粉色", "紫色", "深紫", "靛青", "蓝色", "青色", "青绿",
+    "绿色", "黄色", "琥珀", "橙色", "棕色", "灰蓝", "樱花",
+)
+
+/**
+ * 主题取色屏 — Miuix 实现（完整对齐 KernelSU `ColorPaletteScreenMiuix.kt` 分组结构）。
  *
- * 顶栏返回 + 主题预览区（keyColor 实时预览）→ 主题模式 TabRow → 分组 Card：
- * Monet 开关（miuixMonet）+ 强调色下拉（keyColorOptions 预设色，keyColor=0 跟随默认）
- * + 自定义色（keyColor != 0 时显示调色板风格 colorStyle / 颜色规范 colorSpec 下拉）。
- *
- * 模糊/底栏设置组已在我们设置页，此处按需求不移植（对照 KernelSU 原文移除）。
- * 数据源走 [com.remoteconfig.override.settings.SettingsRepositoryImpl]，写入即时生效。
+ * 主题模式 TabRow → 第一组 Card（启用 Monet 颜色 / 强调色 / 色彩风格 / 色彩标准）
+ * → 第二组 Card（模糊 / 悬浮底栏 / 液态玻璃 / 导航栏角标）
+ * → 第三组 Card（预测性返回手势 / 界面缩放）。
+ * 全部文案为 KernelSU values-zh-rCN 中文，硬编码。
  */
 @Composable
 fun ColorPaletteContentMiuix(
@@ -94,15 +119,17 @@ fun ColorPaletteContentMiuix(
     val backdrop = rememberBlurBackdrop(enableBlurState)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+    val uiState = state
     val currentColorMode = state.currentColorMode
     val isDark = currentColorMode.isDark || currentColorMode.isSystem && isSystemInDarkTheme()
+    val showScaleDialog = rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             BlurredBar(backdrop) {
                 TopAppBar(
                     color = barColor,
-                    title = "主题取色",
+                    title = "主题设置",
                     navigationIcon = {
                         IconButton(
                             onClick = actions.onBack
@@ -139,9 +166,11 @@ fun ColorPaletteContentMiuix(
                 item {
                     Spacer(modifier = Modifier.height(32.dp))
                     ThemePreviewCardMiuix(
-                        keyColor = state.keyColor,
+                        keyColor = uiState.keyColor,
                         isDark = isDark,
-                        miuixMonet = state.miuixMonet,
+                        miuixMonet = uiState.miuixMonet,
+                        enableFloatingBottomBar = uiState.enableFloatingBottomBar,
+                        enableFloatingBottomBarBlur = uiState.enableFloatingBottomBarBlur,
                         paletteStyle = state.currentPaletteStyle,
                         colorSpec = state.currentColorSpec,
                     )
@@ -150,36 +179,36 @@ fun ColorPaletteContentMiuix(
                     val themeItems = listOf("跟随系统", "浅色", "深色")
                     TabRow(
                         tabs = themeItems,
-                        selectedTabIndex = (if (state.themeMode >= 3) state.themeMode - 3 else state.themeMode).coerceIn(0, 2),
+                        selectedTabIndex = (if (uiState.themeMode >= 3) uiState.themeMode - 3 else uiState.themeMode).coerceIn(0, 2),
                         onTabSelected = { index ->
                             actions.onSetThemeMode(index)
                         },
                     )
 
+                    // 第一组：主题
                     Card(
                         modifier = Modifier
                             .padding(top = 12.dp)
                             .fillMaxWidth(),
                     ) {
                         SwitchPreference(
-                            title = "动态取色 Monet",
-                            summary = "跟随系统壁纸取色",
+                            title = "启用 Monet 颜色",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.Wallpaper,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "动态取色 Monet",
+                                    contentDescription = "启用 Monet 颜色",
                                     tint = colorScheme.onBackground
                                 )
                             },
-                            checked = state.miuixMonet,
+                            checked = uiState.miuixMonet,
                             onCheckedChange = {
                                 actions.onSetMiuixMonet(it)
                             }
                         )
 
                         AnimatedVisibility(
-                            visible = state.miuixMonet
+                            visible = uiState.miuixMonet
                         ) {
                             Column {
                                 val colorItems = KeyColorNames
@@ -195,29 +224,29 @@ fun ColorPaletteContentMiuix(
                                             tint = colorScheme.onBackground
                                         )
                                     },
-                                    selectedIndex = colorValues.indexOf(state.keyColor).takeIf { it >= 0 } ?: 0,
+                                    selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
                                     onSelectedIndexChange = { index ->
                                         actions.onSetKeyColor(colorValues[index])
                                     }
                                 )
 
                                 AnimatedVisibility(
-                                    visible = state.keyColor != 0
+                                    visible = uiState.keyColor != 0
                                 ) {
                                     Column {
                                         val styles = PaletteStyle.entries
                                         OverlayDropdownPreference(
-                                            title = "调色板风格",
+                                            title = "色彩风格",
                                             startAction = {
                                                 Icon(
                                                     Icons.Rounded.Style,
                                                     modifier = Modifier.padding(end = 6.dp),
-                                                    contentDescription = "调色板风格",
+                                                    contentDescription = "色彩风格",
                                                     tint = colorScheme.onBackground
                                                 )
                                             },
-                                            items = styles.map { paletteStyleLabel(it.name) },
-                                            selectedIndex = styles.indexOfFirst { it.name == state.colorStyle }.coerceAtLeast(0),
+                                            items = styles.map { it.name },
+                                            selectedIndex = styles.indexOfFirst { it.name == uiState.colorStyle }.coerceAtLeast(0),
                                             onSelectedIndexChange = { index ->
                                                 actions.onSetColorStyle(styles[index].name)
                                             }
@@ -225,17 +254,17 @@ fun ColorPaletteContentMiuix(
 
                                         val specs = ColorSpec.SpecVersion.entries
                                         OverlayDropdownPreference(
-                                            title = "颜色规范",
+                                            title = "色彩标准",
                                             startAction = {
                                                 Icon(
                                                     Icons.Rounded.DesignServices,
                                                     modifier = Modifier.padding(end = 6.dp),
-                                                    contentDescription = "颜色规范",
+                                                    contentDescription = "色彩标准",
                                                     tint = colorScheme.onBackground
                                                 )
                                             },
-                                            items = specs.map { colorSpecLabel(it.name) },
-                                            selectedIndex = specs.indexOfFirst { it.name == state.colorSpec }.coerceAtLeast(0),
+                                            items = specs.map { it.name },
+                                            selectedIndex = specs.indexOfFirst { it.name == uiState.colorSpec }.coerceAtLeast(0),
                                             onSelectedIndexChange = { index ->
                                                 actions.onSetColorSpec(specs[index].name)
                                             }
@@ -244,6 +273,154 @@ fun ColorPaletteContentMiuix(
                                 }
                             }
                         }
+                    }
+
+                    // 第二组：效果
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            SwitchPreference(
+                                title = "模糊",
+                                summary = "启用顶栏和底栏的模糊效果",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.BlurOn,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = "模糊",
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableBlur,
+                                onCheckedChange = {
+                                    actions.onSetEnableBlur(it)
+                                }
+                            )
+                        }
+                        SwitchPreference(
+                            title = "悬浮底栏",
+                            summary = "使用 Apple 风格的悬浮底栏",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.CallToAction,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "悬浮底栏",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            checked = uiState.enableFloatingBottomBar,
+                            onCheckedChange = {
+                                actions.onSetEnableFloatingBottomBar(it)
+                            }
+                        )
+                        AnimatedVisibility(visible = uiState.enableFloatingBottomBar && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            SwitchPreference(
+                                title = "液态玻璃",
+                                summary = "启用悬浮底栏的液态玻璃效果",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.WaterDrop,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = "液态玻璃",
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enableFloatingBottomBarBlur,
+                                onCheckedChange = {
+                                    actions.onSetEnableFloatingBottomBarBlur(it)
+                                }
+                            )
+                        }
+                        SwitchPreference(
+                            title = "导航栏角标",
+                            summary = "在导航栏显示已授权应用和已启用模块数量",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.Pin,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "导航栏角标",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            checked = uiState.enableNavigationBadge,
+                            onCheckedChange = {
+                                actions.onSetEnableNavigationBadge(it)
+                            }
+                        )
+                    }
+
+                    // 第三组：其他
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            SwitchPreference(
+                                title = "预测性返回手势",
+                                summary = "启用对预测性返回手势的支持",
+                                startAction = {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.MenuOpen,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = "预测性返回手势",
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                checked = uiState.enablePredictiveBack,
+                                onCheckedChange = {
+                                    actions.onSetEnablePredictiveBack(it)
+                                }
+                            )
+                        }
+
+                        var sliderValue by remember(uiState.pageScale) { mutableFloatStateOf(uiState.pageScale) }
+                        ArrowPreference(
+                            title = "界面缩放",
+                            summary = "调整全局显示比例",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.AspectRatio,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "界面缩放",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            endActions = {
+                                Text(
+                                    text = "${(sliderValue * 100).toInt()}%",
+                                    color = colorScheme.onSurfaceVariantActions,
+                                )
+                            },
+                            onClick = { showScaleDialog.value = !showScaleDialog.value },
+                            holdDownState = showScaleDialog.value,
+                            bottomAction = {
+                                Slider(
+                                    value = sliderValue,
+                                    onValueChange = {
+                                        sliderValue = it
+                                    },
+                                    onValueChangeFinished = {
+                                        actions.onSetPageScale(sliderValue)
+                                    },
+                                    valueRange = 0.8f..1.1f,
+                                    showKeyPoints = true,
+                                    keyPoints = listOf(0.8f, 0.9f, 1f, 1.1f),
+                                    magnetThreshold = 0.01f,
+                                    hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+                                )
+                            },
+                        )
+                        ScaleDialog(
+                            show = showScaleDialog.value,
+                            onDismissRequest = { showScaleDialog.value = false },
+                            volumeState = { uiState.pageScale },
+                            onVolumeChange = {
+                                actions.onSetPageScale(it)
+                            }
+                        )
                     }
                 }
                 item {
@@ -261,9 +438,74 @@ fun ColorPaletteContentMiuix(
 }
 
 /**
+ * 界面缩放对话框 — 对齐 KernelSU `ScaleDialog.kt`（用本项目已验证的 [WindowDialog]）。
+ * 点击「界面缩放」行展开，支持键盘输入 80% - 110% 精确数值。
+ */
+@Composable
+private fun ScaleDialog(
+    show: Boolean,
+    onDismissRequest: () -> Unit,
+    volumeState: () -> Float,
+    onVolumeChange: (Float) -> Unit,
+) {
+    WindowDialog(
+        show = show,
+        title = "界面缩放",
+        summary = "80% - 110%",
+        onDismissRequest = onDismissRequest,
+        content = {
+            var text by remember(show) {
+                mutableStateOf((volumeState() * 100).toInt().toString())
+            }
+            top.yukonga.miuix.kmp.basic.TextField(
+                modifier = Modifier.padding(bottom = 16.dp),
+                value = text,
+                maxLines = 1,
+                trailingIcon = {
+                    Text(
+                        text = "%",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = colorScheme.onSurfaceVariantActions,
+                    )
+                },
+                onValueChange = { newValue ->
+                    if (newValue.isEmpty()) {
+                        text = ""
+                    } else {
+                        val valid = newValue.all { it.isDigit() }
+                        if (valid) {
+                            text = newValue
+                        }
+                    }
+                },
+            )
+            Row(horizontalArrangement = Arrangement.SpaceBetween) {
+                top.yukonga.miuix.kmp.basic.TextButton(
+                    text = stringResource(android.R.string.cancel),
+                    onClick = onDismissRequest,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(20.dp))
+                top.yukonga.miuix.kmp.basic.TextButton(
+                    text = stringResource(android.R.string.ok),
+                    onClick = {
+                        val parsed = text.toIntOrNull()
+                        val clamped = parsed?.coerceIn(80, 110) ?: (volumeState() * 100).toInt()
+                        onVolumeChange(clamped / 100f)
+                        onDismissRequest()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+        }
+    )
+}
+
+/**
  * 主题预览卡 — 对齐 KernelSU `ThemePreviewCardMiuix`。
  * keyColor 实时预览：Monet 开启时用 materialkolor 动态色；否则回落到当前 Miuix 主题色。
- * 宽屏（[isExpandedWidth]）预览左侧导航 rail，窄屏预览底部导航条。
+ * 宽屏（[isExpandedWidth]）预览左侧导航 rail，窄屏预览底部导航条（悬浮底栏开启时预览悬浮样式）。
  */
 @SuppressLint("ConfigurationScreenWidthHeight")
 @Composable
@@ -271,6 +513,8 @@ private fun ThemePreviewCardMiuix(
     keyColor: Int,
     isDark: Boolean,
     miuixMonet: Boolean,
+    enableFloatingBottomBar: Boolean = false,
+    enableFloatingBottomBarBlur: Boolean = false,
     paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     colorSpec: ColorSpec.SpecVersion = ColorSpec.SpecVersion.SPEC_2021,
 ) {
@@ -405,7 +649,38 @@ private fun ThemePreviewCardMiuix(
                 }
             } else {
                 content()
+            }
 
+            if (!useRail && enableFloatingBottomBar) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (enableFloatingBottomBarBlur) navBarColor.copy(alpha = 0.5f)
+                                else navBarColor
+                            )
+                            .border(0.5.dp, textColor.copy(alpha = 0.1f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(4) {
+                            Box(
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(if (it == 0) iconColor else textColor)
+                            )
+                        }
+                    }
+                }
+            } else if (!useRail) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
