@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.model.GameConfigSummary
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -34,11 +35,15 @@ import com.remoteconfig.override.viewmodel.MainViewModel
  * 由原 GameListScreen.kt 的 ConfigListContent 迁入，仅改名并去掉 MainScreen 不再使用的
  * `onBack`/`isActive`/`modifier` 参数；`onGameClick`/`onNewConfig` 只回调不内部导航
  * （导航由 MainScreen 的 ConfigListPage 回调完成，见 Step 4）。
+ *
+ * [bottomInnerPadding]：底栏占位高度。Pager 不加 bottom padding（内容需铺到底栏下方供
+ * 悬浮玻璃采样折射），留白由 LazyColumn 末尾 `item { Spacer }` 与 FAB 的 bottom padding 消费。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ConfigListContentMaterial(
     viewModel: MainViewModel,
+    bottomInnerPadding: Dp = 0.dp,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
@@ -128,6 +133,8 @@ fun ConfigListContentMaterial(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showNewDialog = true },
+                // FAB 抬到底栏上方（Pager 已不加 bottom padding）
+                modifier = Modifier.padding(bottom = bottomInnerPadding),
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Icon(Icons.Filled.Add, "新建配置", tint = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -221,6 +228,8 @@ fun ConfigListContentMaterial(
                             )
                         }
                     }
+                    // 底栏留白：由页面自己消费（对齐 KernelSU 的末尾 Spacer 模式）
+                    item { Spacer(Modifier.height(bottomInnerPadding)) }
                 }
             }
         }

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -93,11 +94,16 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  *   （不传 BasicComponent 的 onClick，避免与 combinedClickable 双重触发；indication 用 null）
  * - 对话框全部用 WindowDialog + TextButton 双按钮（对齐 KernelSU DialogMiuix.kt 用法）
  * - 溢出菜单（刷新配置 / 清除数据）用 OverlayListPopup + ListPopupColumn + DropdownImpl
+ *
+ * [bottomInnerPadding]：底栏占位高度。Pager 不加 bottom padding（内容需铺到底栏下方供
+ * 悬浮玻璃采样折射），留白由 LazyColumn 末尾 `item { Spacer }`（对齐 KernelSU
+ * SuperUserMiuix.kt:481）与 FAB 的 bottom padding（对齐 ModuleMiuix.kt:448）消费。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConfigListContentMiuix(
     viewModel: MainViewModel,
+    bottomInnerPadding: Dp = 0.dp,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
@@ -213,7 +219,11 @@ fun ConfigListContentMiuix(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showNewDialog = true }) {
+            FloatingActionButton(
+                onClick = { showNewDialog = true },
+                // FAB 抬到底栏上方（对齐 KernelSU ModuleMiuix.kt:448）
+                modifier = Modifier.padding(bottom = bottomInnerPadding),
+            ) {
                 Icon(
                     imageVector = MiuixIcons.Add,
                     contentDescription = "新建配置",
@@ -296,6 +306,10 @@ fun ConfigListContentMiuix(
                                 },
                             )
                         }
+                    }
+                    // 底栏留白：由页面自己消费（对齐 KernelSU SuperUserMiuix.kt:481）
+                    item {
+                        Spacer(Modifier.height(bottomInnerPadding))
                     }
                 }
             }

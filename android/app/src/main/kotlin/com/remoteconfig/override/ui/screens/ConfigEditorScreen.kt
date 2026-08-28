@@ -40,6 +40,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
@@ -173,9 +174,18 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
  * 注意：loadConfig 内部自己 launch 协程（非 suspend），直接调用即可。
  * 若该包名已在编辑中（含 MainScreen onNewConfig 的 createNewConfig 模板），
  * 跳过重载以保留未保存的编辑 / 新建模板。
+ *
+ * [bottomInnerPadding]：双窗右侧窗格处在 Pager 内，Pager 已不加 bottom padding
+ * （内容需铺到底栏下方供悬浮玻璃采样折射），因此编辑器主体自行扣除底栏高度，
+ * 避免最后几行文本被系统导航栏 / 底栏遮挡。
  */
 @Composable
-fun ConfigEditorPane(viewModel: MainViewModel, packageName: String, onClosed: () -> Unit) {
+fun ConfigEditorPane(
+    viewModel: MainViewModel,
+    packageName: String,
+    onClosed: () -> Unit,
+    bottomInnerPadding: Dp = 0.dp,
+) {
     val editingPackageName by viewModel.editingPackageName.collectAsState()
     LaunchedEffect(packageName) {
         if (editingPackageName != packageName) {
@@ -183,8 +193,14 @@ fun ConfigEditorPane(viewModel: MainViewModel, packageName: String, onClosed: ()
         }
     }
     when (LocalUiMode.current) {
-        UiMode.Miuix -> ConfigEditorContent(viewModel, onClosed, isMiuix = true, packageName = packageName, showBack = false)
-        UiMode.Material -> ConfigEditorContent(viewModel, onClosed, isMiuix = false, packageName = packageName, showBack = false)
+        UiMode.Miuix -> ConfigEditorContent(
+            viewModel, onClosed, isMiuix = true, packageName = packageName, showBack = false,
+            bottomInnerPadding = bottomInnerPadding,
+        )
+        UiMode.Material -> ConfigEditorContent(
+            viewModel, onClosed, isMiuix = false, packageName = packageName, showBack = false,
+            bottomInnerPadding = bottomInnerPadding,
+        )
     }
 }
 
@@ -196,6 +212,7 @@ private fun ConfigEditorContent(
     isMiuix: Boolean,
     packageName: String? = null,
     showBack: Boolean = true,
+    bottomInnerPadding: Dp = 0.dp,
 ) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
@@ -332,7 +349,13 @@ private fun ConfigEditorContent(
 
     // 编辑器主体（双模式共享）：自研核心原样保留，仅作为两个 Scaffold 分支共用的 content。
     val editorBody: @Composable (PaddingValues) -> Unit = { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                // 双窗窗格：Pager 不再代为扣除底栏高度，编辑器自己让出底部空间
+                .padding(bottom = bottomInnerPadding)
+        ) {
             if (isEditorLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

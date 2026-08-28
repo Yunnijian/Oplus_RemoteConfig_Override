@@ -10,10 +10,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.R
@@ -71,9 +77,13 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  * - TopAppBar 的 `title` 为 String（Task 7 同款用法）
  * - BasicComponent 的槽位名为 `startAction`/`endActions`（简报中的 leftAction/rightActions 在 0.9.3 不存在）
  * - TextButton 只接收 `text: String`（无 content 槽），故捐赠按钮用带 content 槽的 `Button`
+ *
+ * [bottomInnerPadding]：底栏占位高度，在滚动内容末尾用 `Spacer` 消费
+ * （对齐 KernelSU HomeMiuix.kt:84,177）。Pager 不加 bottom padding，内容需铺到底栏下方
+ * 供悬浮玻璃底栏采样折射。
  */
 @Composable
-fun HomeContentMiuix(viewModel: MainViewModel) {
+fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
     val systemStatus by viewModel.systemStatus.collectAsState()
     val cosaVersion by viewModel.cosaVersion.collectAsState()
     val context = LocalContext.current
@@ -88,6 +98,9 @@ fun HomeContentMiuix(viewModel: MainViewModel) {
     val scrollBehavior = MiuixScrollBehavior()
 
     Scaffold(
+        // 不消费底部 inset：内容必须能铺到悬浮玻璃底栏下方（底部留白由末尾 Spacer 承担），
+        // 与 ConfigListMiuix / SettingsMiuix 一致，对齐 KernelSU HomeMiuix.kt:100
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
                 title = "Color云控修改",
@@ -122,6 +135,8 @@ fun HomeContentMiuix(viewModel: MainViewModel) {
                     } catch (_: Exception) {}
                 },
             )
+            // 底栏留白：由页面自己消费（对齐 KernelSU HomeMiuix.kt:177）
+            Spacer(Modifier.height(bottomInnerPadding))
         }
     }
 

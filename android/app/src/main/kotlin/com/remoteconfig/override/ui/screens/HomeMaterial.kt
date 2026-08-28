@@ -22,6 +22,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.R
 import com.remoteconfig.override.ui.util.resolveDeviceName
@@ -33,11 +34,16 @@ import com.remoteconfig.override.viewmodel.MainViewModel
  * 视觉/行为与 Task 8 之前逐字保持（Root 状态卡 / 设备信息 / 作者·捐赠 / 源码卡 / 捐赠弹窗），
  * 仅删除了从未被 MainScreen 传递的 `isActive`/`onNavigateConfig` 参数；
  * `modifier` 在体内使用，保留默认值。
+ *
+ * [bottomInnerPadding]：底栏占位高度，在滚动内容末尾用 `Spacer` 消费
+ * （对齐 KernelSU HomeMaterial.kt:66,140）。原先硬编码的 `bottom = 96.dp` 由它替代，
+ * 因为 Pager 已不加 bottom padding（内容需铺到底栏下方供玻璃采样折射）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeContentMaterial(
     viewModel: MainViewModel,
+    bottomInnerPadding: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
     val systemStatus by viewModel.systemStatus.collectAsState()
@@ -76,7 +82,7 @@ fun HomeContentMaterial(
                     .padding(innerPadding)
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .verticalScroll(scrollState)
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // ── Root 状态卡 ──
@@ -234,6 +240,8 @@ fun HomeContentMaterial(
                         Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                // 底栏留白：由页面自己消费（对齐 KernelSU HomeMaterial.kt:140）
+                Spacer(Modifier.height(bottomInnerPadding))
             }
         }
     }

@@ -104,25 +104,25 @@ fun MainScreen(viewModel: MainViewModel) {
             Box(
                 modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier
             ) {
+                // Pager 不加 bottom padding（对齐 KernelSU）：内容必须铺满到底栏下方，
+                // 悬浮底栏的玻璃才有内容可采样折射。底部留白由各页面自己消费
+                // （bottomInnerPadding 透传给页面的 contentPadding）。
                 HorizontalPager(
-                    modifier = Modifier
-                        .padding(bottom = bottomInnerPadding)
-                        .then(
-                            if (enableFloatingBottomBar && enableFloatingBottomBarBlur) {
-                                Modifier.layerBackdrop(backdrop)
-                            } else {
-                                Modifier
-                            }
-                        ),
                     state = pagerState,
+                    modifier = if (enableFloatingBottomBar && enableFloatingBottomBarBlur) {
+                        Modifier.layerBackdrop(backdrop)
+                    } else {
+                        Modifier
+                    },
                     beyondViewportPageCount = if (contentReady) 3 else 0,
                     overscrollEffect = null,
                 ) { page ->
                     val isCurrentPage = page == settledPage
                     when (page) {
-                        0 -> if (isCurrentPage || contentReady) HomePage(viewModel, isCurrentPage)
+                        0 -> if (isCurrentPage || contentReady) HomePage(viewModel, bottomInnerPadding, isCurrentPage)
                         1 -> if (isCurrentPage || contentReady) ConfigListPage(
                             viewModel = viewModel,
+                            bottomInnerPadding = bottomInnerPadding,
                             isCurrentPage = isCurrentPage,
                             onGameClick = { pkg ->
                                 if (expanded) {
@@ -142,7 +142,7 @@ fun MainScreen(viewModel: MainViewModel) {
                             onDualPaneSelect = { dualPaneSelected = it },
                         )
 
-                        2 -> if (isCurrentPage || contentReady) SettingsContent()
+                        2 -> if (isCurrentPage || contentReady) SettingsContent(bottomInnerPadding)
                     }
                 }
             }

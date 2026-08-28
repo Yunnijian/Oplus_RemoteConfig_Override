@@ -15,6 +15,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
@@ -35,10 +37,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * 双窗（Task 12）：宽屏 [isExpandedWidth]（≥840dp）渲染 list-detail 双窗格
  * （左列表 + 右 [ConfigEditorPane]）；窄屏保持整页路由模式。列表实现不感知双窗，
  * 选中项高亮通过 [dualPaneSelected]（可选参数，默认 null = 窄屏不传入）下发。
+ *
+ * [bottomInnerPadding]：底栏（悬浮液态玻璃底栏 / 宽屏系统导航栏）占位高度。Pager 不加
+ * bottom padding（内容需铺到底栏下方供玻璃采样折射），留白由本页在 LazyColumn 末尾
+ * item Spacer + FAB bottom padding 消费；双窗右侧编辑器窗格同样透传。
  */
 @Composable
 fun ConfigListPage(
     viewModel: MainViewModel,
+    bottomInnerPadding: Dp = 0.dp,
     isCurrentPage: Boolean,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
@@ -58,7 +65,7 @@ fun ConfigListPage(
         // 宽屏：左列表 + 右编辑器双窗格
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth(0.42f)) {
-                ConfigListContentImpl(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
+                ConfigListContentImpl(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
             }
             VerticalDivider()
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -68,6 +75,7 @@ fun ConfigListPage(
                     ConfigEditorPane(
                         viewModel = viewModel,
                         packageName = dualPaneSelected,
+                        bottomInnerPadding = bottomInnerPadding,
                         onClosed = {
                             onDualPaneSelect("")
                             // Bug 3：双窗关闭也清理编辑态，避免编辑态残留跨模式泄漏
@@ -78,7 +86,7 @@ fun ConfigListPage(
             }
         }
     } else {
-        ConfigListContentImpl(viewModel, onGameClick, onNewConfig, dualPaneSelected)
+        ConfigListContentImpl(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected)
     }
 }
 
@@ -103,13 +111,14 @@ private fun EmptyPaneHint() {
 @Composable
 private fun ConfigListContentImpl(
     viewModel: MainViewModel,
+    bottomInnerPadding: Dp,
     onGameClick: (String) -> Unit,
     onNewConfig: (String) -> Unit,
     dualPaneSelected: String? = null,
     onDualPaneSelect: (String) -> Unit = {},
 ) {
     when (LocalUiMode.current) {
-        UiMode.Miuix -> ConfigListContentMiuix(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
-        UiMode.Material -> ConfigListContentMaterial(viewModel, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
+        UiMode.Miuix -> ConfigListContentMiuix(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
+        UiMode.Material -> ConfigListContentMaterial(viewModel, bottomInnerPadding, onGameClick, onNewConfig, dualPaneSelected, onDualPaneSelect)
     }
 }
