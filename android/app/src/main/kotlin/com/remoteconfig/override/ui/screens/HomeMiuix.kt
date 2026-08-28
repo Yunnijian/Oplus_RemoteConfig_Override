@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.R
+import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.MainViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
@@ -209,11 +210,14 @@ private fun RootStatusCard(systemStatus: MainViewModel.SystemStatus) {
 }
 
 // ── 设备信息卡 ──
+// 设备型号对齐 KernelSU：resolveDeviceName() 解析各厂商市场名（remember 缓存一次）。
+// 内核版本与 KernelSU Home 一致：Os.uname().release。
 @Composable
 private fun DeviceInfoCard(kernelVersion: String, cosaVersion: String) {
+    val deviceModel = remember { resolveDeviceName() }
     Card(Modifier.fillMaxWidth()) {
         Column {
-            BasicComponent(title = "设备型号", summary = "${Build.MANUFACTURER} ${Build.MODEL}")
+            BasicComponent(title = "设备型号", summary = deviceModel)
             BasicComponent(title = "安卓版本", summary = "Android ${Build.VERSION.RELEASE}")
             BasicComponent(title = "内核版本", summary = kernelVersion)
             BasicComponent(title = "应用增强服务", summary = "v$cosaVersion · com.oplus.cosa")

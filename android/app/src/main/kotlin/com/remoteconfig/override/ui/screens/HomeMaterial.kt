@@ -24,6 +24,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.R
+import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.MainViewModel
 
 /**
@@ -46,6 +47,8 @@ fun HomeContentMaterial(
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
     }
+    // 设备型号对齐 KernelSU：resolveDeviceName() 解析各厂商市场名（remember 缓存一次）。
+    val deviceModel = remember { resolveDeviceName() }
 
     var showDonateDialog by remember { mutableStateOf(false) }
     var donateImageId by remember { mutableIntStateOf(0) }
@@ -144,7 +147,7 @@ fun HomeContentMaterial(
                     elevation = CardDefaults.cardElevation(0.dp)
                 ) {
                     Column(Modifier.padding(24.dp)) {
-                        InfoCardItem(label = "设备型号", content = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}", icon = Icons.Filled.Smartphone)
+                        InfoCardItem(label = "设备型号", content = deviceModel, icon = Icons.Filled.Smartphone)
                         Spacer(Modifier.height(16.dp))
                         InfoCardItem(label = "安卓版本", content = "Android ${android.os.Build.VERSION.RELEASE}", icon = Icons.Filled.Android)
                         Spacer(Modifier.height(16.dp))
