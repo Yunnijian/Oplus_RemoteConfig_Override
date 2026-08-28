@@ -64,15 +64,14 @@ class MainPagerState(
     }
 
     fun syncPage() {
-        // 只在"滚动中（跟手）"或"已停稳（settledPage 到位）"时同步 selectedPage。
-        // 守卫：IME 弹出/窗口尺寸变化会让 Pager 短暂重排、currentPage 抖动（非滚动、非停稳），
-        // 此时不同步，避免 selectedPage 误跳到错误页（C1：横屏编辑器弹输入法跳设置页）。
-        // isNavigating=true（点击 tab 的程序滚动）时也不同步，避免被拉回。
+        // 用 settledPage（真正停稳的页）同步，不用 currentPage。
+        // 根因（C1）：输入法弹出 → 窗口 resize → Pager 重新布局时 isScrollInProgress=true
+        // 且 currentPage 跳到错误页（如 2），settledPage 仍是真实页（1）。
+        // 若用 currentPage 同步会把 selectedPage 带到错误页 → 页面"跳设置页"。
+        // settledPage 只在真正停稳后变化，IME resize 不影响它。
         if (isNavigating) return
-        if (pagerState.isScrollInProgress || pagerState.settledPage == pagerState.currentPage) {
-            if (selectedPage != pagerState.currentPage) {
-                selectedPage = pagerState.currentPage
-            }
+        if (selectedPage != pagerState.settledPage) {
+            selectedPage = pagerState.settledPage
         }
     }
 }
