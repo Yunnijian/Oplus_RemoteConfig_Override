@@ -65,9 +65,15 @@ private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
  *
  * 功能项：界面风格（Miuix/Material）+ 主题设置（→ Route.ColorPalette）+ 关于。
  * 其余主题字段（深色模式/动态取色/液态玻璃等）已移入主题设置页。
+ *
+ * [onOpenTheme]：主题设置项点击回调。null（窄屏）= push Route.ColorPalette（现状）；
+ * 非 null（宽屏双窗）= 由 SettingsContent 注入选中右侧 pane，不 push 路由。
  */
 @Composable
-fun SettingsContentMiuix(bottomInnerPadding: Dp = 0.dp) {
+fun SettingsContentMiuix(
+    bottomInnerPadding: Dp = 0.dp,
+    onOpenTheme: (() -> Unit)? = null,
+) {
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
@@ -137,7 +143,10 @@ fun SettingsContentMiuix(bottomInnerPadding: Dp = 0.dp) {
                                     tint = colorScheme.onBackground,
                                 )
                             },
-                            onClick = { navigator.push(Route.ColorPalette) },
+                            onClick = {
+                                if (onOpenTheme != null) onOpenTheme()
+                                else navigator.push(Route.ColorPalette)
+                            },
                         )
                     }
                 }

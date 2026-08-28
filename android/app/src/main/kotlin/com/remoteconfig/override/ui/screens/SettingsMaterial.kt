@@ -55,10 +55,16 @@ private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
  * 结构对齐 KernelSU `SettingsMaterial.kt` 的外观组：`SegmentedColumn` + `SegmentedDropdownItem`
  * （界面风格）+ `SegmentedListItem`（主题设置 → Route.ColorPalette），关于用 `SegmentedListItem` +
  * Material3 [AlertDialog]。全部文案为 KernelSU values-zh-rCN 中文。
+ *
+ * [onOpenTheme]：主题设置项点击回调。null（窄屏）= push Route.ColorPalette（现状）；
+ * 非 null（宽屏双窗）= 由 SettingsContent 注入选中右侧 pane，不 push 路由。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsContentMaterial(bottomInnerPadding: Dp = 0.dp) {
+fun SettingsContentMaterial(
+    bottomInnerPadding: Dp = 0.dp,
+    onOpenTheme: (() -> Unit)? = null,
+) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val navigator = LocalNavigator.current
     var showAbout by rememberSaveable { mutableStateOf(false) }
@@ -101,7 +107,10 @@ fun SettingsContentMaterial(bottomInnerPadding: Dp = 0.dp) {
                     }
                     item {
                         SegmentedListItem(
-                            onClick = { navigator.push(Route.ColorPalette) },
+                            onClick = {
+                                if (onOpenTheme != null) onOpenTheme()
+                                else navigator.push(Route.ColorPalette)
+                            },
                             headlineContent = { Text("主题设置") },
                             supportingContent = { Text("自定义更多主题选项") },
                             leadingContent = { Icon(Icons.Rounded.Palette, "主题设置") },

@@ -103,12 +103,17 @@ private val KeyColorNames: List<String> = listOf(
  * 主题模式分段按钮 → 第一组（启用 Monet 颜色 / 强调色 / 色彩风格 / 色彩标准）
  * → 第二组（模糊 / 悬浮底栏 / 液态玻璃 / 导航栏角标）
  * → 第三组（预测性返回手势 / 界面缩放）。
+ *
+ * [showTopBar]：全屏路由 true（带返回按钮）；宽屏双窗右侧 pane 传 false（无顶栏返回按钮，
+ * 由左侧设置列表选择控制）。无顶栏时 contentWindowInsets 去掉 Top（左侧列表顶栏已消费状态栏），
+ * 顶部补 16dp 间距对齐左列内容起点。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ColorPaletteContentMaterial(
     state: ColorPaletteUiState,
     actions: ColorPaletteScreenActions,
+    showTopBar: Boolean = true,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val uiState = state
@@ -120,19 +125,24 @@ fun ColorPaletteContentMaterial(
 
     ExpressiveScaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = actions.onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                title = { Text("主题设置") },
-                colors = expressiveTopAppBarColors(),
-                windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-                scrollBehavior = scrollBehavior,
-            )
+            if (showTopBar) {
+                LargeFlexibleTopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = actions.onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    title = { Text("主题设置") },
+                    colors = expressiveTopAppBarColors(),
+                    windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                    scrollBehavior = scrollBehavior,
+                )
+            }
         },
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            if (showTopBar) WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+            else WindowInsetsSides.Horizontal
+        ),
     ) { paddingValues ->
         val navBars = WindowInsets.navigationBars.asPaddingValues()
         val captionBar = WindowInsets.captionBar.asPaddingValues()
@@ -144,6 +154,9 @@ fun ColorPaletteContentMaterial(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!showTopBar) {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             val isDark = currentColorMode.isDark || currentColorMode.isSystem && isSystemInDarkTheme()
             val isAmoled = currentColorMode.isAmoled
             ThemePreviewCard(

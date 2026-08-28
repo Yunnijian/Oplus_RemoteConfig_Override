@@ -65,6 +65,22 @@ data class ColorPaletteScreenActions(
 fun ColorPaletteScreen() {
     // LocalNavigator.current 是 @Composable getter，提前提升进 actions（避免非组合 lambda 内访问）。
     val navigator = LocalNavigator.current
+    val (uiState, actions) = rememberColorPaletteStateAndActions(onBack = { navigator.pop() })
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> ColorPaletteContentMiuix(uiState, actions)
+        UiMode.Material -> ColorPaletteContentMaterial(uiState, actions)
+    }
+}
+
+/**
+ * 构建取色屏状态与动作（数据源 [SettingsRepositoryImpl]）。
+ *
+ * 全屏路由（[ColorPaletteScreen]）与宽屏双窗右侧 pane（SettingsScreen 内 ThemePane）共用。
+ * [onBack] 由调用方注入：全屏 = navigator.pop()，pane = 空操作（pane 无返回按钮，
+ * 由左侧设置列表选择控制）。
+ */
+@Composable
+internal fun rememberColorPaletteStateAndActions(onBack: () -> Unit): Pair<ColorPaletteUiState, ColorPaletteScreenActions> {
     val repo = remember { SettingsRepositoryImpl() }
     val uiState = ColorPaletteUiState(
         themeMode = repo.themeMode,
@@ -92,7 +108,7 @@ fun ColorPaletteScreen() {
     )
     val actions = remember(repo) {
         ColorPaletteScreenActions(
-            onBack = { navigator.pop() },
+            onBack = onBack,
             onSetThemeMode = { repo.themeMode = it },
             onSetMiuixMonet = { repo.miuixMonet = it },
             onSetKeyColor = { repo.keyColor = it },
@@ -107,8 +123,5 @@ fun ColorPaletteScreen() {
             onSetPageScale = { repo.pageScale = it },
         )
     }
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> ColorPaletteContentMiuix(uiState, actions)
-        UiMode.Material -> ColorPaletteContentMaterial(uiState, actions)
-    }
+    return uiState to actions
 }

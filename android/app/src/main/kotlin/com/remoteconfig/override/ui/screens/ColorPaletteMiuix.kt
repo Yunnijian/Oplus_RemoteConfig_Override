@@ -108,15 +108,21 @@ private val KeyColorNames: List<String> = listOf(
  * → 第二组 Card（模糊 / 悬浮底栏 / 液态玻璃 / 导航栏角标）
  * → 第三组 Card（预测性返回手势 / 界面缩放）。
  * 全部文案为 KernelSU values-zh-rCN 中文，硬编码。
+ *
+ * [showTopBar]：全屏路由 true（带返回按钮）；宽屏双窗右侧 pane 传 false（无顶栏返回按钮，
+ * 由左侧设置列表选择控制）。无顶栏时内容自带 32dp 顶部间距，不被状态栏挤压。
  */
 @Composable
 fun ColorPaletteContentMiuix(
     state: ColorPaletteUiState,
     actions: ColorPaletteScreenActions,
+    showTopBar: Boolean = true,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val enableBlurState = LocalEnableBlur.current
-    val backdrop = rememberBlurBackdrop(enableBlurState)
+    // pane 模式（showTopBar=false）不创建自己的模糊背景层：外层 MainScreen 已对 Pager
+    // 内容铺 layerBackdrop，嵌套 RenderEffect 层会导致重复采样/渲染伪影（对齐配置双窗行为）。
+    val backdrop = rememberBlurBackdrop(if (showTopBar) enableBlurState else false)
     val blurActive = backdrop != null
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
     val uiState = state
@@ -126,27 +132,29 @@ fun ColorPaletteContentMiuix(
 
     Scaffold(
         topBar = {
-            BlurredBar(backdrop) {
-                TopAppBar(
-                    color = barColor,
-                    title = "主题设置",
-                    navigationIcon = {
-                        IconButton(
-                            onClick = actions.onBack
-                        ) {
-                            val layoutDirection = LocalLayoutDirection.current
-                            Icon(
-                                modifier = Modifier.graphicsLayer {
-                                    if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
-                                },
-                                imageVector = MiuixIcons.Back,
-                                contentDescription = null,
-                                tint = colorScheme.onBackground
-                            )
-                        }
-                    },
-                    scrollBehavior = scrollBehavior,
-                )
+            if (showTopBar) {
+                BlurredBar(backdrop) {
+                    TopAppBar(
+                        color = barColor,
+                        title = "主题设置",
+                        navigationIcon = {
+                            IconButton(
+                                onClick = actions.onBack
+                            ) {
+                                val layoutDirection = LocalLayoutDirection.current
+                                Icon(
+                                    modifier = Modifier.graphicsLayer {
+                                        if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
+                                    },
+                                    imageVector = MiuixIcons.Back,
+                                    contentDescription = null,
+                                    tint = colorScheme.onBackground
+                                )
+                            }
+                        },
+                        scrollBehavior = scrollBehavior,
+                    )
+                }
             }
         },
         // popupHost 用默认 MiuixPopupHost()（不传 {}）：OverlayDropdownPreference 的

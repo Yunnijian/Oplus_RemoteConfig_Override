@@ -90,17 +90,17 @@ fun ConfigListPage(
     }
 }
 
-/** 双窗右侧空态提示（按 UI 模式取主题色）。 */
+/** 双窗右侧空态提示（按 UI 模式取主题色）；[text] 可定制（配置页 / 设置页各自文案）。 */
 @Composable
-private fun EmptyPaneHint() {
+internal fun EmptyPaneHint(text: String = "选择左侧应用查看配置") {
     when (LocalUiMode.current) {
         UiMode.Miuix -> MiuixText(
-            text = "选择左侧应用查看配置",
+            text = text,
             fontSize = 14.sp,
             color = colorScheme.onSurfaceVariantSummary,
         )
         UiMode.Material -> Text(
-            text = "选择左侧应用查看配置",
+            text = text,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
