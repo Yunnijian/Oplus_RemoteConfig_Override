@@ -14,12 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.ContactPage
 import androidx.compose.material.icons.rounded.Dashboard
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,10 +30,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
-import com.remoteconfig.override.settings.ColorMode
 import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
+import com.remoteconfig.override.ui.util.BlurredBar
+import com.remoteconfig.override.ui.util.rememberBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -47,31 +44,27 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.window.WindowDialog
-import com.remoteconfig.override.ui.util.BlurredBar
-import com.remoteconfig.override.ui.util.rememberBlurBackdrop
 
 /** 关于项展示的版本文本（与简报逐字一致）。 */
 private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
 
 /**
- * 设置页 — Miuix 实现。
+ * 设置页 — Miuix 实现（精简为对齐 KernelSU 设置页外观组）。
  *
  * 布局/组件/文案风格完整对齐 KernelSU `SettingsMiuix.kt`：
  * `Scaffold` 顶栏用 [BlurredBar]（backdrop 由 [rememberBlurBackdrop] 按
  * `LocalEnableBlur` 惰性创建）+ `MiuixScrollBehavior`；内容 `LazyColumn` 用
  * `scrollEndHaptic() + overScrollVertical() + nestedScroll + overscrollEffect = null`，
  * 分组 `Card(padding(top = 12.dp).fillMaxWidth())` 组内直接排
- * `SwitchPreference / OverlayDropdownPreference / ArrowPreference`，每个
- * Preference 均带 `startAction` 图标（`Icons.Rounded.*`，tint = colorScheme.onBackground）。
+ * `OverlayDropdownPreference / ArrowPreference`，每个 Preference 均带
+ * `startAction` 图标（`Icons.Rounded.*`，tint = colorScheme.onBackground）。
  *
- * 功能项为本应用自己的 9 个设置字段（不移植 KernelSU 的 su/selinux 等特有功能）：
- * 外观组（设计风格 / 主题取色 / 深色模式 / 动态取色 Monet）+ 液态玻璃组
- * （液态玻璃底栏 / 底栏实时模糊 / 全局模糊）+ 关于组。
+ * 功能项：界面风格（Miuix/Material）+ 主题设置（→ Route.ColorPalette）+ 关于。
+ * 其余主题字段（深色模式/动态取色/液态玻璃等）已移入主题设置页。
  */
 @Composable
 fun SettingsContentMiuix(bottomInnerPadding: Dp = 0.dp) {
@@ -117,14 +110,14 @@ fun SettingsContentMiuix(bottomInnerPadding: Dp = 0.dp) {
                             .fillMaxWidth(),
                     ) {
                         OverlayDropdownPreference(
-                            title = "设计风格",
-                            summary = "Miuix / Material 设计风格",
+                            title = "界面风格",
+                            summary = "选择应用的界面风格",
                             items = listOf("Miuix", "Material"),
                             startAction = {
                                 Icon(
                                     Icons.Rounded.Dashboard,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "设计风格",
+                                    contentDescription = "界面风格",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -134,104 +127,17 @@ fun SettingsContentMiuix(bottomInnerPadding: Dp = 0.dp) {
                             },
                         )
                         ArrowPreference(
-                            title = "主题取色",
-                            summary = "自定义强调色与调色板风格",
+                            title = "主题设置",
+                            summary = "自定义更多主题选项",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.Palette,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "主题取色",
+                                    contentDescription = "主题设置",
                                     tint = colorScheme.onBackground,
                                 )
                             },
                             onClick = { navigator.push(Route.ColorPalette) },
-                        )
-                        OverlayDropdownPreference(
-                            title = "深色模式",
-                            summary = "跟随系统 / 浅色 / 深色",
-                            items = listOf("跟随系统", "浅色", "深色"),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.DarkMode,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "深色模式",
-                                    tint = colorScheme.onBackground,
-                                )
-                            },
-                            // Monet 态（3-5）/AMOLED(6) 映射回对应非 Monet 三态显示
-                            selectedIndex = ColorMode.fromValue(repo.themeMode).toNonMonetMode(),
-                            onSelectedIndexChange = { index ->
-                                repo.themeMode = index
-                            },
-                        )
-                        SwitchPreference(
-                            title = "动态取色 Monet",
-                            summary = "跟随系统壁纸取色",
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.AutoAwesome,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "动态取色 Monet",
-                                    tint = colorScheme.onBackground,
-                                )
-                            },
-                            checked = repo.miuixMonet,
-                            onCheckedChange = { repo.miuixMonet = it },
-                        )
-                    }
-                }
-
-                // ── 液态玻璃组 ──
-                item {
-                    Card(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .fillMaxWidth(),
-                    ) {
-                        SwitchPreference(
-                            title = "液态玻璃底栏",
-                            summary = "关闭后使用普通底栏（更省电）",
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Layers,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "液态玻璃底栏",
-                                    tint = colorScheme.onBackground,
-                                )
-                            },
-                            checked = repo.enableFloatingBottomBar,
-                            onCheckedChange = { repo.enableFloatingBottomBar = it },
-                        )
-                        // 底栏实时模糊仅在底栏开启时显示
-                        if (repo.enableFloatingBottomBar) {
-                            SwitchPreference(
-                                title = "底栏实时模糊",
-                                summary = "关闭后保留玻璃质感但更省电",
-                                startAction = {
-                                    Icon(
-                                        Icons.Rounded.BlurOn,
-                                        modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = "底栏实时模糊",
-                                        tint = colorScheme.onBackground,
-                                    )
-                                },
-                                checked = repo.enableFloatingBottomBarBlur,
-                                onCheckedChange = { repo.enableFloatingBottomBarBlur = it },
-                            )
-                        }
-                        SwitchPreference(
-                            title = "全局模糊",
-                            summary = "液态玻璃模糊总开关",
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.BlurOn,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "全局模糊",
-                                    tint = colorScheme.onBackground,
-                                )
-                            },
-                            checked = repo.enableBlur,
-                            onCheckedChange = { repo.enableBlur = it },
                         )
                     }
                 }
