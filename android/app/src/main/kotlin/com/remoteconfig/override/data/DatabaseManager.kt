@@ -3,347 +3,101 @@ package com.remoteconfig.override.data
 import android.content.Context
 import com.topjohnwu.superuser.Shell
 import java.io.File
-import kotlinx.serialization.json.*
+import java.util.UUID
 
-/**
- * 数据库管理器 — 通过 Root 权限与 com.oplus.cosa 的 SQLite 数据库交互。
- * 读写都以原始 JSON 字符串形式进行。
- */
-class DatabaseManager(private val context: Context) {
+/** Root shell adapter for the bundled Rust/rusqlite database utility. */
+class DatabaseManager(context: Context) {
+
+    data class WriteResult(val success: Boolean, val message: String)
+
+    private val appContext = context.applicationContext
 
     companion object {
-        private const val DB_PATH_1 = "/data/data/com.oplus.cosa/databases/db_game_database"
-        private const val DB_PATH_2 = "/data/user_de/0/com.oplus.cosa/databases/db_game_database"
-        private const val SQLITE3_ASSET = "tool/sqlite3"
-        private const val YT_ASSET = "tool/yt"
-
-        private val colNameMap = mapOf(
-            "package_name" to "Package_Name", "type_id" to "Type_Id",
-            "feature_flag" to "Feature_Flag", "cpu_config" to "Cpu_Config",
-            "gpu_config" to "Gpu_Config", "io_config" to "Io_Config",
-            "dynamic_resolution" to "Dynamic_Resolution", "launch_boost" to "Launch_Boost",
-            "usage_power_ratio" to "Usage_Power_Ratio", "memory_clear" to "Memory_Clear",
-            "frameboost" to "FrameBoost", "frameBoost" to "FrameBoost",
-            "refresh_rate" to "Refresh_Rate", "gpa_config" to "Gpa_Config",
-            "touch_config" to "Touch_Config", "default_scene" to "Default_Scene",
-            "game_scenes" to "Game_Scenes"
-        )
+        private const val EXPORT_DIR = "/storage/emulated/0/cosa_json"
+        private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_.]*")
     }
 
-    private var sqlite3Path: String? = null
+    private val binary: String
+        get() = File(appContext.applicationInfo.nativeLibraryDir, "libcosa.so").absolutePath
 
-    fun checkRoot(): Boolean = Shell.cmd("su -c 'echo ok' 2>/dev/null || echo fail").exec().out.any { it.contains("ok") }
+    private fun quote(value: String): String = "'${value.replace("'", "'\\''")}'"
 
-    fun findDatabase(): String? {
-        val result = Shell.cmd(
-            "if [ -f '$DB_PATH_1' ]; then echo '$DB_PATH_1'; " +
-            "elif [ -f '$DB_PATH_2' ]; then echo '$DB_PATH_2'; " +
-            "else exit 1; fi"
-        ).exec()
-        return if (result.isSuccess) result.out.firstOrNull() else null
+    private fun run(vararg args: String): Shell.Result {
+        val command = buildList {
+            add(binary)
+            addAll(args.asList())
+        }.joinToString(" ", transform = ::quote)
+        return Shell.cmd(command).exec()
     }
 
-    fun checkDatabase(): Boolean = findDatabase() != null
+    private fun Shell.Result.message(fallback: String): String =
+        (out.asSequence() + err.asSequence())
+            .map(String::trim)
+            .firstOrNull(String::isNotEmpty)
+            ?: fallback
 
-    private fun ensureSqlite3(): String {
-        sqlite3Path?.let { return it }
-        val checkSys = Shell.cmd("which sqlite3").exec()
-        if (checkSys.isSuccess && checkSys.out.firstOrNull()?.isNotEmpty() == true) {
-            sqlite3Path = checkSys.out.first().trim(); return sqlite3Path!!
+    private fun validPackage(packageName: String): Boolean =
+        packageName.length <= 255 && PACKAGE_NAME.matches(packageName)
+
+    fun checkRoot(): Boolean =
+        Shell.cmd("id -u").exec().out.any { it.trim() == "0" }
+
+    fun checkDatabase(): Boolean = run("list").isSuccess
+
+    fun listConfiguredPackages(): List<String> =
+        run("list").let { result ->
+            if (result.isSuccess) result.out.map(String::trim).filter(String::isNotEmpty) else emptyList()
         }
-        val localPath = File(context.filesDir, "sqlite3").absolutePath
-        if (!File(localPath).exists()) {
-            context.assets.open(SQLITE3_ASSET).use { i -> File(localPath).outputStream().use { o -> i.copyTo(o) } }
-            Shell.cmd("chmod 755 '$localPath'").exec()
+
+    fun countConfiguredPackages(): Int = listConfiguredPackages().size
+
+    fun loadConfig(packageName: String): String? {
+        if (!validPackage(packageName)) return null
+        return run("read", packageName).let { result ->
+            if (!result.isSuccess) null
+            else result.out.joinToString("\n").trim().ifEmpty { null }
         }
-        sqlite3Path = localPath; return localPath
     }
 
-    private fun ensureYt(): String {
-        val checkSys = Shell.cmd("which yt").exec()
-        if (checkSys.isSuccess && checkSys.out.firstOrNull()?.isNotEmpty() == true) {
-            return checkSys.out.first().trim()
-        }
-        val localPath = File(context.filesDir, "yt").absolutePath
-        if (!File(localPath).exists()) {
-            context.assets.open(YT_ASSET).use { i -> File(localPath).outputStream().use { o -> i.copyTo(o) } }
-            Shell.cmd("chmod 755 '$localPath'").exec()
-        }
-        return localPath
+    fun exportConfig(packageName: String): WriteResult {
+        if (!validPackage(packageName)) return WriteResult(false, "包名格式无效")
+        val result = run("read", packageName, "$EXPORT_DIR/$packageName.json")
+        return WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已导出" else "导出失败"))
     }
 
-    fun listConfiguredPackages(): List<String> {
-        val db = findDatabase() ?: return emptyList()
-        val sqlite = ensureSqlite3()
-        val result = Shell.cmd(
-            "'$sqlite' '$db' \"SELECT DISTINCT Package_Name FROM PackageConfigBean WHERE Package_Name NOT IN ('oplus.cosa.common.model.config', 'oplus.cosa.default.model.config') AND Package_Name LIKE 'com.%' ORDER BY Package_Name;\""
-        ).exec()
-        return if (result.isSuccess) result.out.filter { it.isNotBlank() } else emptyList()
-    }
-
-    fun countConfiguredPackages(): Int {
-        val db = findDatabase() ?: return 0
-        val sqlite = ensureSqlite3()
-        val result = Shell.cmd(
-            "'$sqlite' '$db' \"SELECT COUNT(DISTINCT Package_Name) FROM PackageConfigBean WHERE Package_Name NOT IN ('oplus.cosa.common.model.config', 'oplus.cosa.default.model.config') AND Package_Name LIKE 'com.%';\"").exec()
-        return if (result.isSuccess) result.out.firstOrNull()?.toIntOrNull() ?: 0 else 0
-    }
-
-    // ── 读取整理后的 JSON ───────────────────────────────────
-
-    /**
-     * 读取指定包名的配置，返回格式化 JSON 字符串。
-     * 先用 yt 1 整理模式输出到 /storage/emulated/0/output/，再读取该文件。
-     */
-    fun loadRawConfig(packageName: String): String? {
-        // 方式一：用 yt 整理模式（不依赖原模块，yt 从 assets 解压）
-        try {
-            val yt = ensureYt()
-            val outDir = "/storage/emulated/0/output"
-            Shell.cmd("mkdir -p '$outDir' 2>/dev/null").exec()
-            Shell.cmd("'$yt' 1 '$packageName'").exec()
-
-            val outputPath = "$outDir/${packageName}.json"
-            val catResult = Shell.cmd("cat '$outputPath' 2>/dev/null").exec()
-            if (catResult.isSuccess && catResult.out.isNotEmpty()) {
-                val output = catResult.out.joinToString("\n").trim()
-                if (output.isNotEmpty() && (output.startsWith("{") || output.startsWith("["))) {
-                    return output
-                }
-            }
-        } catch (_: Exception) { /* 回退 */ }
-
-        // 方式二：sqlite3 -json + jq 展开嵌套字段 + pretty-print
-        return loadRawViaJq(packageName)
-    }
-
-    /**
-     * 用 sqlite3 -json 读取 + jq 将字符串字段展开为嵌套对象。
-     * 效果等同 yt 1 的整理模式。
-     */
-    private fun loadRawViaJq(packageName: String): String? {
-        val db = findDatabase() ?: return null
-        val sqlite = ensureSqlite3()
-        val result = Shell.cmd(
-            "'$sqlite' -json '$db' \"SELECT * FROM PackageConfigBean WHERE Package_Name='$packageName';\""
-        ).exec()
-        if (!result.isSuccess || result.out.isEmpty()) return null
-        val raw = result.out.joinToString("").trim()
-        if (raw.length < 2) return null
-        val jsonStr = raw.substring(1, raw.length - 1)
-
-        // 在 Kotlin 侧将所有 JSON 字符串字段展开为嵌套对象
+    fun writeConfig(packageName: String, json: String): WriteResult {
+        if (!validPackage(packageName)) return WriteResult(false, "包名格式无效")
+        if (json.isBlank()) return WriteResult(false, "JSON 内容为空")
+        val temporary = File(appContext.cacheDir, "write-${UUID.randomUUID()}.json")
         return try {
-            val json = Json { ignoreUnknownKeys = true }
-            val obj = json.parseToJsonElement(jsonStr).jsonObject.toMutableMap()
-            for ((key, el) in obj) {
-                if (el is JsonPrimitive && el.isString && el.content.startsWith("{")) {
-                    try {
-                        obj[key] = json.parseToJsonElement(el.content)
-                    } catch (_: Exception) { /* 保持原样 */ }
-                }
-            }
-            val expanded = JsonObject(obj)
-            val pretty = Json { prettyPrint = true }
-            pretty.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), expanded)
-        } catch (_: Exception) {
-            jsonStr
-        }
-    }
-
-    // ── 写入配置（原始 JSON） ───────────────────────────────
-
-    fun writeRawConfig(packageName: String, rawJson: String): WriteResult {
-        val db = findDatabase() ?: return WriteResult(false, "未找到数据库文件")
-        val sqlite = ensureSqlite3()
-
-        val json = Json { ignoreUnknownKeys = true }
-        val obj = try { json.parseToJsonElement(rawJson).jsonObject } catch (e: Exception) {
-            return WriteResult(false, "JSON 解析失败: ${e.message}")
-        }
-
-        try {
-            // 1. 生成列名和值（与 action.sh 的 jq 逻辑一致）
-            //    字符串 → "value"（内部 " → ""）
-            //    对象/数组 → tojson → 再转义 " → "" → 包 ""
-            //    数字 → tostring → 包 ""
-            //    null → "NULL"
-            val cols = mutableListOf<String>()
-            val vals = mutableListOf<String>()
-
-            for ((key, value) in obj) {
-                val col = sqliteColumnName(key)
-                cols += "\"$col\""
-                val v = when {
-                    value is JsonNull -> "NULL"
-                    value is JsonPrimitive && value.isString ->
-                        "\"${value.content.replace("\"", "\"\"")}\""
-                    value is JsonPrimitive -> {
-                        // 数字或布尔
-                        "\"${value.content}\""
-                    }
-                    else -> {
-                        // 嵌套对象/数组 → tojson → 转义
-                        val raw = value.toString()
-                        "\"${raw.replace("\"", "\"\"")}\""
-                    }
-                }
-                vals += v
-            }
-
-            if (cols.isEmpty()) return WriteResult(false, "JSON 内容为空")
-
-            val columns = cols.joinToString(", ")
-            val values = vals.joinToString(", ")
-
-            // 2. 清理 PackageInfoBean
-            val infoCount = Shell.cmd(
-                "'$sqlite' '$db' \"SELECT COUNT(*) FROM PackageInfoBean WHERE package_name = '$packageName';\""
-            ).exec().let { it.out.firstOrNull()?.toIntOrNull() ?: 0 }
-            if (infoCount > 0) {
-                Shell.cmd("'$sqlite' '$db' \"DELETE FROM PackageInfoBean WHERE package_name = '$packageName';\"").exec()
-            }
-
-            // 3. 检查现有记录
-            val existing = Shell.cmd(
-                "'$sqlite' '$db' \"SELECT COUNT(*) FROM PackageConfigBean WHERE Package_Name = '$packageName';\""
-            ).exec().let { it.out.firstOrNull()?.toIntOrNull() ?: 0 }
-
-            // 4. 写 SQL 到临时文件，用重定向执行
-            val tmpSql = File(context.filesDir, "_s_${packageName}.sql")
-            val sql = if (existing > 0) {
-                "UPDATE PackageConfigBean SET ($columns) = ($values) WHERE Package_Name = \"$packageName\";"
-            } else {
-                "INSERT INTO PackageConfigBean (Package_Name, $columns) VALUES (\"$packageName\", $values);"
-            }
-            tmpSql.writeText(sql)
-
-            val result = Shell.cmd("'$sqlite' '$db' < '${tmpSql.absolutePath}'").exec()
-            tmpSql.delete()
-
-            return if (result.isSuccess) WriteResult(true, "$packageName 配置写入成功")
-            else WriteResult(false, "写入失败: ${result.err.joinToString("; ")}")
-
-        } catch (e: Exception) {
-            return WriteResult(false, "写入失败: ${e.message}")
+            temporary.writeText(json)
+            val result = run("write", packageName, temporary.absolutePath)
+            WriteResult(result.isSuccess, result.message(if (result.isSuccess) "写入成功" else "写入失败"))
+        } catch (error: Exception) {
+            WriteResult(false, "写入失败: ${error.message ?: "无法创建临时文件"}")
+        } finally {
+            temporary.delete()
         }
     }
 
     fun deleteConfig(packageName: String): WriteResult {
-        val db = findDatabase() ?: return WriteResult(false, "未找到数据库文件")
-        val sqlite = ensureSqlite3()
-        val result = Shell.cmd("'$sqlite' '$db' \"DELETE FROM PackageConfigBean WHERE Package_Name='$packageName';\"").exec()
-        return if (result.isSuccess) WriteResult(true, "$packageName 已删除")
-        else WriteResult(false, "删除失败: ${result.err.joinToString("; ")}")
+        if (!validPackage(packageName)) return WriteResult(false, "包名格式无效")
+        val result = run("delete", packageName)
+        return WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已删除" else "删除失败"))
     }
 
-    /** 获取 com.oplus.cosa 版本号 */
-    fun getCosaVersion(): String {
-        val result = Shell.cmd("dumpsys package com.oplus.cosa | grep versionName | head -1").exec()
-        if (result.isSuccess && result.out.isNotEmpty()) {
-            val line = result.out.first().trim()
-            // 格式: versionName=16.0.174
-            val v = line.substringAfter("=").trim()
-            if (v.isNotEmpty()) return v
-        }
-        // 备用方案
-        val result2 = Shell.cmd("pm list packages --show-versioncode | grep com.oplus.cosa").exec()
-        if (result2.isSuccess && result2.out.isNotEmpty()) {
-            val parts = result2.out.first().trim().split(" ")
-            if (parts.size >= 2) return parts.last()
-        }
-        return "未知"
+    fun enableProtection(): WriteResult {
+        val result = run("protect")
+        return WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已启用保护" else "启用失败"))
     }
 
-    /** 重启应用增强服务 */
-    fun restartGameService(): WriteResult {
-        val r1 = Shell.cmd("setprop persist.sys.oplus.gameswitch.enable 0").exec()
-        sleep(1000)
-        val r2 = Shell.cmd("setprop persist.sys.oplus.gameswitch.enable 1").exec()
-        return if (r2.isSuccess) WriteResult(true, "应用增强服务已重启")
-        else WriteResult(false, "重启失败: ${r2.err.joinToString("; ")}")
-    }
+    fun getCosaVersion(): String =
+        Shell.cmd("dumpsys package com.oplus.cosa | grep versionName | head -1")
+            .exec().out.firstOrNull()?.substringAfter('=')?.trim()?.ifEmpty { null } ?: "未知"
 
-    /** 清除应用增强服务数据 */
     fun clearGameData(): WriteResult {
         val result = Shell.cmd("pm clear com.oplus.cosa").exec()
         return if (result.isSuccess) WriteResult(true, "应用增强服务数据已清除")
-        else WriteResult(false, "清除失败: ${result.err.joinToString("; ")}")
+        else WriteResult(false, result.message("清除失败"))
     }
-
-    /** 导出配置到 /storage/emulated/0/cosa_json/<pkg>.json */
-    fun exportConfig(packageName: String, json: String): WriteResult {
-        val outDir = "/storage/emulated/0/cosa_json"
-        val outFile = "$outDir/${packageName}.json"
-        val tmpFile = File(context.filesDir, "_export_${packageName}.json")
-        tmpFile.writeText(json)
-        val result = Shell.cmd(
-            "mkdir -p '$outDir' && cp '${tmpFile.absolutePath}' '$outFile' && chmod 644 '$outFile' && rm '${tmpFile.absolutePath}'"
-        ).exec()
-        return if (result.isSuccess) WriteResult(true, "已导出到 $outDir/${packageName}.json")
-        else WriteResult(false, "导出失败: ${result.err.joinToString("; ")}")
-    }
-
-    /** 从 /storage/emulated/0/cosa_json/<pkg>.json 读取配置 */
-    fun importConfig(packageName: String): String? {
-        val inFile = "/storage/emulated/0/cosa_json/${packageName}.json"
-        val result = Shell.cmd("cat '$inFile' 2>/dev/null").exec()
-        if (!result.isSuccess || result.out.isEmpty()) return null
-        val text = result.out.joinToString("\n").trim()
-        return text.ifEmpty { null }
-    }
-
-    // ── 本地文件配置管理 ─────────────────────────────────────
-
-    private val configDir: File
-        get() = File(context.filesDir, "configs").also { it.mkdirs() }
-
-    private fun configFile(packageName: String) = File(configDir, "${packageName}.json")
-    private fun backupFile(packageName: String) = File(configDir, "${packageName}.json.bak")
-
-    /** 将配置写入本地文件（创建备份 → 写入新内容） */
-    fun saveLocalConfig(packageName: String, json: String): WriteResult {
-        return try {
-            val file = configFile(packageName)
-            val bak = backupFile(packageName)
-            // 如果已存在本地文件，先备份
-            if (file.exists()) {
-                if (bak.exists()) bak.delete()
-                file.renameTo(bak)
-            }
-            file.writeText(json)
-            WriteResult(true, "配置已保存到本地")
-        } catch (e: Exception) {
-            WriteResult(false, "保存失败: ${e.message}")
-        }
-    }
-
-    /** 从本地文件读取配置 */
-    fun loadLocalConfig(packageName: String): String? {
-        val file = configFile(packageName)
-        return if (file.exists()) file.readText() else null
-    }
-
-    /** 检查是否有备份文件 */
-    fun hasBackup(packageName: String): Boolean = backupFile(packageName).exists()
-
-    /** 从备份恢复配置（备份 → 当前文件） */
-    fun restoreFromBackup(packageName: String): WriteResult {
-        return try {
-            val file = configFile(packageName)
-            val bak = backupFile(packageName)
-            if (!bak.exists()) return WriteResult(false, "未找到备份文件")
-            file.writeText(bak.readText())
-            WriteResult(true, "已从备份恢复")
-        } catch (e: Exception) {
-            WriteResult(false, "恢复失败: ${e.message}")
-        }
-    }
-
-    private fun sleep(ms: Long) {
-        try { Thread.sleep(ms) } catch (_: InterruptedException) { }
-    }
-    private fun sqliteColumnName(field: String): String = colNameMap[field] ?: field.replaceFirstChar { it.uppercase() }
-
-    data class WriteResult(val success: Boolean, val message: String)
 }

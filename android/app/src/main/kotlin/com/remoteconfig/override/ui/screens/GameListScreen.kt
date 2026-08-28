@@ -45,7 +45,6 @@ fun ConfigListContent(
 
     var searchQuery by remember { mutableStateOf("") }
     var showNewDialog by remember { mutableStateOf(false) }
-    var showRestartConfirm by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var resultMsg by remember { mutableStateOf("") }
     var showResultDialog by remember { mutableStateOf(false) }
@@ -108,7 +107,6 @@ fun ConfigListContent(
                             Icon(Icons.Filled.MoreVert, "更多操作")
                             DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
                                 DropdownMenuItem(text = { Text("刷新配置") }, onClick = { showOverflow = false; viewModel.refreshAll() })
-                                DropdownMenuItem(text = { Text("重启应用增强服务") }, onClick = { showOverflow = false; showRestartConfirm = true })
                                 DropdownMenuItem(text = { Text("清除应用增强服务数据") }, onClick = { showOverflow = false; showClearConfirm = true })
                             }
                         }
@@ -229,21 +227,15 @@ fun ConfigListContent(
             confirmButton = { TextButton(onClick = { showResultDialog = false }) { Text("确定") } }
         )
     }
-    if (showRestartConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRestartConfirm = false },
-            title = { Text("重启应用增强服务") },
-            text = { Text("确定要重启应用增强服务吗？") },
-            confirmButton = { TextButton(onClick = { showRestartConfirm = false; viewModel.restartGameService(); resultMsg = "应用增强服务已重启"; showResultDialog = true }) { Text("确定") } },
-            dismissButton = { TextButton(onClick = { showRestartConfirm = false }) { Text("取消") } }
-        )
-    }
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text("清除应用增强服务数据") },
             text = { Text("确定要清除应用增强服务数据吗？\n清除后游戏配置将恢复默认。") },
-            confirmButton = { TextButton(onClick = { showClearConfirm = false; viewModel.clearGameData(); resultMsg = "应用增强服务数据已清除"; showResultDialog = true }) { Text("确定") } },
+            confirmButton = { TextButton(onClick = {
+                showClearConfirm = false
+                viewModel.clearGameData { _, msg -> resultMsg = msg; showResultDialog = true }
+            }) { Text("确定") } },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
         )
     }
@@ -251,7 +243,7 @@ fun ConfigListContent(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
             title = { Text("删除配置") },
-            text = { Text("确定要删除 ${showDeleteConfirm} 的配置吗？\n本地文件和备份将一并删除。") },
+            text = { Text("确定要从数据库删除 ${showDeleteConfirm} 的配置吗？") },
             confirmButton = { TextButton(onClick = {
                 val pkg = showDeleteConfirm ?: ""; showDeleteConfirm = null
                 viewModel.deleteConfig(pkg) { s, msg -> resultMsg = msg; showResultDialog = true }

@@ -3,7 +3,6 @@ package com.remoteconfig.override.viewmodel
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.Drawable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.DatabaseManager
@@ -19,7 +18,7 @@ import kotlinx.coroutines.withContext
  * 主 ViewModel — 所有配置以原始 JSON 字符串形式处理。
  *
  * 数据流：
- *   数据库 → loadRawConfig() → 原始 JSON → UI 编辑 → writeRawConfig() → 数据库
+ *   数据库 → Rust/rusqlite → JSON → UI 编辑 → Rust/rusqlite → 数据库
  */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -127,21 +126,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── 配置编辑 ─────────────────────────────────────────────
 
     /**
-     * 从数据库加载指定包名的原始 JSON 配置，并写入本地文件。
+     * 从数据库加载指定包名的 JSON 配置，字段顺序由 Rust 工具按表结构保留。
      */
     fun loadConfig(packageName: String) {
         viewModelScope.launch {
             _isLoading.value = true
             _editingPackageName.value = packageName
             try {
-                val json = dbManager.loadRawConfig(packageName)
-                if (json != null) {
-                    // 保存到本地文件
-                    dbManager.saveLocalConfig(packageName, json)
-                    _editingJson.value = json
-                } else {
-                    _editingJson.value = null
-                }
+                _editingJson.value = dbManager.loadConfig(packageName)
             } catch (_: Exception) {
                 _editingJson.value = null
             } finally {
@@ -173,67 +165,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val localResult = dbManager.saveLocalConfig(pkg, json)
-                if (!localResult.success) {
-                    onComplete(false, "本地保存失败: ${localResult.message}")
-                    _isLoading.value = false; return@launch
+                val result = if (_systemStatus.value.isRooted) {
+                    dbManager.writeConfig(pkg, json)
+                } else {
+                    DatabaseManager.WriteResult(false, "未授予 Root 权限")
                 }
-                if (_systemStatus.value.isRooted) {
-                    val dbResult = dbManager.writeRawConfig(pkg, json)
-                    if (dbResult.success) { refreshAll(); onComplete(true, "配置已注入（本地 + 数据库）") }
-                    else { onComplete(true, "已保存到本地，数据库写入: ${dbResult.message}") }
-                } else { onComplete(true, "配置已保存到本地") }
+                if (result.success) refreshAll()
+                onComplete(result.success, result.message)
             } catch (e: Exception) { onComplete(false, "注入失败: ${e.message}") }
             finally { _isLoading.value = false }
         }
-    }
-
-    fun restoreBackupConfig(onComplete: (Boolean, String) -> Unit) {
-        val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
-        val result = dbManager.restoreFromBackup(pkg)
-        if (result.success) { _editingJson.value = dbManager.loadLocalConfig(pkg) }
-        onComplete(result.success, result.message)
     }
 
     fun deleteConfig(packageName: String, onComplete: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                if (_systemStatus.value.isRooted) { dbManager.deleteConfig(packageName) }
-                val configDir = java.io.File(getApplication<Application>().filesDir, "configs")
-                java.io.File(configDir, "${packageName}.json").delete()
-                java.io.File(configDir, "${packageName}.json.bak").delete()
+                if (!_systemStatus.value.isRooted) {
+                    onComplete(false, "未授予 Root 权限")
+                    return@launch
+                }
+                val result = dbManager.deleteConfig(packageName)
+                if (!result.success) {
+                    onComplete(false, result.message)
+                    return@launch
+                }
                 refreshAll(); onComplete(true, "配置 $packageName 已删除")
             } catch (e: Exception) { onComplete(false, "删除失败: ${e.message}") }
             finally { _isLoading.value = false }
         }
     }
 
-    /** 重启应用增强服务 */
-    fun restartGameService() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            dbManager.restartGameService()
-            _isLoading.value = false
-        }
-    }
-
     /** 清除应用增强服务数据 */
-    fun clearGameData() {
+    fun clearGameData(onComplete: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
-            dbManager.clearGameData()
-            _isLoading.value = false
+            try {
+                val result = dbManager.clearGameData()
+                onComplete(result.success, result.message)
+            } catch (e: Exception) {
+                onComplete(false, "清除失败: ${e.message ?: "未知错误"}")
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
     /** 导出当前配置到内部存储 */
     fun exportConfig(onComplete: (Boolean, String) -> Unit) {
         val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
-        val json = _editingJson.value ?: run { onComplete(false, "无可导出的配置"); return }
+        if (_editingJson.value == null) {
+            onComplete(false, "无可导出的配置")
+            return
+        }
         viewModelScope.launch {
             _isLoading.value = true
-            val result = dbManager.exportConfig(pkg, json)
+            val result = dbManager.exportConfig(pkg)
             onComplete(result.success, result.message)
             _isLoading.value = false
         }

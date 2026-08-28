@@ -12,15 +12,11 @@
 - 📋 **配置管理** — 查看所有已配置的应用列表，支持按包名搜索过滤
 - 📝 **JSON 编辑器** — 集成语法高亮、实时语法校验与缩放功能，提供流畅的编辑体验
 - 📥 **配置导入/导出** — 支持导入自定义应用配置，同时可将指定配置导出到本地存储
-- 🔄 **自动备份与回退** — 修改配置时自动创建备份，支持一键恢复到上一版本
+- 🔐 **本地配置保护** — 写入配置后自动启用本地配置保护触发器，避免云端覆盖
 - 💾 **数据库写入** — 将编辑后的配置一键写入 `com.oplus.cosa` 的 `db_game_database`
-- 🗑️ **配置删除** — 长按配置列表项可从数据库及本地存储中删除对应配置
-- ⚙️ **系统维护** — 支持重启应用增强服务及清除应用增强服务数据
+- 🗑️ **配置删除** — 长按配置列表项可从数据库删除对应配置
+- ⚙️ **系统维护** — 支持清除应用增强服务数据
 - ℹ️ **设备信息** — 查看设备型号、Android 版本、内核版本、应用增强服务版本
-
-## 云控配置参考文档
-
-> 📖 **[欧加云控配置解析](欧加云控配置解析.md)** — 以 **一加 15（SM8850）** 为例，详细解析云控各字段的含义、取值范围与用法，包含 CPU 频率表、GPA 调度、温控锁帧、FPS 稳定器等完整说明。修改配置前建议先阅读此文档。
 
 ## 截图
 
@@ -34,10 +30,22 @@
 
 - Android Studio Hedgehog 2023.1+ (JDK 17)
 - Android SDK 34
+- Rust stable、Android NDK（需包含 `aarch64-linux-android` 工具链）
+- 目标设备需提供 `/system/lib64/libsqlite.so`（Android 系统 SQLite）。构建机上的库文件如果叫 `libsqlite.so`，需要在同一目录提供 `libsqlite3.so` 这个链接名给 Cargo 的 `-lsqlite3` 查找逻辑。
 
 ### 编译
 
 ```bash
+# 编译 Rust 数据库工具并放入 APK 的 native 库目录
+cd rust
+NDK=/path/to/android-ndk
+export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+SQLITE3_LIB_DIR=/path/to/system-sqlite
+ln -sf "$SQLITE3_LIB_DIR/libsqlite.so" "$SQLITE3_LIB_DIR/libsqlite3.so"
+CC_aarch64_linux_android="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" \
+  SQLITE3_LIB_DIR="$SQLITE3_LIB_DIR" cargo build --release --target aarch64-linux-android
+cp target/aarch64-linux-android/release/cosa ../android/app/src/main/jniLibs/arm64-v8a/libcosa.so
+
 cd android
 
 # Debug APK
@@ -51,7 +59,14 @@ APK 输出位置：
 
 ```
 android/app/build/outputs/apk/debug/app-debug.apk
-android/app/build/outputs/apk/release/app-release.apk
+android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+在 arm64 proot 主机上若 AGP 自带的 aapt2 无法启动，可将系统 arm64
+aapt2 通过参数覆盖：
+
+```bash
+./gradlew -Pandroid.aapt2FromMavenOverride=/usr/lib/android-sdk/build-tools/34.0.0/aapt2 assembleDebug
 ```
 
 ### 直接安装
@@ -63,7 +78,10 @@ android/app/build/outputs/apk/release/app-release.apk
 - **UI**: Jetpack Compose + Material 3
 - **导航**: Jetpack Navigation Compose
 - **Root 交互**: libsu (topjohnwu)
-- **数据库**: `com.oplus.cosa` SQLite (通过 Root Shell 操作)
+- **数据库**: `com.oplus.cosa` SQLite (Rust `rusqlite` 原生工具，通过 Root Shell 操作)
+
+Rust 工具动态链接系统的 `libsqlite.so`，APK 不再携带 SQLite 实现；当前构建目标为
+64 位 Android（`arm64-v8a`）。
 - **序列化**: kotlinx-serialization-json
 - **语法高亮**: 自定义轻量状态机解析器（无第三方依赖）
 
@@ -74,7 +92,7 @@ android/app/src/main/kotlin/com/remoteconfig/override/
 ├── App.kt                    # Application 入口
 ├── MainActivity.kt           # 主 Activity
 ├── data/
-│   └── DatabaseManager.kt    # Root Shell + SQLite 数据库操作
+│   └── DatabaseManager.kt    # Root Shell + Rust 数据库工具调用
 ├── model/
 │   └── GameConfig.kt         # 数据模型
 ├── navigation/
@@ -90,6 +108,9 @@ android/app/src/main/kotlin/com/remoteconfig/override/
 │       └── Type.kt
 └── viewmodel/
     └── MainViewModel.kt      # 主 ViewModel
+rust/
+├── src/main.rs               # rusqlite 数据库命令行工具
+└── Cargo.toml
 ```
 
 ## 开源协议

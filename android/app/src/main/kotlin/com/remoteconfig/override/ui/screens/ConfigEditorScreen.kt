@@ -3,7 +3,13 @@ package com.remoteconfig.override.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -19,21 +25,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.viewmodel.MainViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 private val DARK_BG = Color(0xFF1E1E1E)
-private val LIGHT_BG = Color(0xFFFFFFFFFF)
+private val LIGHT_BG = Color(0xFFFFFFFF)
 private val DARK_TEXT = Color(0xFFD4D4D4)
 private val LIGHT_TEXT = Color(0xFF333333)
 private val DARK_LINE = Color(0xFF858585)
@@ -117,13 +134,12 @@ private fun highlightJson(text: String, dark: Boolean): AnnotatedString {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val systemStatus by viewModel.systemStatus.collectAsState()
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
 
@@ -138,6 +154,12 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     var resultSuccess by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var fontSize by rememberSaveable { mutableStateOf(13f) }
+    var highlighted by remember(dark) { mutableStateOf(AnnotatedString("")) }
+    var editorVisible by rememberSaveable { mutableStateOf(false) }
+    var editorFocused by remember { mutableStateOf(false) }
+    var fieldValue by remember(editingPackageName) { mutableStateOf(TextFieldValue()) }
+    var cursorRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val latestTextLayout = remember { arrayOfNulls<TextLayoutResult>(1) }
 
     val bg = if (dark) DARK_BG else LIGHT_BG
     val textColor = if (dark) DARK_TEXT else LIGHT_TEXT
@@ -146,14 +168,66 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val statusBg = if (dark) DARK_STATUS else LIGHT_STATUS
     val cursorColor = if (dark) DARK_CURSOR else LIGHT_CURSOR
 
+    val currentText = editingJson.orEmpty()
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    LaunchedEffect(currentText) {
+        if (fieldValue.text != currentText) {
+            val cursor = fieldValue.selection.end.coerceIn(0, currentText.length)
+            fieldValue = TextFieldValue(currentText, TextRange(cursor))
+            cursorRect = null
+            latestTextLayout[0] = null
+        }
+    }
+    LaunchedEffect(fieldValue.selection.end, currentText) {
+        // Selection changes do not necessarily trigger onTextLayout. Re-read the
+        // caret from the latest layout when the user taps another line.
+        latestTextLayout[0]?.let { layout ->
+            val nextRect = layout.getCursorRect(fieldValue.selection.end)
+            if (nextRect != cursorRect) cursorRect = nextRect
+        }
+    }
+    LaunchedEffect(isLoading, editingPackageName) {
+        if (isLoading) {
+            editorVisible = false
+        } else if (currentText.isNotEmpty()) {
+            // Let the loading state commit one frame before composing the large
+            // editor tree, then reveal it without a first-frame jump.
+            withFrameNanos { }
+            editorVisible = true
+        }
+    }
+    LaunchedEffect(currentText, dark) {
+        // Keep typing responsive: render plain text immediately, then highlight
+        // the latest snapshot off the UI thread after a short idle window.
+        highlighted = AnnotatedString(currentText)
+        val snapshot = currentText
+        // The first document waits until the entry fade has settled, so the
+        // initial composition and syntax scan do not compete for the same frame.
+        delay(if (editorVisible) 120 else 300)
+        highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
+    }
+    LaunchedEffect(currentText) {
+        error = null
+        if (currentText.isBlank()) return@LaunchedEffect
+        val snapshot = currentText
+        delay(250)
+        error = withContext(Dispatchers.Default) {
+            try {
+                Json { ignoreUnknownKeys = true }.parseToJsonElement(snapshot)
+                null
+            } catch (e: Exception) {
+                e.message
+            }
+        }
+    }
+
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                val text = inputStream?.bufferedReader()?.readText() ?: ""
-                inputStream?.close()
+                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 if (text.isNotBlank()) {
                     viewModel.updateEditingJson(text)
                     resultSuccess = true; resultMessage = "已导入配置"
@@ -165,9 +239,17 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
 
     Scaffold(
+        // The editor applies IME padding to its scroll viewport below. Do not
+        // let Scaffold consume the keyboard inset before that modifier sees it.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "返回")
+                    }
+                },
                 actions = {
                     var showOverflow by remember { mutableStateOf(false) }
                     IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小") }
@@ -175,15 +257,9 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     IconButton(onClick = { showOverflow = true }) {
                         Icon(Icons.Filled.MoreVert, "更多操作")
                         DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
-                            DropdownMenuItem(text = { Text("注入数据") }, onClick = {
+                            DropdownMenuItem(text = { Text("写入数据库") }, onClick = {
                                 showOverflow = false
                                 viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
-                            })
-                            DropdownMenuItem(text = { Text("回退配置") }, onClick = {
-                                showOverflow = false
-                                viewModel.restoreBackupConfig { s, msg ->
-                                    resultSuccess = s; resultMessage = msg; showResultDialog = true
-                                }
                             })
                             DropdownMenuItem(text = { Text("导入配置") }, onClick = {
                                 showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
@@ -208,78 +284,178 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     }
                 }
             } else {
-                val text = editingJson ?: ""
+                val text = currentText
+                val lineCount = remember(text) { text.count { it == '\n' } + 1 }
                 if (text.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("数据库中无此记录，请输入 JSON 后写入", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    Column(Modifier.fillMaxSize()) {
-                        // 状态栏
-                        Row(
-                            Modifier.fillMaxWidth().background(statusBg).padding(horizontal = 12.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (error != null) {
-                                Text("⚠ ${error!!.take(60)}", style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.error),
-                                    maxLines = 1, modifier = Modifier.weight(1f))
-                            } else {
-                                Text("✓ JSON", style = TextStyle(fontSize = 11.sp, color = textColor.copy(alpha = 0.6f)))
-                            }
-                            Spacer(Modifier.weight(1f))
-                            Text("${text.count { it == '\n' } + 1} 行 · ${fontSize.toInt()}sp",
-                                style = TextStyle(fontSize = 10.sp, color = textColor.copy(alpha = 0.4f)))
+                    if (!editorVisible) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                         }
-
-                        // 编辑区 — 语法高亮
-                        Row(Modifier.fillMaxSize().background(bg)) {
-                            val textScroll = rememberScrollState()
-                            val lines = remember(text) { text.split("\n") }
-
-                            // 行号
-                            Column(
-                                Modifier.width(40.dp).fillMaxHeight()
-                                    .verticalScroll(textScroll)
-                                    .background(lineBg)
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                                horizontalAlignment = Alignment.End
+                    }
+                    AnimatedVisibility(
+                        visible = editorVisible,
+                        enter = fadeIn(animationSpec = tween(160)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            Row(
+                                Modifier.fillMaxWidth().background(statusBg).padding(horizontal = 12.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                lines.forEachIndexed { i, _ ->
-                                    Text("${i + 1}", style = TextStyle(
-                                        fontFamily = FontFamily.Monospace, fontSize = (fontSize * 0.85f).sp,
-                                        lineHeight = (fontSize * 1.5f).sp, color = lineColor))
+                                if (error != null) {
+                                    Text("⚠ ${error!!.take(60)}", style = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.error),
+                                        maxLines = 1, modifier = Modifier.weight(1f))
+                                } else {
+                                    Text("✓ JSON", style = TextStyle(fontSize = 11.sp, color = textColor.copy(alpha = 0.6f)))
+                                }
+                                Spacer(Modifier.weight(1f))
+                                Text("$lineCount 行 · ${fontSize.toInt()}sp",
+                                    style = TextStyle(fontSize = 10.sp, color = textColor.copy(alpha = 0.4f)))
+                            }
+
+                            val textScroll = rememberScrollState()
+                            val horizontalScroll = rememberScrollState()
+                            LaunchedEffect(
+                                fieldValue.selection.end,
+                                cursorRect,
+                                editorFocused,
+                                imeBottom,
+                                editorVisible,
+                                textScroll.viewportSize
+                            ) {
+                                val caret = cursorRect ?: return@LaunchedEffect
+                                if (!editorFocused || !editorVisible || textScroll.viewportSize <= 0) {
+                                    return@LaunchedEffect
+                                }
+                                // windowInsetsPadding(WindowInsets.ime) makes the scroll viewport
+                                // itself end above the keyboard, so use that measured boundary.
+                                delay(if (imeBottom > 0) 120 else 60)
+                                val margin = with(density) { 28.dp.toPx() }
+                                val top = textScroll.value.toFloat()
+                                val bottom = top + textScroll.viewportSize
+                                val target = when {
+                                    caret.bottom + margin > bottom ->
+                                        textScroll.value + (caret.bottom + margin - bottom).toInt()
+                                    caret.top - margin < top ->
+                                        textScroll.value - (top - caret.top + margin).toInt()
+                                    else -> null
+                                }?.coerceIn(0, textScroll.maxValue)
+                                if (target != null && target != textScroll.value) {
+                                    textScroll.animateScrollTo(target, tween(180))
                                 }
                             }
-
-                            // 语法高亮 + 编辑区
-                            val highlighted = remember(text, dark) { highlightJson(text, dark) }
-
-                            Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(textScroll).horizontalScroll(rememberScrollState())) {
-                                BasicTextField(
-                                    value = text,
-                                    onValueChange = { newText ->
-                                        viewModel.updateEditingJson(newText)
-                                        error = try { Json { ignoreUnknownKeys = true }.parseToJsonElement(newText); null }
-                                        catch (e: Exception) { e.message }
-                                    },
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 8.dp),
-                                    textStyle = TextStyle(
-                                        fontFamily = FontFamily.Monospace, fontSize = fontSize.sp,
-                                        lineHeight = (fontSize * 1.5f).sp, color = Color.Transparent
-                                    ),
-                                    cursorBrush = SolidColor(cursorColor),
-                                    decorationBox = { innerTextField ->
-                                        // 层叠: 底层的语法高亮 Text + 上层的编辑区（透明文字，保留光标）
-                                        Text(
-                                            text = highlighted,
-                                            style = TextStyle(
-                                                fontFamily = FontFamily.Monospace, fontSize = fontSize.sp,
-                                                lineHeight = (fontSize * 1.5f).sp
-                                            )
-                                        )
-                                        innerTextField()
+                            val lineNumbers = remember(lineCount) {
+                                buildString {
+                                    for (line in 1..lineCount) {
+                                        if (line > 1) append('\n')
+                                        append(line)
                                     }
-                                )
+                                }
+                            }
+                            var gestureScale by remember { mutableFloatStateOf(1f) }
+                            val transformState = rememberTransformableState { zoomChange, _, _ ->
+                                if (zoomChange != 1f) {
+                                    // Keep the gesture on the GPU layer. Re-measuring the
+                                    // complete document for every touch event causes jank.
+                                    gestureScale = (gestureScale * zoomChange).coerceIn(0.65f, 2.5f)
+                                }
+                            }
+                            LaunchedEffect(transformState.isTransformInProgress) {
+                                if (!transformState.isTransformInProgress && gestureScale != 1f) {
+                                    val appliedScale = gestureScale
+                                    gestureScale = 1f
+                                    fontSize = (fontSize * appliedScale).coerceIn(8f, 32f)
+                                }
+                            }
+                            val gestureLayer = if (gestureScale == 1f) {
+                                Modifier
+                            } else {
+                                Modifier.graphicsLayer {
+                                    scaleX = gestureScale
+                                    scaleY = gestureScale
+                                    transformOrigin = TransformOrigin(0f, 0f)
+                                }
+                            }
+                            Column(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(bg)
+                                    .verticalScroll(textScroll)
+                                    .windowInsetsPadding(WindowInsets.ime)
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .then(gestureLayer)
+                                ) {
+                                    Text(
+                                        text = lineNumbers,
+                                        modifier = Modifier
+                                            .width(40.dp)
+                                            .background(lineBg)
+                                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                                        style = TextStyle(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = (fontSize * 0.85f).sp,
+                                            lineHeight = (fontSize * 1.5f).sp,
+                                            color = lineColor,
+                                            textAlign = TextAlign.End
+                                        )
+                                    )
+
+                                    Box(
+                                        Modifier
+                                            .weight(1f)
+                                            .horizontalScroll(horizontalScroll)
+                                            .transformable(
+                                                state = transformState,
+                                                canPan = { false },
+                                                lockRotationOnZoomPan = true
+                                            )
+                                    ) {
+                                        BasicTextField(
+                                            value = fieldValue,
+                                            onValueChange = { newValue ->
+                                                fieldValue = newValue
+                                                viewModel.updateEditingJson(newValue.text)
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                                .onFocusChanged { editorFocused = it.isFocused },
+                                            textStyle = TextStyle(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = fontSize.sp,
+                                                lineHeight = (fontSize * 1.5f).sp,
+                                                color = Color.Transparent
+                                            ),
+                                            minLines = lineCount.coerceAtLeast(1),
+                                            cursorBrush = SolidColor(cursorColor),
+                                            onTextLayout = { layout: TextLayoutResult ->
+                                                latestTextLayout[0] = layout
+                                                val nextRect = layout.getCursorRect(fieldValue.selection.end)
+                                                if (nextRect != cursorRect) cursorRect = nextRect
+                                            },
+                                            decorationBox = { innerTextField ->
+                                                Box {
+                                                    Text(
+                                                        text = highlighted,
+                                                        style = TextStyle(
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontSize = fontSize.sp,
+                                                            lineHeight = (fontSize * 1.5f).sp
+                                                        )
+                                                    )
+                                                    innerTextField()
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

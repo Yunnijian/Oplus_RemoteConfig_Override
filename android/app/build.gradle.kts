@@ -14,6 +14,10 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "1.2.1"
+        // The target system SQLite library is the 64-bit /system/lib64/libsqlite.so.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -53,6 +57,10 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // libcosa.so is an executable command launched through the root shell.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/*"
         }
@@ -84,9 +92,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
     // libsu (Root access)
-    implementation("com.github.topjohnwu.libsu:core:5.0.5")
-    implementation("com.github.topjohnwu.libsu:service:5.0.5")
-    implementation("com.github.topjohnwu.libsu:nio:5.0.5")
+    implementation("com.github.topjohnwu.libsu:core:6.0.0")
 
     // Core
     implementation("androidx.core:core-ktx:1.12.0")
