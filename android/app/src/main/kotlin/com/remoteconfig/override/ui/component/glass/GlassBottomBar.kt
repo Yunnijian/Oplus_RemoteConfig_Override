@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -66,14 +67,17 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
+import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalEnableGlass
 import com.remoteconfig.override.ui.theme.LocalEnableGlassBlur
+import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isInDarkTheme
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Tab 按压缩放比例（值只在 GlassTab 的 graphicsLayer lambda 中读取，draw-phase 观测）。 */
 val LocalGlassTabScale = staticCompositionLocalOf { { 1f } }
@@ -81,10 +85,27 @@ val LocalGlassTabScale = staticCompositionLocalOf { { 1f } }
 /** Tab 点击回调：由 GlassBottomBar 提供（tab 只做视觉，点击统一汇入 currentIndex → snapshotFlow）。 */
 val LocalGlassTabSelect = staticCompositionLocalOf<(Int) -> Unit> { {} }
 
-// 强调色：Miuix 默认蓝（与 Miuix 主题主色一致；深色按 catalog 的方式提亮一档）。
-// Task 7 接入真实主题后再改为读 MiuixTheme/MaterialTheme primary。
-private val AccentLight = Color(0xFF3482FF)
-private val AccentDark = Color(0xFF348BFF)
+// 主题色：按 LocalUiMode 读 MiuixTheme / MaterialTheme 的 primary/surface/onSurface
+// （Task 7 真实主题接入）。三个 helper 同时被 GlassBottomBar / GlassTab / rememberGlassBackdrop 共用。
+@Composable
+internal fun glassAccentColor(): Color = when (LocalUiMode.current) {
+    UiMode.Miuix -> MiuixTheme.colorScheme.primary
+    UiMode.Material -> MaterialTheme.colorScheme.primary
+}
+
+/** 底栏容器 / backdrop 垫底色：主题 surface。 */
+@Composable
+internal fun glassSurfaceColor(): Color = when (LocalUiMode.current) {
+    UiMode.Miuix -> MiuixTheme.colorScheme.surface
+    UiMode.Material -> MaterialTheme.colorScheme.surface
+}
+
+/** 底栏内容色（tab 图标/文字）：主题 onSurface。 */
+@Composable
+internal fun glassContentColor(): Color = when (LocalUiMode.current) {
+    UiMode.Miuix -> MiuixTheme.colorScheme.onSurface
+    UiMode.Material -> MaterialTheme.colorScheme.onSurface
+}
 
 /**
  * 液态玻璃底栏。
@@ -139,10 +160,9 @@ private fun GlassLiquidBottomTabs(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isInDarkTheme()
-    val accentColor = if (isLightTheme) AccentLight else AccentDark
-    val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.4f)
-        else Color(0xFF121212).copy(0.4f)
+    // Bug 3: 强调/容器色读主题（Miuix/Material 双源）；玻璃路径容器色带 alpha 保留半透明玻璃观感
+    val accentColor = glassAccentColor()
+    val containerColor = glassSurfaceColor().copy(alpha = 0.4f)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -380,8 +400,9 @@ private fun GlassFallbackBottomBar(
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isInDarkTheme()
-    val accentColor = if (isLightTheme) AccentLight else AccentDark
-    val containerColor = if (isLightTheme) Color(0xFFFAFAFA) else Color(0xFF121212)
+    // Bug 3: 降级路径同样读主题色
+    val accentColor = glassAccentColor()
+    val containerColor = glassSurfaceColor()
 
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val animationScope = rememberCoroutineScope()

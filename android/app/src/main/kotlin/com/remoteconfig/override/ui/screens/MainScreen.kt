@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -33,7 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -46,16 +46,17 @@ import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.component.glass.GlassBottomBar
 import com.remoteconfig.override.ui.component.glass.LocalGlassTabScale
 import com.remoteconfig.override.ui.component.glass.LocalGlassTabSelect
+import com.remoteconfig.override.ui.component.glass.glassContentColor
 import com.remoteconfig.override.ui.component.glass.rememberGlassBackdrop
 import com.remoteconfig.override.ui.component.rememberContentReady
 import com.remoteconfig.override.ui.theme.LocalEnableGlass
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isExpandedWidth
-import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.NavigationRail as MiuixNavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
+import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.rememberNavigationRailState as rememberMiuixNavigationRailState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Home
@@ -102,26 +103,25 @@ fun MainScreen(viewModel: MainViewModel) {
     } else {
         // ── 窄屏（Compact/Medium）：保持既有 3 tab Pager + 底栏 ──
         val glassBackdrop = rememberGlassBackdrop(enabled = LocalEnableGlass.current)
-        Scaffold(
-            bottomBar = {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding(),
-                    contentAlignment = Alignment.BottomCenter,
+        val bottomBar: @Composable () -> Unit = {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                GlassBottomBar(
+                    selectedIndex = { currentPage },
+                    onSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+                    backdrop = glassBackdrop,
                 ) {
-                    GlassBottomBar(
-                        selectedIndex = { currentPage },
-                        onSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
-                        backdrop = glassBackdrop,
-                    ) {
-                        GlassTab(0, Icons.Filled.Home, "首页")
-                        GlassTab(1, Icons.AutoMirrored.Filled.List, "配置")
-                        GlassTab(2, Icons.Filled.Settings, "设置")
-                    }
+                    GlassTab(0, Icons.Filled.Home, "首页")
+                    GlassTab(1, Icons.AutoMirrored.Filled.List, "配置")
+                    GlassTab(2, Icons.Filled.Settings, "设置")
                 }
-            },
-        ) { innerPadding ->
+            }
+        }
+        val pagerContent: @Composable (PaddingValues) -> Unit = { innerPadding ->
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
@@ -139,6 +139,18 @@ fun MainScreen(viewModel: MainViewModel) {
                     onDualPaneSelect = {},
                 )
             }
+        }
+        // Bug 3: 外壳 Scaffold 按 LocalUiMode 分支（Miuix 用 MiuixScaffold），bottomBar/pager 共享
+        if (LocalUiMode.current == UiMode.Miuix) {
+            MiuixScaffold(
+                bottomBar = bottomBar,
+                content = pagerContent,
+            )
+        } else {
+            Scaffold(
+                bottomBar = bottomBar,
+                content = pagerContent,
+            )
         }
     }
 }
@@ -267,8 +279,12 @@ private fun MainPagerPage(
 fun RowScope.GlassTab(index: Int, icon: ImageVector, label: String) {
     val select = LocalGlassTabSelect.current
     val scale = LocalGlassTabScale.current
-    // 任务 6 先用固定兜底内容色（避免主题依赖），Task 7 接入真实主题色后替换
-    val contentColor = if (isInDarkTheme()) Color(0xFFE6E6E6) else Color(0xFF1A1A1A)
+    // Bug 3: 内容色读主题 onSurface；文字样式按 LocalUiMode 取 Miuix footnote1 / M3 labelSmall
+    val contentColor = glassContentColor()
+    val labelStyle = when (LocalUiMode.current) {
+        UiMode.Miuix -> MiuixTheme.textStyles.footnote1
+        UiMode.Material -> MaterialTheme.typography.labelSmall
+    }
     Column(
         Modifier
             .clip(Capsule())
@@ -294,6 +310,6 @@ fun RowScope.GlassTab(index: Int, icon: ImageVector, label: String) {
             modifier = Modifier.size(24.dp),
             tint = contentColor,
         )
-        Text(label, style = MaterialTheme.typography.labelSmall, color = contentColor)
+        Text(label, style = labelStyle, color = contentColor)
     }
 }
