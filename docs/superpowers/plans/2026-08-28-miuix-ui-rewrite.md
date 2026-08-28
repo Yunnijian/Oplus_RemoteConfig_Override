@@ -19,7 +19,7 @@
 - 分支：`MIUIX-test`。每个任务结束：`./gradlew :app:compileDebugKotlin` 通过 + git commit。
 - **数据层完全不动**：`MainViewModel.kt`、`DatabaseManager.kt`、`model/GameConfig.kt`、`App.kt` 的公开签名保持不变。UI 任务如需 MainViewModel 新增只读状态必须走 `derivedStateOf` 且不改现有函数签名。
 - 版本：`versionCode = 2`、`versionName = "1.2.1"` 保持不变（发版号调整不在本计划范围）。
-- `minSdk = 26` 不变；`compileSdk = 36`、`targetSdk = 36`；Java 21。
+- `minSdk = 26` 不变；`compileSdk = 37`（BOM 2026.08.00 AAR 元数据要求，Task 2 已验证）、`targetSdk = 36`；Java 21。
 - 性能规则（规格 9 节）：动画值只在 `graphicsLayer{}`/`drawBackdrop` lambda 中读取；Animatable 必须设 visibilityThreshold；`items(key, contentType)`；`collectAsStateWithLifecycle`；重计算 `Dispatchers.IO`；液态玻璃必须有能力检测 + 关闭降级分支。
 - 所有新 UI 代码中文文案与现有 app 保持一致（"写入数据库"、"应用增强服务" 等术语）。
 - 测试策略：纯逻辑（枚举/仓库映射）用 kotlin.test 单测；UI 用编译 + 手动验收清单（无设备自动化）。每个 UI 任务的验证步骤包含 `assembleDebug` 成功。
