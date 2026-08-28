@@ -11,7 +11,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -45,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
+import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -202,7 +202,9 @@ private fun ConfigEditorContent(
     // 编辑器/窗格加载状态：与列表刷新（isLoading）分离，双窗下点列表项不影响左列表
     val isEditorLoading by viewModel.isEditorLoading.collectAsState()
     val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
+    // Bug 2：编辑器配色（背景/正文/行号/高亮色表/光标/状态栏）必须跟随应用主题
+    // （AppSettingsRepository.colorMode），而非系统深色。SYSTEM 模式回落系统。
+    val dark = isInDarkTheme()
 
     val appLabel = remember(editingPackageName) {
         editingPackageName?.let { p -> try {
