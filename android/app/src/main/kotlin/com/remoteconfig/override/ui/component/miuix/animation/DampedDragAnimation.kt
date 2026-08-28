@@ -1,9 +1,7 @@
-// Ported from AndroidLiquidGlass catalog (com.kyant.backdrop.catalog.utils.DampedDragAnimation),
-// https://github.com/Kyant0/AndroidLiquidGlass — Apache 2.0.
-// Package renamed; the missing `import kotlinx.coroutines.android.awaitFrame` from the catalog
-// source file has been added (release() uses awaitFrame()).
+// Ported verbatim from KernelSU
+// me.weishu.kernelsu.ui.component.miuix.animation.DampedDragAnimation.
 
-package com.remoteconfig.override.ui.component.glass
+package com.remoteconfig.override.ui.component.miuix.animation
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
@@ -16,11 +14,10 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.android.awaitFrame
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.remoteconfig.override.ui.component.miuix.modifier.inspectDragGestures
 import kotlin.math.abs
-import kotlin.time.Clock
 
 class DampedDragAnimation(
     private val animationScope: CoroutineScope,
@@ -29,6 +26,7 @@ class DampedDragAnimation(
     val visibilityThreshold: Float,
     val initialScale: Float,
     val pressedScale: Float,
+    val canDrag: (Offset) -> Boolean = { true },
     val onDragStarted: DampedDragAnimation.(position: Offset) -> Unit,
     val onDragStopped: DampedDragAnimation.() -> Unit,
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
@@ -61,7 +59,6 @@ class DampedDragAnimation(
     private val velocityTracker = VelocityTracker()
 
     val value: Float get() = valueAnimation.value
-    val progress: Float get() = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
     val targetValue: Float get() = valueAnimation.targetValue
     val pressProgress: Float get() = pressProgressAnimation.value
     val scaleX: Float get() = scaleXAnimation.value
@@ -83,7 +80,15 @@ class DampedDragAnimation(
                 release()
             }
         ) { change, dragAmount ->
-            onDrag(size, dragAmount)
+            val position = change.position
+            val previousPosition = change.previousPosition
+
+            val isInside = canDrag(position)
+            val wasInside = canDrag(previousPosition)
+
+            if (isInside && wasInside) {
+                onDrag(size, dragAmount)
+            }
         }
     }
 
@@ -101,9 +106,7 @@ class DampedDragAnimation(
             awaitFrame()
             if (value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
-                snapshotFlow { valueAnimation.value }
-                    .filter { abs(it - valueAnimation.targetValue) < threshold }
-                    .first()
+                snapshotFlow { valueAnimation.value }.first { abs(it - valueAnimation.targetValue) < threshold }
             }
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
@@ -115,15 +118,6 @@ class DampedDragAnimation(
         val targetValue = value.coerceIn(valueRange)
         animationScope.launch {
             launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() } }
-        }
-    }
-
-    /** 瞬时跳到位（无动画）——外部（pager 滑动）同步用，让指示器即时跟随。 */
-    fun snapTo(value: Float) {
-        animationScope.launch {
-            mutatorMutex.mutate {
-                valueAnimation.snapTo(value.coerceIn(valueRange))
-            }
         }
     }
 
@@ -143,7 +137,7 @@ class DampedDragAnimation(
 
     private fun updateVelocity() {
         velocityTracker.addPosition(
-            Clock.System.now().toEpochMilliseconds(),
+            System.currentTimeMillis(),
             Offset(value, 0f)
         )
         val targetVelocity = velocityTracker.calculateVelocity().x / (valueRange.endInclusive - valueRange.start)

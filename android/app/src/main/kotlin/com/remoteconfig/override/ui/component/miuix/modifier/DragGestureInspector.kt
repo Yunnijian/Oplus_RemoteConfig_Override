@@ -1,7 +1,7 @@
-// Ported from AndroidLiquidGlass catalog (com.kyant.backdrop.catalog.utils.DragGestureInspector),
-// https://github.com/Kyant0/AndroidLiquidGlass — Apache 2.0. Only the package name was changed.
+// Ported verbatim from KernelSU
+// me.weishu.kernelsu.ui.component.miuix.modifier.DragGestureInspector.
 
-package com.remoteconfig.override.ui.component.glass
+package com.remoteconfig.override.ui.component.miuix.modifier
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -25,13 +25,12 @@ suspend fun PointerInputScope.inspectDragGestures(
         val initialDown = awaitFirstDown(false, PointerEventPass.Initial)
 
         val down = awaitFirstDown(false)
-        val drag = initialDown
 
         onDragStart(down)
-        onDrag(drag, Offset.Zero)
+        onDrag(initialDown, Offset.Zero)
         val upEvent =
             drag(
-                pointerId = drag.id,
+                pointerId = initialDown.id,
                 onDrag = { onDrag(it, it.positionChange()) }
             )
         if (upEvent == null) {
