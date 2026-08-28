@@ -228,14 +228,17 @@ private fun GlassLiquidBottomTabs(
                 }
             )
         }
-        // 外部（pager 滑动/翻页）变化：只驱动指示器动画跟随，不写 currentIndex、
-        // 不触发 onTabSelected——否则手势滑动中每个 currentPage 都会反向
-        // animateScrollToPage，与手指打架（Bug 2）。点击 tab 走 tabSelect → currentIndex 链。
+        // 外部（pager 滑动/点击）变化：currentIndex 跟随 selectedTabIndex()。
+        // selectedIndex = MainScreen 协调器的 selectedPage：
+        //  - 手势滑动 → 协调器 syncPage 实时更新 selectedPage → 这里跟随（tab 跟手）
+        //  - 点击 tab → 协调器 animateToPage 置位 selectedPage + isNavigating，滚动中不变
+        //    → 这里不被拉回；滚动完 selectedPage 确认同值
+        // 协调器已用 isNavigating 防"点击滚动中 currentPage 回跳拉回"，这里无需 clickPending。
         LaunchedEffect(Unit) {
             snapshotFlow { selectedTabIndex() }
                 .collect { index ->
                     if (index != currentIndex) {
-                        dampedDragAnimation.animateToValue(index.toFloat())
+                        currentIndex = index
                     }
                 }
         }
@@ -264,8 +267,10 @@ private fun GlassLiquidBottomTabs(
             )
         }
 
-        // tab 点击统一汇入 currentIndex（onSelected 由 snapshotFlow 驱动，见上方 LaunchedEffect）
-        val tabSelect: (Int) -> Unit = { index -> currentIndex = index }
+        // tab 点击统一汇入 currentIndex（onTabSelected 由 snapshotFlow 驱动，见上方 LaunchedEffect）
+        val tabSelect: (Int) -> Unit = { index ->
+            currentIndex = index
+        }
 
         // —— 第一段：可见玻璃面板 ——
         // Bug 8: 可见 Row 同样 provide LocalGlassTabSelect/LocalGlassTabScale——之前只有离屏
@@ -448,10 +453,8 @@ private fun GlassFallbackBottomBar(
         )
     }
 
-    // 外部（pager 滑动）变化：只跟随指示器（indicatorOffset 由 currentIndex 驱动，
-    // 直接更新 currentIndex 即可），不触发 onSelected——防手势滑动中反向滚动（Bug 2）。
-    // 用户点击 tab → tabSelect 写 currentIndex（置 clickPending=true）→ onSelected。
-    var clickPending by remember { mutableStateOf(false) }
+    // 外部（pager 滑动/点击）变化：currentIndex 跟随 selectedIndex()（协调器 selectedPage，
+    // isNavigating 已防点击滚动中拉回）。点击 tab → tabSelect 写 currentIndex → onSelected。
     LaunchedEffect(Unit) {
         snapshotFlow { selectedIndex() }
             .collect { index ->
@@ -463,10 +466,7 @@ private fun GlassFallbackBottomBar(
             .drop(1)
             .collectLatest { index ->
                 dampedDragAnimation.animateToValue(index.toFloat())
-                if (clickPending) {
-                    clickPending = false
-                    onSelected(index)
-                }
+                onSelected(index)
             }
     }
 
@@ -485,10 +485,9 @@ private fun GlassFallbackBottomBar(
             label = "glassFallbackIndicatorOffset"
         )
 
-        // 用户点击 tab：置 clickPending → onSelected 触发（驱动 pager 滚动）。
-        // 外部滑动同步（上方 LaunchedEffect）不置 clickPending，只跟随指示器。
+        // 用户点击 tab：写 currentIndex → onSelected 触发（驱动 pager 滚动）。
+        // 协调器 isNavigating 已防点击滚动中 selectedPage 被拉回，无需 clickPending。
         val tabSelect: (Int) -> Unit = { index ->
-            clickPending = true
             currentIndex = index
         }
         CompositionLocalProvider(

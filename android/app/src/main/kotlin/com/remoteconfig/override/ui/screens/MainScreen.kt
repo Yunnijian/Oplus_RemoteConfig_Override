@@ -26,8 +26,11 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,6 +56,7 @@ import com.remoteconfig.override.ui.theme.LocalEnableGlass
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.viewmodel.MainViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.NavigationRail as MiuixNavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem as MiuixNavigationRailItem
@@ -66,17 +70,72 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val PAGE_COUNT = 3
 
+/**
+ * Pager 与 tab 选中态的协调器（对齐 KernelSU MainPagerState 模型）。
+ *
+ * - [selectedPage]：tab 选中态（唯一状态源）。点击 tab → [animateToPage] 置位；
+ *   手势滑动 → [syncPage] 同步（currentPage 实时跟随）。
+ * - [isNavigating]：程序滚动中标志。为 true 时 [syncPage] 不执行，
+ *   防止"点击 tab 触发的滚动动画中 currentPage 回跳"把 selectedPage 拉回旧页。
+ */
+class MainPagerStateCoordinator(
+    val pagerState: androidx.compose.foundation.pager.PagerState,
+    private val coroutineScope: kotlinx.coroutines.CoroutineScope,
+) {
+    var selectedPage by mutableIntStateOf(pagerState.currentPage)
+        private set
+
+    var isNavigating by mutableStateOf(false)
+        private set
+
+    private var navJob: kotlinx.coroutines.Job? = null
+
+    fun animateToPage(targetIndex: Int) {
+        if (targetIndex == selectedPage) return
+        navJob?.cancel()
+        selectedPage = targetIndex
+        isNavigating = true
+        navJob = coroutineScope.launch {
+            val myJob = coroutineContext[Job]
+            try {
+                pagerState.animateScrollToPage(targetIndex)
+            } finally {
+                if (navJob == myJob) {
+                    isNavigating = false
+                    if (pagerState.currentPage != targetIndex) {
+                        selectedPage = pagerState.currentPage
+                    }
+                }
+            }
+        }
+    }
+
+    /** 手势滑动后同步：不在程序滚动时才更新 selectedPage（实时跟随手指）。 */
+    fun syncPage() {
+        if (!isNavigating && selectedPage != pagerState.currentPage) {
+            selectedPage = pagerState.currentPage
+        }
+    }
+}
+
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { PAGE_COUNT })
     val contentReady = rememberContentReady()
     val scope = rememberCoroutineScope()
     val navigator = LocalNavigator.current
-    // Bug 2: 内容门控（是否加载当前页）仍用 settledPage（停稳才算当前页）；tab 选中高亮
-    // 改用 currentPage（滑动中实时更新，手势滑动时 tab 即时跟随）。
+    // 内容门控用 settledPage（停稳才算当前页）
     val settledPage = pagerState.settledPage
-    val currentPage = pagerState.currentPage
     val expanded = isExpandedWidth()
+
+    // Pager ↔ tab 协调器（对齐 KernelSU MainPagerState）
+    val pagerCoordinator = remember(pagerState, scope) {
+        MainPagerStateCoordinator(pagerState, scope)
+    }
+    // 手势滑动 → 实时同步 tab（isNavigating=false 时才生效）
+    LaunchedEffect(pagerState.currentPage) {
+        pagerCoordinator.syncPage()
+    }
 
     // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
     var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
@@ -86,9 +145,9 @@ fun MainScreen(viewModel: MainViewModel) {
         Row(Modifier.fillMaxSize()) {
             // Bug 4: rail 选中高亮用 currentPage（即时），内容门控仍用 settledPage
             if (LocalUiMode.current == UiMode.Miuix) {
-                MiuixNavRail(selectedPage = currentPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
+                MiuixNavRail(selectedPage = pagerCoordinator.selectedPage, onSelect = { pagerCoordinator.animateToPage(it) })
             } else {
-                MaterialNavRail(selectedPage = currentPage, onSelect = { scope.launch { pagerState.animateScrollToPage(it) } })
+                MaterialNavRail(selectedPage = pagerCoordinator.selectedPage, onSelect = { pagerCoordinator.animateToPage(it) })
             }
             MainPager(
                 pagerState = pagerState,
@@ -114,8 +173,10 @@ fun MainScreen(viewModel: MainViewModel) {
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 GlassBottomBar(
-                    selectedIndex = { currentPage },
-                    onSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+                    // tab 选中态：读协调器 selectedPage（点击置位 + 手势 syncPage 实时跟随），
+                    // 而不是直接读 currentPage/settledPage——isNavigating 协调点击滚动与手势同步
+                    selectedIndex = { pagerCoordinator.selectedPage },
+                    onSelected = { index -> pagerCoordinator.animateToPage(index) },
                     backdrop = glassBackdrop,
                 ) {
                     // Bug 1: tab 图标按 UiMode 选源（Miuix 用 MiuixIcons，Material 用 M3 icons）

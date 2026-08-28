@@ -118,6 +118,15 @@ class DampedDragAnimation(
         }
     }
 
+    /** 瞬时跳到位（无动画）——外部（pager 滑动）同步用，让指示器即时跟随。 */
+    fun snapTo(value: Float) {
+        animationScope.launch {
+            mutatorMutex.mutate {
+                valueAnimation.snapTo(value.coerceIn(valueRange))
+            }
+        }
+    }
+
     fun animateToValue(value: Float) {
         animationScope.launch {
             mutatorMutex.mutate {
