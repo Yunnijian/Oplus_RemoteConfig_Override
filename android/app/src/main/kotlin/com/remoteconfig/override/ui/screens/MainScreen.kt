@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.relocation.BringIntoViewResponder
+import androidx.compose.foundation.relocation.bringIntoViewResponder
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold as MaterialScaffold
 import androidx.compose.runtime.Composable
@@ -50,6 +52,29 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val PAGE_COUNT = 3
+
+/**
+ * 截断 Pager 各页内容向外层 HorizontalPager 的可见性请求（bringIntoView）：
+ * 离屏组装的页面（编辑器文本域 / 设置页下拉锚点）的边界可落在相邻页范围内，
+ * 聚焦、inset 变化等时机触发的请求会把 Pager 拽向相邻 tab（跳设置 / 闪烁回弹）。
+ * tab 切换只经 MainPagerState（侧栏/底栏点击），无需 bringIntoView 参与。
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private val PagerBringIntoViewBarrier = object : BringIntoViewResponder {
+    override fun calculateRectForParent(rect: androidx.compose.ui.geometry.Rect): androidx.compose.ui.geometry.Rect =
+        androidx.compose.ui.geometry.Rect.Zero
+    override suspend fun bringChildIntoView(childRect: () -> androidx.compose.ui.geometry.Rect?) { /* swallow */ }
+}
+
+/** 每页内容根部的可见性请求屏障。 */
+@Composable
+private fun PageBringIntoViewBarrier(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier.bringIntoViewResponder(PagerBringIntoViewBarrier)
+    ) {
+        content()
+    }
+}
 
 /**
  * 主页面 — 完整对齐 KernelSU MainScreen（MainActivity.kt:224-388）。
@@ -143,6 +168,10 @@ fun MainScreen(viewModel: MainViewModel) {
                 // （bottomInnerPadding 透传给页面的 contentPadding）。
                 HorizontalPager(
                     state = pagerState,
+                    // 宽屏双窗时 JSON 编辑器嵌在第 1 页内，编辑器上的横向甩动会被
+                    // Pager 继承导致翻到相邻 tab（设置页）；此时 tab 切换走侧栏，
+                    // 禁用 pager 横滑。窄屏编辑器是独立路由，不受影响。
+                    userScrollEnabled = !(expanded && dualPaneSelected != null),
                     modifier = if (enableFloatingBottomBar && enableFloatingBottomBarBlur) {
                         Modifier.layerBackdrop(backdrop)
                     } else {
@@ -153,35 +182,41 @@ fun MainScreen(viewModel: MainViewModel) {
                 ) { page ->
                     val isCurrentPage = page == settledPage
                     when (page) {
-                        0 -> if (isCurrentPage || contentReady) HomePage(viewModel, bottomInnerPadding, isCurrentPage)
-                        1 -> if (isCurrentPage || contentReady) ConfigListPage(
-                            viewModel = viewModel,
-                            bottomInnerPadding = bottomInnerPadding,
-                            isCurrentPage = isCurrentPage,
-                            onGameClick = { pkg ->
-                                if (expanded) {
-                                    // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
-                                    selectDualPane(pkg)
-                                } else {
-                                    viewModel.loadConfig(pkg)
-                                    navigator.push(Route.ConfigEditor(pkg))
-                                }
-                            },
-                            onNewConfig = { pkg ->
-                                // 新建配置同样会重置编辑缓冲区：脏状态下先确认。
-                                if (expanded && viewModel.isEditingDirty()) {
-                                    pendingNewConfig = pkg
-                                } else {
-                                    viewModel.createNewConfig(pkg)
-                                    if (expanded) dualPaneSelected = pkg
-                                    else navigator.push(Route.ConfigEditor(pkg))
-                                }
-                            },
-                            dualPaneSelected = if (expanded) dualPaneSelected else null,
-                            onDualPaneSelect = selectDualPane,
-                        )
+                        0 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
+                            HomePage(viewModel, bottomInnerPadding, isCurrentPage)
+                        }
+                        1 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
+                            ConfigListPage(
+                                viewModel = viewModel,
+                                bottomInnerPadding = bottomInnerPadding,
+                                isCurrentPage = isCurrentPage,
+                                onGameClick = { pkg ->
+                                    if (expanded) {
+                                        // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
+                                        selectDualPane(pkg)
+                                    } else {
+                                        viewModel.loadConfig(pkg)
+                                        navigator.push(Route.ConfigEditor(pkg))
+                                    }
+                                },
+                                onNewConfig = { pkg ->
+                                    // 新建配置同样会重置编辑缓冲区：脏状态下先确认。
+                                    if (expanded && viewModel.isEditingDirty()) {
+                                        pendingNewConfig = pkg
+                                    } else {
+                                        viewModel.createNewConfig(pkg)
+                                        if (expanded) dualPaneSelected = pkg
+                                        else navigator.push(Route.ConfigEditor(pkg))
+                                    }
+                                },
+                                dualPaneSelected = if (expanded) dualPaneSelected else null,
+                                onDualPaneSelect = selectDualPane,
+                            )
+                        }
 
-                        2 -> if (isCurrentPage || contentReady) SettingsContent(bottomInnerPadding)
+                        2 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
+                            SettingsContent(bottomInnerPadding)
+                        }
                     }
                 }
             }
