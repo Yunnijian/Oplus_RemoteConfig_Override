@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.util.fastCoerceIn
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import com.remoteconfig.override.ui.component.miuix.modifier.inspectDragGestures
 import org.intellij.lang.annotations.Language
@@ -43,9 +42,6 @@ class InteractiveHighlight(
 
     private var startPosition = Offset.Zero
     val offset: Offset get() = positionAnimation.value - startPosition
-
-    /** 在途的按压位置同步：snapTo 目标为绝对坐标，新事件取消上一个即可，无协程堆积。 */
-    private var positionSnapJob: Job? = null
 
     @Language("AGSL")
     private val shader =
@@ -114,9 +110,7 @@ class InteractiveHighlight(
                     }
                 }
             ) { change, _ ->
-                // snapTo 为绝对坐标：取消在途任务直接换新目标，中间位置无需逐条应用。
-                positionSnapJob?.cancel()
-                positionSnapJob = animationScope.launch { positionAnimation.snapTo(change.position) }
+                animationScope.launch { positionAnimation.snapTo(change.position) }
             }
         }
 }
