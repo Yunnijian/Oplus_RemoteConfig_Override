@@ -245,7 +245,10 @@ fun ConfigListContentMiuix(
     ) { innerPadding ->
         Box(Modifier.fillMaxSize().padding(innerPadding)) {
             when {
-                isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                // spinner 仅在无数据可显示时出现（真正的首屏加载）；已有数据时
+                // refreshAll 是后台刷新（粘性首刷），整体换 spinner 会把列表拆掉
+                // 重建，表现为切到配置页时列表“闪一下”。
+                isLoading && filteredGames.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
                 filteredGames.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

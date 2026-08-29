@@ -149,7 +149,9 @@ fun ConfigListContentMaterial(
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
 
-            if (isLoading) {
+            // spinner 仅在无数据可显示时出现（真正的首屏加载）；已有数据时
+            // refreshAll 是后台刷新，整体换 spinner 会让切 tab 时列表“闪一下”。
+            if (isLoading && filteredGames.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             } else if (filteredGames.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
