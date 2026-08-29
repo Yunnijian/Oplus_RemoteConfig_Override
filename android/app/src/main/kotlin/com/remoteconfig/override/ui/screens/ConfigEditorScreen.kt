@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.settings.UiMode
+import com.remoteconfig.override.ui.component.rememberContentReady
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -313,10 +315,14 @@ private fun ConfigEditorContent(
     }
     // Bug 3：editorVisible 纳入 currentText 判定——空文档（DB 无记录/全选删除后）也可编辑；
     // 导入文件（updateEditingJson）会改变 currentText 触发本效果重新运行，保证导入后可见。
-    LaunchedEffect(isEditorLoading, editingPackageName, currentText) {
+    // P1（对齐 KernelSU DeferredContent）：转场期间保持 spinner 占位，转场结束 +1 帧后才
+    // 揭幕编辑器全树——push 转场中段组合整文档行号 + 整高 BasicTextField 是列表进编辑器
+    // 卡顿的根因。双窗 pane 嵌在 Main entry 内（其转场早已结束），ready 恒为 true，行为不变。
+    val contentReady = rememberContentReady()
+    LaunchedEffect(isEditorLoading, editingPackageName, currentText, contentReady) {
         if (isEditorLoading) {
             editorVisible = false
-        } else if (!editorVisible) {
+        } else if (contentReady && !editorVisible) {
             // Let the loading state commit one frame before composing the large
             // editor tree, then reveal it without a first-frame jump.
             withFrameNanos { }
@@ -324,14 +330,17 @@ private fun ConfigEditorContent(
         }
     }
     LaunchedEffect(currentText, dark) {
-        // Keep typing responsive: render plain text immediately, then highlight
-        // the latest snapshot off the UI thread after a short idle window.
-        highlighted = AnnotatedString(currentText)
+        // P2（对齐 KernelSU produceState(占位) 思路）：揭幕前（spinner 期）文档未上屏、
+        // 无输入竞争，直接在后台完成全量高亮——揭幕即带色，消除“先素文 120ms 后突变彩色”；
+        // 揭幕后的键入路径保持素文先行 + 空闲窗口重上色，保证输入响应。
         val snapshot = currentText
-        // The first document waits until the entry fade has settled, so the
-        // initial composition and syntax scan do not compete for the same frame.
-        delay(if (editorVisible) 120 else 300)
-        highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
+        if (!editorVisible) {
+            highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
+        } else {
+            highlighted = AnnotatedString(snapshot)
+            delay(120)
+            highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
+        }
     }
     LaunchedEffect(currentText) {
         error = null
@@ -441,7 +450,13 @@ private fun ConfigEditorContent(
                 // Bug 3：空文档与有内容文档共用同一编辑器（含可编辑输入框）。
                 // "数据库中无此记录"等引导文案由状态栏/placeholder 承担，不再替代输入框。
                 val editorPane: @Composable () -> Unit = {
-                    if (!editorVisible) {
+                    // P5：spinner 随编辑器淡入同步淡出（交叉过渡）——原先 editorVisible 翻转
+                    // 瞬间移除 spinner，揭幕首帧（全树组合+测量最重的一帧）落成“spinner 瞬失→空白”。
+                    AnimatedVisibility(
+                        visible = !editorVisible,
+                        exit = fadeOut(animationSpec = tween(120)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                         }
