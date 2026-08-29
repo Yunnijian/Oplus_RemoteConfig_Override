@@ -69,11 +69,10 @@ fun ConfigListContentMaterial(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     val qt = searchQuery.trim().lowercase()
-    val filteredGames by remember(gameList, qt) {
-        derivedStateOf {
-            if (qt.isEmpty()) gameList
-            else gameList.filter { it.appName.lowercase().contains(qt) || it.packageName.lowercase().contains(qt) }
-        }
+    // gameList/qt 均为 remember 键，直接计算即可（derivedStateOf 包装在键变化时重建，纯属多余）
+    val filteredGames = remember(gameList, qt) {
+        if (qt.isEmpty()) gameList
+        else gameList.filter { it.appName.lowercase().contains(qt) || it.packageName.lowercase().contains(qt) }
     }
 
     Scaffold(

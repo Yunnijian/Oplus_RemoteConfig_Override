@@ -406,16 +406,21 @@ fun SegmentedColumn(
                 }
             }
         ) { measurables, constraints ->
-            val placeables = measurables.map { it.measure(constraints) }
+            // progress == 0 的项跳过测量与放置：不可见项不参与测量/绘制
+            // （原实现每帧全量测量且隐藏项以 alpha≈0 常驻绘制）。
+            // 注意 progress 读取发生在 measure 块内，展开/收起动画期间本就按帧重新测量。
+            val placeables = measurables.mapIndexed { index, measurable ->
+                if (progresses[index].value > 0f) measurable.measure(constraints) else null
+            }
             val positions = IntArray(placeables.size)
             var y = 0f
             placeables.forEachIndexed { index, placeable ->
                 positions[index] = y.roundToInt()
-                y += placeable.height * progresses[index].value.coerceAtLeast(0f)
+                y += (placeable?.height ?: 0) * progresses[index].value.coerceAtLeast(0f)
             }
             layout(constraints.maxWidth, y.roundToInt().coerceAtLeast(0)) {
                 placeables.forEachIndexed { index, placeable ->
-                    placeable.placeRelative(0, positions[index])
+                    placeable?.placeRelative(0, positions[index])
                 }
             }
         }

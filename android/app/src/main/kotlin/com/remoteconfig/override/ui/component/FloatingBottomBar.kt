@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -77,10 +78,11 @@ import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sign
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 val LocalFloatingBottomBarTabScale = staticCompositionLocalOf { { 1f } }
 
@@ -117,17 +119,25 @@ private fun rememberGravityRotatedHighlight(
 ): Highlight {
     val baseStyle = base.style as BloomStroke
     val tilt by rememberDeviceTilt()
-    val rotatedPrimary = remember(tilt, baseStyle.primaryLight, extraDegrees) {
-        val basePrimary = baseStyle.primaryLight
-        val gx = tilt.gravityX
-        val gy = tilt.gravityY
-        val gMagSq = gx * gx + gy * gy
-        val (lx0, ly0) = if (gMagSq > GRAVITY_DIR_THRESHOLD_SQ) {
-            val invMag = 1f / sqrt(gMagSq)
-            (gx * invMag) to (gy * invMag)
-        } else {
-            0f to -1f
+    // 重力方向按 15° 量化（含静止回落默认向上）：传感器微动不再逐 tick 重建
+    // Highlight / 触发重组，仅方向跨档时更新。传感器监听由 miuix-blur 库管理，
+    // 此处消除的是传感器频率的重组与对象重建开销。
+    val quantizedDirection by remember {
+        derivedStateOf {
+            val gx = tilt.gravityX
+            val gy = tilt.gravityY
+            if (gx * gx + gy * gy > GRAVITY_DIR_THRESHOLD_SQ) {
+                val step = (PI / 12.0).toFloat()
+                val snapped = (atan2(gy, gx) / step).roundToInt() * step
+                cos(snapped) to sin(snapped)
+            } else {
+                0f to -1f
+            }
         }
+    }
+    val rotatedPrimary = remember(quantizedDirection, baseStyle.primaryLight, extraDegrees) {
+        val basePrimary = baseStyle.primaryLight
+        val (lx0, ly0) = quantizedDirection
         val rad = extraDegrees * PI / 180.0
         val c = cos(rad).toFloat()
         val s = sin(rad).toFloat()
@@ -212,7 +222,12 @@ fun FloatingBottomBar(
         }
     }
 
-    var currentIndex by remember(selectedIndex) { mutableIntStateOf(selectedIndex()) }
+    // 调用方（BottomBarMiuix）传内联 lambda，每次重组都是新实例；
+    // 经 rememberUpdatedState 固定读取点，避免用不稳定 lambda 作 key
+    // 导致 currentIndex 反复重建 / LaunchedEffect 反复重启。
+    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
+
+    var currentIndex by remember { mutableIntStateOf(latestSelectedIndex()) }
 
     class DampedDragAnimationHolder {
         var instance: DampedDragAnimation? = null
@@ -223,7 +238,7 @@ fun FloatingBottomBar(
     val dampedDragAnimation = remember(animationScope, tabsCount, density, isLtr) {
         DampedDragAnimation(
             animationScope = animationScope,
-            initialValue = selectedIndex().toFloat(),
+            initialValue = latestSelectedIndex().toFloat(),
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
@@ -245,8 +260,14 @@ fun FloatingBottomBar(
             onDragStarted = {},
             onDragStopped = {
                 val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
-                currentIndex = targetIndex
-                animateToValue(targetIndex.toFloat())
+                // 单一触发：跨 tab 时写 currentIndex 经 snapshotFlow 调 animateToValue + onSelected；
+                // 未跨 tab 时 snapshotFlow 不发射，须直接调 animateToValue 完成 release（恢复缩放）。
+                // 原先两条路径同帧都触发，弹簧被 MutatorMutex 取消重启一次。
+                if (targetIndex != currentIndex) {
+                    currentIndex = targetIndex
+                } else {
+                    animateToValue(targetIndex.toFloat())
+                }
                 animationScope.launch {
                     offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                 }
@@ -257,6 +278,9 @@ fun FloatingBottomBar(
                         (targetValue + dragAmount.x / tabWidthPx * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
+                    // 此处必须逐事件 launch（不可 cancel+relaunch）：offset 是增量累加
+                    // （value + dragAmount.x），依赖主调度器 FIFO 顺序逐条应用；取消在途
+                    // 协程会丢一次累加导致橡皮筋回跳。
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -265,8 +289,8 @@ fun FloatingBottomBar(
         ).also { holder.instance = it }
     }
 
-    LaunchedEffect(selectedIndex) {
-        snapshotFlow { selectedIndex() }.collectLatest { currentIndex = it }
+    LaunchedEffect(Unit) {
+        snapshotFlow { latestSelectedIndex() }.collectLatest { currentIndex = it }
     }
     LaunchedEffect(dampedDragAnimation) {
         snapshotFlow { currentIndex }.drop(1).collectLatest { index ->

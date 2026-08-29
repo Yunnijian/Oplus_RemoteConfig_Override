@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -128,11 +127,11 @@ fun ConfigListContentMiuix(
     val scrollBehavior = MiuixScrollBehavior()
 
     val qt = searchQuery.trim().lowercase()
-    val filteredGames by remember(gameList, qt) {
-        derivedStateOf {
-            if (qt.isEmpty()) gameList
-            else gameList.filter { it.appName.lowercase().contains(qt) || it.packageName.lowercase().contains(qt) }
-        }
+    // gameList/qt 均为 remember 键，直接计算即可；
+    // 原先 remember(gameList, qt) { derivedStateOf { ... } } 在键变化时重建包装对象，纯属多余
+    val filteredGames = remember(gameList, qt) {
+        if (qt.isEmpty()) gameList
+        else gameList.filter { it.appName.lowercase().contains(qt) || it.packageName.lowercase().contains(qt) }
     }
 
     Scaffold(

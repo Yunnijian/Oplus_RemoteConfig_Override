@@ -47,14 +47,15 @@ class DatabaseManager(context: Context) {
     fun checkRoot(): Boolean =
         Shell.cmd("id -u").exec().out.any { it.trim() == "0" }
 
-    fun checkDatabase(): Boolean = run("list").isSuccess
-
-    fun listConfiguredPackages(): List<String> =
+    /**
+     * 单次 `list` 同时得出数据库可用性、配置数量与包名列表（原先 checkDatabase /
+     * countConfiguredPackages / listConfiguredPackages 各跑一次 shell，现合并为一次）。
+     * 成功返回包名列表（可为空表）；失败返回 null（数据库不可访问）。
+     */
+    fun listConfiguredPackagesOrNull(): List<String>? =
         run("list").let { result ->
-            if (result.isSuccess) result.out.map(String::trim).filter(String::isNotEmpty) else emptyList()
+            if (result.isSuccess) result.out.map(String::trim).filter(String::isNotEmpty) else null
         }
-
-    fun countConfiguredPackages(): Int = listConfiguredPackages().size
 
     fun loadConfig(packageName: String): String? {
         if (!validPackage(packageName)) return null
@@ -124,9 +125,16 @@ class DatabaseManager(context: Context) {
         return WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已启用保护" else "启用失败"))
     }
 
-    fun getCosaVersion(): String =
-        Shell.cmd("dumpsys package com.oplus.cosa | grep versionName | head -1")
+    /** cosa 版本在应用会话内不变，只经 root shell 查询一次（dumpsys 开销大，且每次写入后刷新均会调用）。 */
+    private var cachedCosaVersion: String? = null
+
+    fun getCosaVersion(): String {
+        cachedCosaVersion?.let { return it }
+        val version = Shell.cmd("dumpsys package com.oplus.cosa | grep versionName | head -1")
             .exec().out.firstOrNull()?.substringAfter('=')?.trim()?.ifEmpty { null } ?: "未知"
+        cachedCosaVersion = version
+        return version
+    }
 
     fun clearGameData(): WriteResult {
         val result = Shell.cmd("pm clear com.oplus.cosa").exec()

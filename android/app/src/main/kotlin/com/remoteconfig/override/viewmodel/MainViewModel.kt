@@ -87,40 +87,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAll() {
         viewModelScope.launch {
             _isLoading.value = true
-            checkSystemStatus()
-            loadGameList()
+            // 单次 `list` 同时供系统状态（数量）与游戏列表使用，不再各查一遍 shell
+            val configuredPkgs = checkSystemStatus()
+            loadGameList(configuredPkgs)
             _isLoading.value = false
         }
     }
 
-    private suspend fun checkSystemStatus() {
+    /** 检测 Root/数据库状态并返回配置包名列表（数据库不可访问时为空表）。 */
+    private suspend fun checkSystemStatus(): List<String> {
         // 所有 Root Shell / 数据库调用放到 IO 线程，避免阻塞主线程导致 ANR。
-        val (status, version) = withContext(Dispatchers.IO) {
+        val (status, configuredPkgs, version) = withContext(Dispatchers.IO) {
             val isRooted = try { dbManager.checkRoot() } catch (_: Exception) { false }
-            val dbAvailable = try { isRooted && dbManager.checkDatabase() } catch (_: Exception) { false }
-            val configuredCount = if (dbAvailable) {
-                try { dbManager.countConfiguredPackages() } catch (_: Exception) { 0 }
-            } else 0
+            val pkgs = if (isRooted) {
+                try { dbManager.listConfiguredPackagesOrNull() } catch (_: Exception) { null }
+            } else null
             val ver = if (isRooted) {
                 try { dbManager.getCosaVersion() } catch (_: Exception) { "未知" }
             } else ""
-            SystemStatus(isRooted, dbAvailable, configuredCount) to ver
+            Triple(
+                SystemStatus(isRooted, pkgs != null, pkgs?.size ?: 0),
+                pkgs.orEmpty(),
+                ver,
+            )
         }
         _systemStatus.value = status.copy(checked = true)
         if (status.isRooted) {
             _cosaVersion.value = version
         }
+        return configuredPkgs
     }
 
-    private suspend fun loadGameList() {
-        val context = getApplication<Application>()
-        val configuredPkgs = try {
-            if (_systemStatus.value.dbAvailable) {
-                withContext(Dispatchers.IO) { dbManager.listConfiguredPackages() }
-            } else emptyList()
-        } catch (_: Exception) { emptyList() }
-
+    private suspend fun loadGameList(configuredPkgs: List<String>) {
         _hasDbData.value = configuredPkgs.isNotEmpty()
+        val context = getApplication<Application>()
 
         // 后台线程预加载：包名 → (appLabel, iconBitmap, isInstalled)
         val results = withContext(Dispatchers.IO) {

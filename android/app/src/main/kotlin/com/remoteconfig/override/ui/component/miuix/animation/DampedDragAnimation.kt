@@ -13,6 +13,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -58,6 +59,12 @@ class DampedDragAnimation(
 
     private val velocityTracker = VelocityTracker()
 
+    /** 每次按压递增：release 的收敛等待期间若发生新按压，本次恢复作废（避免取消新按压的放大动画）。 */
+    private var pressGeneration = 0
+
+    /** 在途的速度平滑动画：新事件直接取消上一个，避免协程堆积。 */
+    private var velocityJob: Job? = null
+
     val value: Float get() = valueAnimation.value
     val targetValue: Float get() = valueAnimation.targetValue
     val pressProgress: Float get() = pressProgressAnimation.value
@@ -93,6 +100,7 @@ class DampedDragAnimation(
     }
 
     fun press() {
+        pressGeneration++
         velocityTracker.resetTracking()
         animationScope.launch {
             launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
@@ -102,11 +110,16 @@ class DampedDragAnimation(
     }
 
     fun release() {
+        val generation = pressGeneration
         animationScope.launch {
             awaitFrame()
+            // 等待前/等待期间发生新按压：新 press 的放大动画已接管，本代恢复必须跳过，
+            // 否则恢复动画后启动会取消新按压的放大（表现为下一个 tab 按下去不放大）。
+            if (generation != pressGeneration) return@launch
             if (value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
                 snapshotFlow { valueAnimation.value }.first { abs(it - valueAnimation.targetValue) < threshold }
+                if (generation != pressGeneration) return@launch
             }
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
@@ -116,8 +129,9 @@ class DampedDragAnimation(
 
     fun updateValue(value: Float) {
         val targetValue = value.coerceIn(valueRange)
+        // animateTo 为挂起函数，协程内直接调用即可（原先多包一层 launch 纯属冗余）。
         animationScope.launch {
-            launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() } }
+            valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() }
         }
     }
 
@@ -141,6 +155,9 @@ class DampedDragAnimation(
             Offset(value, 0f)
         )
         val targetVelocity = velocityTracker.calculateVelocity().x / (valueRange.endInclusive - valueRange.start)
-        animationScope.launch { velocityAnimation.animateTo(targetVelocity, velocityAnimationSpec) }
+        // 拖拽期间每事件一次：取消上一个在途的平滑动画再启动新的，
+        // 避免事件率高于帧率时协程堆积（Animatable 会保留当前值/速度，无跳变）。
+        velocityJob?.cancel()
+        velocityJob = animationScope.launch { velocityAnimation.animateTo(targetVelocity, velocityAnimationSpec) }
     }
 }
