@@ -115,7 +115,9 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
                 .padding(innerPadding)
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                // bottom 留白由末尾 Spacer(bottomInnerPadding) 承担，不再叠加 bottom padding
+                // （对齐 KernelSU #3620：原先 spacedBy 12dp + bottom 12dp 双倍留白）
+                .padding(start = 12.dp, end = 12.dp, top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             RootStatusCard(systemStatus = systemStatus)
