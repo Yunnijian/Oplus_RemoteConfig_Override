@@ -23,11 +23,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -180,6 +184,20 @@ fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
  * （内容需铺到底栏下方供悬浮玻璃采样折射），因此编辑器主体自行扣除底栏高度，
  * 避免最后几行文本被系统导航栏 / 底栏遮挡。
  */
+/**
+ * 吞掉编辑器内部滚动（horizontalScroll 抵达行首/行尾边缘）向上传递的横向剩余位移。
+ * 不拦截的话，剩余位移会沿嵌套滚动链绕过 Pager 的 userScrollEnabled 直接拖动 Pager，
+ * 表现为：在编辑器上左滑时整页跟随拖出小半截、松手又弹回（宽屏双窗下观感极差）。
+ * 文本行到边缘后停住（标准滚动边界行为），Pager 不再被牵连。
+ */
+private val EditorNestedScrollConnection = object : NestedScrollConnection {
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset = if (available.x != 0f) Offset(available.x, 0f) else Offset.Zero
+}
+
 @Composable
 fun ConfigEditorPane(
     viewModel: MainViewModel,
@@ -193,15 +211,17 @@ fun ConfigEditorPane(
             viewModel.loadConfig(packageName)
         }
     }
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> ConfigEditorContent(
-            viewModel, onClosed, isMiuix = true, packageName = packageName, showBack = false,
-            bottomInnerPadding = bottomInnerPadding,
-        )
-        UiMode.Material -> ConfigEditorContent(
-            viewModel, onClosed, isMiuix = false, packageName = packageName, showBack = false,
-            bottomInnerPadding = bottomInnerPadding,
-        )
+    Box(Modifier.nestedScroll(EditorNestedScrollConnection)) {
+        when (LocalUiMode.current) {
+            UiMode.Miuix -> ConfigEditorContent(
+                viewModel, onClosed, isMiuix = true, packageName = packageName, showBack = false,
+                bottomInnerPadding = bottomInnerPadding,
+            )
+            UiMode.Material -> ConfigEditorContent(
+                viewModel, onClosed, isMiuix = false, packageName = packageName, showBack = false,
+                bottomInnerPadding = bottomInnerPadding,
+            )
+        }
     }
 }
 

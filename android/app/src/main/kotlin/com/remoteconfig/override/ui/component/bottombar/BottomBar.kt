@@ -72,8 +72,11 @@ class MainPagerState(
 
 private suspend fun PagerState.springAnimateToPage(target: Int) {
     if (target !in 0 until pageCount) return
-    var shouldSnapToTarget = false
-    scroll(MutatePriority.UserInput) {
+    // 必须用 Default 优先级：UserInput 在 userScrollEnabled=false（宽屏双窗编辑器
+    // 托管在 Pager 内时禁用用户拖拽）下会被拒绝，导致 tab 点击的弹簧动画中途
+    // 冻结、Pager 永久停在三页之间（settledPage 不更新），后续所有滑动手势都被
+    // 错位的 Pager 经嵌套滚动 onPreScroll 抢走——表现为“首次滑动不落到编辑区”。
+    scroll(MutatePriority.Default) {
         val pageSize = layoutInfo.pageSize + layoutInfo.pageSpacing
         val distance = target - currentPage - currentPageOffsetFraction
         val scrollPixels = distance * pageSize
@@ -92,7 +95,6 @@ private suspend fun PagerState.springAnimateToPage(target: Int) {
                 val consumed = scrollBy(delta)
                 consumedScroll += consumed
                 if (abs(delta - consumed) > 0.1f) {
-                    shouldSnapToTarget = true
                     skipScroll = true
                 }
             } else {
@@ -110,9 +112,12 @@ private suspend fun PagerState.springAnimateToPage(target: Int) {
         }
     }
 
-    if (shouldSnapToTarget || currentPage != target) {
-        scrollToPage(target)
-    }
+    // 必须无条件以 scrollToPage 收尾（而非只在失败时 snap）：弹簧经 Animatable 逐帧
+    // scrollBy 累积，结束位置可残留亚像素偏移（currentPageOffsetFraction ≠ 0）。
+    // Pager 的默认 pageNestedScrollConnection 只要 fraction ≠ 0 就会经 onPreScroll
+    // 截走子组件派发的 UserInput 横向位移（不检查 userScrollEnabled），首次滑动即被
+    // Pager 抢走。精确对齐页界让该抢夺条件在静止时恒不成立。
+    scrollToPage(target)
 }
 
 @Composable

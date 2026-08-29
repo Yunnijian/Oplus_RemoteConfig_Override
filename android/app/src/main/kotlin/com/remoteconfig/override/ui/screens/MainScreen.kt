@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.relocation.BringIntoViewResponder
 import androidx.compose.foundation.relocation.bringIntoViewResponder
@@ -28,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.unit.Dp
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
@@ -63,7 +66,8 @@ private const val PAGE_COUNT = 3
 private val PagerBringIntoViewBarrier = object : BringIntoViewResponder {
     override fun calculateRectForParent(rect: androidx.compose.ui.geometry.Rect): androidx.compose.ui.geometry.Rect =
         androidx.compose.ui.geometry.Rect.Zero
-    override suspend fun bringChildIntoView(childRect: () -> androidx.compose.ui.geometry.Rect?) { /* swallow */ }
+    override suspend fun bringChildIntoView(childRect: () -> androidx.compose.ui.geometry.Rect?) {
+    }
 }
 
 /** 每页内容根部的可见性请求屏障。 */
@@ -158,6 +162,20 @@ fun MainScreen(viewModel: MainViewModel) {
 
     val useRail = useNavigationRail()
 
+    // 锁定 Pager 拖拽（宽屏双窗编辑器嵌在第 1 页内）时，必须同时替换默认的
+    // pageNestedScrollConnection：foundation 1.12 的默认实现在
+    // currentPageOffsetFraction ≠ 0 时经 onPreScroll 截走子组件派发的 UserInput
+    // 横向位移，且不检查 userScrollEnabled——子像素残留（见 springAnimateToPage 的
+    // 无条件 snap）即触发“首次滑动不落到编辑区”，且 Pager 被挪离页界后抢夺会自我
+    // 维持，直到下一个整页边界才停（无 settle 动画，冻结在半路）。
+    val defaultPagerScrollConnection = PagerDefaults.pageNestedScrollConnection(
+        pagerState,
+        Orientation.Horizontal,
+    )
+    val lockedPagerScrollConnection = remember { object : NestedScrollConnection {} }
+    val pageNestedScrollConnection =
+        if (expanded && dualPaneSelected != null) lockedPagerScrollConnection else defaultPagerScrollConnection
+
     CompositionLocalProvider(LocalMainPagerState provides mainPagerState) {
         val pagerContent: @Composable (Dp) -> Unit = { bottomInnerPadding ->
             Box(
@@ -168,10 +186,12 @@ fun MainScreen(viewModel: MainViewModel) {
                 // （bottomInnerPadding 透传给页面的 contentPadding）。
                 HorizontalPager(
                     state = pagerState,
-                    // 宽屏双窗时 JSON 编辑器嵌在第 1 页内，编辑器上的横向甩动会被
-                    // Pager 继承导致翻到相邻 tab（设置页）；此时 tab 切换走侧栏，
-                    // 禁用 pager 横滑。窄屏编辑器是独立路由，不受影响。
+                    // 宽屏双窗时 JSON 编辑器嵌在第 1 页内：禁用 Pager 自身的手势拖拽，
+                    // 编辑器内部的横向滚动不会被 Pager 抢走（首次滑动尤其如此）；
+                    // 配合 ConfigEditorPane 根部 NestedScrollConnection 拦截内部滚动
+                    // 抵达边缘后的剩余位移，双通道都堵死。此模式下 tab 切换走侧栏。
                     userScrollEnabled = !(expanded && dualPaneSelected != null),
+                    pageNestedScrollConnection = pageNestedScrollConnection,
                     modifier = if (enableFloatingBottomBar && enableFloatingBottomBarBlur) {
                         Modifier.layerBackdrop(backdrop)
                     } else {
