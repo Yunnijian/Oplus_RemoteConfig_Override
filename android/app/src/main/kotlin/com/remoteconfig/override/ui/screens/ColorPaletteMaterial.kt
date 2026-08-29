@@ -115,7 +115,14 @@ fun ColorPaletteContentMaterial(
     actions: ColorPaletteScreenActions,
     showTopBar: Boolean = true,
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    // 仅全屏路由（有顶栏）才需要折叠滚动行为：宽屏双窗右侧 pane 无顶栏时，
+    // ExitUntilCollapsed 的 heightOffsetLimit 保持 -Float.MAX_VALUE，其 onPreScroll 会吞掉
+    // 全部上滑滚动，导致主题窗格无法滚动（对齐 Miuix 版的条件挂载修复）。
+    val scrollBehavior = if (showTopBar) {
+        TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    } else {
+        null
+    }
     val uiState = state
     val currentColorMode = state.currentColorMode
     val currentKeyColor = uiState.keyColor
@@ -150,7 +157,7 @@ fun ColorPaletteContentMaterial(
         Column(
             modifier = Modifier
                 .padding(paddingValues)
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .then(scrollBehavior?.let { Modifier.nestedScroll(it.nestedScrollConnection) } ?: Modifier)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -213,7 +220,9 @@ fun ColorPaletteContentMaterial(
                                 onCheckedChange = actions.onSetMiuixMonet,
                             )
                         }
-                        item(visible = uiState.miuixMonet) {
+                        // 强调色在 Monet 关闭时依然生效（主题引擎按 keyColor != 0 应用），
+                        // 故始终可见，避免孤儿设置；风格/标准仅在有强调色时展示。
+                        item {
                             SegmentedDropdownItem(
                                 icon = Icons.Rounded.Colorize,
                                 title = "强调色",
@@ -224,7 +233,7 @@ fun ColorPaletteContentMaterial(
                                 },
                             )
                         }
-                        item(visible = uiState.miuixMonet && uiState.keyColor != 0) {
+                        item(visible = uiState.keyColor != 0) {
                             val styles = PaletteStyle.entries
                             SegmentedDropdownItem(
                                 icon = Icons.Rounded.Style,
@@ -236,7 +245,7 @@ fun ColorPaletteContentMaterial(
                                 },
                             )
                         }
-                        item(visible = uiState.miuixMonet && uiState.keyColor != 0) {
+                        item(visible = uiState.keyColor != 0) {
                             val specs = ColorSpec.SpecVersion.entries
                             SegmentedDropdownItem(
                                 icon = Icons.Rounded.DesignServices,

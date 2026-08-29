@@ -58,6 +58,8 @@ fun ConfigListContentMaterial(
     var showNewDialog by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var resultMsg by remember { mutableStateOf("") }
+    // 显式成败布尔：不再靠消息文案嗅探（含“已”的失败文案会被误判为成功）。
+    var resultSuccess by remember { mutableStateOf(false) }
     var showResultDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
 
@@ -97,7 +99,11 @@ fun ConfigListContentMaterial(
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default.copy(
                                 imeAction = androidx.compose.ui.text.input.ImeAction.Done
                             ),
-                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { isSearching = false })
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = {
+                                // 与取消路径对齐：隐藏搜索框的同时清空过滤词，
+                                // 否则列表继续被隐藏条件过滤而用户无从得知。
+                                isSearching = false; searchQuery = ""
+                            })
                         )
                     } else {
                         Text("云控配置", style = MaterialTheme.typography.headlineLarge)
@@ -148,16 +154,19 @@ fun ConfigListContentMaterial(
             } else if (filteredGames.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"，
-                        // DB 无数据才显示"数据库中暂无配置记录"
+                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"；
+                        // 数据库不可访问（未授 Root/检测失败）与“库为空”分开提示，
+                        // 避免把“打不开库”误报成“暂无记录”误导新建。
                         Text(
                             when {
                                 qt.isNotEmpty() -> "未找到匹配的应用"
+                                !systemStatus.checked -> "正在检测..."
+                                !systemStatus.dbAvailable -> "无法访问数据库，请先授予 Root 权限"
                                 !hasDbData -> "数据库中暂无配置记录"
                                 else -> "未找到匹配的应用"
                             },
                             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (qt.isEmpty() && !hasDbData && systemStatus.isRooted) {
+                        if (qt.isEmpty() && !hasDbData && systemStatus.dbAvailable) {
                             Spacer(Modifier.height(8.dp))
                             Text("点击右下角 + 按钮新建配置", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -223,7 +232,9 @@ fun ConfigListContentMaterial(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = androidx.compose.material3.ripple(),
                                     onClick = { onGameClick(summary.packageName) },
-                                    onLongClick = { showDeleteConfirm = summary.packageName }
+                                    onLongClick = { showDeleteConfirm = summary.packageName },
+                                    // 读屏无障碍：让 TalkBack 用户知道长按是删除操作。
+                                    onLongClickLabel = "删除",
                                 )
                             )
                         }
@@ -271,8 +282,14 @@ fun ConfigListContentMaterial(
     if (showResultDialog) {
         AlertDialog(
             onDismissRequest = { showResultDialog = false },
-            icon = { Icon(if (resultMsg.contains("成功") || resultMsg.contains("已")) Icons.Default.CheckCircle else Icons.Default.Info, null) },
-            title = { Text(if (resultMsg.contains("成功") || resultMsg.contains("已")) "操作成功" else "操作失败") },
+            icon = {
+                Icon(
+                    if (resultSuccess) Icons.Default.CheckCircle else Icons.Default.Info,
+                    null,
+                    tint = if (resultSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
+            },
+            title = { Text(if (resultSuccess) "操作成功" else "操作失败") },
             text = { Text(resultMsg) },
             confirmButton = { TextButton(onClick = { showResultDialog = false }) { Text("确定") } }
         )
@@ -287,7 +304,7 @@ fun ConfigListContentMaterial(
                 viewModel.clearGameData { success, msg ->
                     // Bug 4：清除成功后右窗格指向的包已被清 → 清空选中
                     if (success && dualPaneSelected != null) onDualPaneSelect("")
-                    resultMsg = msg; showResultDialog = true
+                    resultSuccess = success; resultMsg = msg; showResultDialog = true
                 }
             }) { Text("确定") } },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
@@ -303,7 +320,7 @@ fun ConfigListContentMaterial(
                 viewModel.deleteConfig(pkg) { success, msg ->
                     // Bug 4：删除成功且右窗格正显示该包 → 清空选中，避免残留已删 JSON
                     if (success && pkg == dualPaneSelected) onDualPaneSelect("")
-                    resultMsg = msg; showResultDialog = true
+                    resultSuccess = success; resultMsg = msg; showResultDialog = true
                 }
             }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = null }) { Text("取消") } }

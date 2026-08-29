@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式启动主题：避免系统深色下冷启动/恢复时窗口背景白闪
+         （Compose 主题接管前的窗口背景由此决定） -->
+    <style name="Theme.RemoteConfigOverride" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

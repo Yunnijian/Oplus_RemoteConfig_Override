@@ -1,6 +1,7 @@
 package com.remoteconfig.override.ui.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -216,6 +217,11 @@ private fun ConfigEditorContent(
 ) {
     val editingJson by viewModel.editingJson.collectAsState()
     val editingPackageName by viewModel.editingPackageName.collectAsState()
+    val baselineJson by viewModel.baselineJson.collectAsState()
+    // 写入守护：root shell 最长 10s，期间禁用写入类菜单防止并发重复触发。
+    val isWriting by viewModel.isWriting.collectAsState()
+    // 脏标记：编辑内容与基准（最近一次载入的原文）不一致即为未保存修改。
+    val isDirty = editingPackageName != null && editingJson != baselineJson
     // 编辑器/窗格加载状态：与列表刷新（isLoading）分离，双窗下点列表项不影响左列表
     val isEditorLoading by viewModel.isEditorLoading.collectAsState()
     val context = LocalContext.current
@@ -237,9 +243,19 @@ private fun ConfigEditorContent(
     var highlighted by remember(dark) { mutableStateOf(AnnotatedString("")) }
     var editorVisible by rememberSaveable { mutableStateOf(false) }
     var editorFocused by remember { mutableStateOf(false) }
-    var fieldValue by remember(editingPackageName) { mutableStateOf(TextFieldValue()) }
+    // rememberSaveable：旋转/重建后保留光标位置（与同层 fontSize/editorVisible 的保存策略一致）
+    var fieldValue by rememberSaveable(editingPackageName, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue())
+    }
     var cursorRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val latestTextLayout = remember { arrayOfNulls<TextLayoutResult>(1) }
+
+    // 未保存修改拦截：退出/关闭/系统返回均先弹确认，避免静默丢稿。
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val requestClose: () -> Unit = {
+        if (isDirty) showDiscardDialog = true else onBack()
+    }
+    BackHandler(enabled = isDirty) { showDiscardDialog = true }
 
     val bg = if (dark) DARK_BG else LIGHT_BG
     val textColor = if (dark) DARK_TEXT else LIGHT_TEXT
@@ -251,6 +267,14 @@ private fun ConfigEditorContent(
     val currentText = editingJson.orEmpty()
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
+    // 全屏路由下 bottomInnerPadding 为 0：键盘收起时自补系统导航栏高度，
+    // 否则最后一行文本被导航栏遮挡、光标无法定位（双窗窗格传入真实值，不受影响）。
+    val navBarBottomPx = WindowInsets.navigationBars.getBottom(density)
+    val bottomInset = if (imeBottom > 0) {
+        bottomInnerPadding
+    } else {
+        bottomInnerPadding.coerceAtLeast(with(density) { navBarBottomPx.toDp() })
+    }
     LaunchedEffect(currentText) {
         if (fieldValue.text != currentText) {
             val cursor = fieldValue.selection.end.coerceIn(0, currentText.length)
@@ -304,6 +328,7 @@ private fun ConfigEditorContent(
         }
     }
 
+    var pendingImportText by remember { mutableStateOf<String?>(null) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -311,13 +336,23 @@ private fun ConfigEditorContent(
             try {
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 if (text.isNotBlank()) {
-                    viewModel.updateEditingJson(text)
-                    resultSuccess = true; resultMessage = "已导入配置"
-                } else { resultSuccess = false; resultMessage = "文件内容为空" }
-            } catch (e: Exception) { resultSuccess = false; resultMessage = "导入失败: ${e.message}" }
-            showResultDialog = true
+                    if (isDirty) {
+                        // 导入会整体替换编辑缓冲区：先确认，避免覆盖未保存修改。
+                        pendingImportText = text
+                    } else {
+                        viewModel.updateEditingJson(text)
+                        resultSuccess = true; resultMessage = "已导入配置"
+                        showResultDialog = true
+                    }
+                } else { resultSuccess = false; resultMessage = "文件内容为空"; showResultDialog = true }
+            } catch (e: Exception) {
+                resultSuccess = false; resultMessage = "导入失败: ${e.message}"; showResultDialog = true
+            }
         }
     }
+
+    // 写入确认：覆盖目标应用数据库的破坏性操作，须明确确认后才执行。
+    var showWriteConfirm by remember { mutableStateOf(false) }
 
 
     // TopAppBar 操作区（双模式共享）：缩小 / 放大 / 更多（写入数据库 / 导入配置 / 导出配置）。
@@ -329,20 +364,36 @@ private fun ConfigEditorContent(
         val actionTint = if (isMiuix) colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
         IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
         IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
-        IconButton(onClick = { showOverflow = true }) {
-            Icon(Icons.Filled.MoreVert, "更多操作", tint = actionTint)
-            DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
-                DropdownMenuItem(text = { Text("写入数据库") }, onClick = {
-                    showOverflow = false
-                    viewModel.injectConfig { s, msg -> resultSuccess = s; resultMessage = msg; showResultDialog = true }
-                })
-                DropdownMenuItem(text = { Text("导入配置") }, onClick = {
-                    showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
-                })
-                DropdownMenuItem(text = { Text("导出配置") }, onClick = {
-                    showOverflow = false
-                    viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
-                })
+        if (isWriting) {
+            // 写入进行中：以进度指示替换更多菜单，防止重复触发。
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = actionTint,
+                )
+            }
+        } else {
+            IconButton(onClick = { showOverflow = true }) {
+                Icon(Icons.Filled.MoreVert, "更多操作", tint = actionTint)
+                DropdownMenu(expanded = showOverflow, onDismissRequest = { showOverflow = false }) {
+                    DropdownMenuItem(
+                        text = { Text("写入数据库") },
+                        // 校验门禁：JSON 无效时禁止写入，避免失败后才在弹窗里看到裸错误。
+                        enabled = error == null,
+                        onClick = {
+                            showOverflow = false
+                            showWriteConfirm = true
+                        },
+                    )
+                    DropdownMenuItem(text = { Text("导入配置") }, onClick = {
+                        showOverflow = false; importLauncher.launch(arrayOf("application/json", "*/*"))
+                    })
+                    DropdownMenuItem(text = { Text("导出配置") }, onClick = {
+                        showOverflow = false
+                        viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
+                    })
+                }
             }
         }
     }
@@ -353,8 +404,9 @@ private fun ConfigEditorContent(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                // 双窗窗格：Pager 不再代为扣除底栏高度，编辑器自己让出底部空间
-                .padding(bottom = bottomInnerPadding)
+                // 双窗窗格：Pager 不再代为扣除底栏高度，编辑器自己让出底部空间；
+                // 全屏路由下自补系统导航栏避让（见 bottomInset 计算）。
+                .padding(bottom = bottomInset)
         ) {
             if (isEditorLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -568,15 +620,16 @@ private fun ConfigEditorContent(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 MiuixTopAppBar(
-                    title = if (packageName != null) appLabel else "JSON 编辑",
+                    // 窄屏路由与双窗窗格统一显示应用名，保留“正在编辑哪个应用”上下文。
+                    title = appLabel,
                     navigationIcon = {
                         if (showBack) {
-                            MiuixIconButton(onClick = onBack) {
+                            MiuixIconButton(onClick = requestClose) {
                                 MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回", tint = colorScheme.onSurface)
                             }
                         } else {
-                            // 双窗模式：关闭 X → onClosed
-                            MiuixIconButton(onClick = onBack) {
+                            // 双窗模式：关闭 X → 脏检查后 onClosed
+                            MiuixIconButton(onClick = requestClose) {
                                 MiuixIcon(imageVector = MiuixIcons.Basic.Close, contentDescription = "关闭", tint = colorScheme.onSurface)
                             }
                         }
@@ -595,12 +648,12 @@ private fun ConfigEditorContent(
                     title = { Text(appLabel, style = MaterialTheme.typography.titleMedium) },
                     navigationIcon = {
                         if (showBack) {
-                            IconButton(onClick = onBack) {
+                            IconButton(onClick = requestClose) {
                                 Icon(Icons.Default.ArrowBack, "返回")
                             }
                         } else {
-                            // 双窗模式：关闭 X → onClosed
-                            IconButton(onClick = onBack) {
+                            // 双窗模式：关闭 X → 脏检查后 onClosed
+                            IconButton(onClick = requestClose) {
                                 Icon(Icons.Default.Close, "关闭")
                             }
                         }
@@ -610,6 +663,153 @@ private fun ConfigEditorContent(
                 )
             }
         ) { padding -> editorBody(padding) }
+    }
+
+    // ── 写入确认弹窗：写入会覆盖目标应用数据库中的现有配置，须显式确认 ──
+    if (showWriteConfirm) {
+        val pkg = editingPackageName.orEmpty()
+        val confirmMessage = "将覆盖 $pkg 在 com.oplus.cosa 数据库中的现有配置（双库均写入），是否继续？"
+        if (isMiuix) {
+            WindowDialog(
+                show = true,
+                title = "确认写入",
+                onDismissRequest = { showWriteConfirm = false },
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    MiuixText(confirmMessage, fontSize = 14.sp)
+                    Row(
+                        Modifier.align(Alignment.End).padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        MiuixTextButton(
+                            text = "取消",
+                            onClick = { showWriteConfirm = false },
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        MiuixTextButton(
+                            text = "写入",
+                            onClick = {
+                                showWriteConfirm = false
+                                viewModel.injectConfig { s, msg ->
+                                    resultSuccess = s; resultMessage = msg; showResultDialog = true
+                                }
+                            },
+                            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
+                        )
+                    }
+                }
+            }
+        } else {
+            AlertDialog(
+                onDismissRequest = { showWriteConfirm = false },
+                title = { Text("确认写入", fontWeight = FontWeight.SemiBold) },
+                text = { Text(confirmMessage) },
+                confirmButton = {
+                    FilledTonalButton(onClick = {
+                        showWriteConfirm = false
+                        viewModel.injectConfig { s, msg ->
+                            resultSuccess = s; resultMessage = msg; showResultDialog = true
+                        }
+                    }) { Text("写入") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showWriteConfirm = false }) { Text("取消") }
+                },
+            )
+        }
+    }
+
+    // ── 放弃未保存修改弹窗（退出/关闭/系统返回/双窗切换均经此拦截）──
+    if (showDiscardDialog) {
+        if (isMiuix) {
+            WindowDialog(
+                show = true,
+                title = "未保存的修改",
+                onDismissRequest = { showDiscardDialog = false },
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    MiuixText("当前编辑内容尚未写入数据库，确定放弃修改？", fontSize = 14.sp)
+                    Row(
+                        Modifier.align(Alignment.End).padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        MiuixTextButton(
+                            text = "继续编辑",
+                            onClick = { showDiscardDialog = false },
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        MiuixTextButton(
+                            text = "放弃修改",
+                            onClick = { showDiscardDialog = false; onBack() },
+                            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
+                        )
+                    }
+                }
+            }
+        } else {
+            AlertDialog(
+                onDismissRequest = { showDiscardDialog = false },
+                title = { Text("未保存的修改", fontWeight = FontWeight.SemiBold) },
+                text = { Text("当前编辑内容尚未写入数据库，确定放弃修改？") },
+                confirmButton = {
+                    FilledTonalButton(onClick = { showDiscardDialog = false; onBack() }) { Text("放弃修改") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDiscardDialog = false }) { Text("继续编辑") }
+                },
+            )
+        }
+    }
+
+    // ── 导入覆盖确认弹窗：脏状态下导入会整体替换编辑缓冲区 ──
+    if (pendingImportText != null) {
+        val pending = pendingImportText.orEmpty()
+        if (isMiuix) {
+            WindowDialog(
+                show = true,
+                title = "导入将替换当前内容",
+                onDismissRequest = { pendingImportText = null },
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    MiuixText("当前编辑内容尚未保存，导入将替换它且不可恢复，是否继续？", fontSize = 14.sp)
+                    Row(
+                        Modifier.align(Alignment.End).padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        MiuixTextButton(
+                            text = "取消",
+                            onClick = { pendingImportText = null },
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        MiuixTextButton(
+                            text = "导入",
+                            onClick = {
+                                pendingImportText = null
+                                viewModel.updateEditingJson(pending)
+                                resultSuccess = true; resultMessage = "已导入配置"; showResultDialog = true
+                            },
+                            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
+                        )
+                    }
+                }
+            }
+        } else {
+            AlertDialog(
+                onDismissRequest = { pendingImportText = null },
+                title = { Text("导入将替换当前内容", fontWeight = FontWeight.SemiBold) },
+                text = { Text("当前编辑内容尚未保存，导入将替换它且不可恢复，是否继续？") },
+                confirmButton = {
+                    FilledTonalButton(onClick = {
+                        pendingImportText = null
+                        viewModel.updateEditingJson(pending)
+                        resultSuccess = true; resultMessage = "已导入配置"; showResultDialog = true
+                    }) { Text("导入") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingImportText = null }) { Text("取消") }
+                },
+            )
+        }
     }
 
     // ── 结果弹窗（Miuix 用 WindowDialog，Material 保持 AlertDialog，内容一致）──
@@ -629,6 +829,7 @@ private fun ConfigEditorContent(
                             modifier = Modifier.size(28.dp),
                         )
                         Spacer(Modifier.width(8.dp))
+                        // 多行展示：双库失败报告/未知字段警告为多行输出。
                         MiuixText(resultMessage, fontSize = 14.sp)
                     }
                     MiuixTextButton(

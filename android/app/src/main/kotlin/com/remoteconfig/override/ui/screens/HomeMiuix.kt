@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GppBad
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
@@ -163,30 +164,36 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
 }
 
 // ── Root 状态卡 ──
-// 三态颜色映射：primaryContainer/tertiaryContainer/errorContainer 对应 正常/警告/错误（简报要求）
+// 四态颜色映射：surfaceContainer/primaryContainer/tertiaryContainer/errorContainer
+// 对应 检测中/正常/警告/错误；检测未完成前不得显示红色错误卡（避免误导用户重启应用）
 @Composable
 private fun RootStatusCard(systemStatus: MainViewModel.SystemStatus) {
     val containerColor = when {
+        !systemStatus.checked -> colorScheme.surfaceContainer
         systemStatus.isRooted && systemStatus.dbAvailable -> colorScheme.primaryContainer
         systemStatus.isRooted -> colorScheme.tertiaryContainer
         else -> colorScheme.errorContainer
     }
     val onContainerColor = when {
+        !systemStatus.checked -> colorScheme.onSurfaceVariantSummary
         systemStatus.isRooted && systemStatus.dbAvailable -> colorScheme.onPrimaryContainer
         systemStatus.isRooted -> colorScheme.onTertiaryContainer
         else -> colorScheme.onErrorContainer
     }
     val icon = when {
+        !systemStatus.checked -> Icons.Filled.HourglassEmpty
         systemStatus.isRooted && systemStatus.dbAvailable -> Icons.Filled.Verified
         systemStatus.isRooted -> Icons.Filled.Warning
         else -> Icons.Filled.GppBad
     }
     val title = when {
+        !systemStatus.checked -> "正在检测..."
         systemStatus.isRooted && systemStatus.dbAvailable -> "Root 权限正常"
         systemStatus.isRooted -> "数据库连接失败"
         else -> "未授予 Root 权限"
     }
     val subtitle = when {
+        !systemStatus.checked -> "正在检测 Root 权限与数据库状态"
         systemStatus.isRooted && systemStatus.dbAvailable -> "数据库已连接，可读写配置"
         systemStatus.isRooted -> "已获取 Root 权限，但数据库文件不可访问"
         else -> "请授予 Root 权限后重启应用"

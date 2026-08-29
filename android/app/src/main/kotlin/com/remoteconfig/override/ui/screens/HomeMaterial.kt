@@ -86,11 +86,13 @@ fun HomeContentMaterial(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // ── Root 状态卡 ──
+                // 检测未完成前显示中性“正在检测”卡，避免冷启动闪现红色错误卡误导用户。
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = when {
+                            !systemStatus.checked -> MaterialTheme.colorScheme.surfaceVariant
                             systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.primaryContainer
                             systemStatus.isRooted -> MaterialTheme.colorScheme.tertiaryContainer
                             else -> MaterialTheme.colorScheme.errorContainer
@@ -101,12 +103,14 @@ fun HomeContentMaterial(
                     Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = when {
+                                !systemStatus.checked -> Icons.Filled.HourglassEmpty
                                 systemStatus.isRooted && systemStatus.dbAvailable -> Icons.Filled.Verified
                                 systemStatus.isRooted -> Icons.Filled.Warning
                                 else -> Icons.Filled.GppBad
                             },
                             contentDescription = null,
                             tint = when {
+                                !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant
                                 systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer
                                 systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer
                                 else -> MaterialTheme.colorScheme.onErrorContainer
@@ -117,12 +121,14 @@ fun HomeContentMaterial(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = when {
+                                    !systemStatus.checked -> "正在检测..."
                                     systemStatus.isRooted && systemStatus.dbAvailable -> "Root 权限正常"
                                     systemStatus.isRooted -> "数据库连接失败"
                                     else -> "未授予 Root 权限"
                                 },
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                                 color = when {
+                                    !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant
                                     systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer
                                     systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer
                                     else -> MaterialTheme.colorScheme.onErrorContainer
@@ -130,12 +136,14 @@ fun HomeContentMaterial(
                             )
                             Text(
                                 text = when {
+                                    !systemStatus.checked -> "正在检测 Root 权限与数据库状态"
                                     systemStatus.isRooted && systemStatus.dbAvailable -> "数据库已连接，可读写配置"
                                     systemStatus.isRooted -> "已获取 Root 权限，但数据库文件不可访问"
                                     else -> "请授予 Root 权限后重启应用"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = when {
+                                    !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                                     systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
                                     else -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)

@@ -30,11 +30,16 @@ class DatabaseManager(context: Context) {
         return Shell.cmd(command).exec()
     }
 
+    /**
+     * 合并 stdout/stderr 的全部非空行（而非仅取首行）：Rust CLI 的双库失败报告与
+     * “已忽略未知字段”警告均为多行输出，只取首行会丢失后续库的失败详情。
+     */
     private fun Shell.Result.message(fallback: String): String =
         (out.asSequence() + err.asSequence())
             .map(String::trim)
-            .firstOrNull(String::isNotEmpty)
-            ?: fallback
+            .filter(String::isNotEmpty)
+            .joinToString("\n")
+            .ifEmpty { fallback }
 
     private fun validPackage(packageName: String): Boolean =
         packageName.length <= 255 && PACKAGE_NAME.matches(packageName)
@@ -76,7 +81,11 @@ class DatabaseManager(context: Context) {
                 "chmod 644 ${quote(exportPath)}",
             ).joinToString(" && ")
             val result = Shell.cmd(command).exec()
-            WriteResult(result.isSuccess, result.message(if (result.isSuccess) "已导出" else "导出失败"))
+            WriteResult(
+                result.isSuccess,
+                if (result.isSuccess) "已导出至 $exportPath"
+                else result.message("导出失败"),
+            )
         } catch (error: Exception) {
             WriteResult(false, "导出失败: ${error.message ?: "无法创建临时文件"}")
         } finally {
@@ -91,7 +100,12 @@ class DatabaseManager(context: Context) {
         return try {
             temporary.writeText(json)
             val result = run("write", packageName, temporary.absolutePath)
-            WriteResult(result.isSuccess, result.message(if (result.isSuccess) "写入成功" else "写入失败"))
+            val raw = result.message(if (result.isSuccess) "写入成功" else "写入失败")
+            // 新建配置模板只有 package_name 时必命中“没有匹配到任何列”，给用户可读文案。
+            val message = if (!result.isSuccess && raw.contains("没有匹配到任何列")) {
+                "请至少填写一项配置字段后再写入"
+            } else raw
+            WriteResult(result.isSuccess, message)
         } catch (error: Exception) {
             WriteResult(false, "写入失败: ${error.message ?: "无法创建临时文件"}")
         } finally {

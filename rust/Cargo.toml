@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Use rusqlite's generated bindings, but resolve SQLite from Android's
-# system libsqlite.so at link/runtime instead of compiling an embedded copy.
-rusqlite = { version = "0.32", default-features = false, features = ["modern_sqlite"] }
+# Bundle a compiled SQLite copy instead of resolving Android's system
+# libsqlite.so at runtime. The system library is SQLite 3.32 on Android 13
+# (API 33), while previous `modern_sqlite` bindings required symbols from
+# SQLite >= 3.38 (sqlite3_changes64 / sqlite3_error_offset); the binary then
+# failed to load on Android 13 devices with "cannot locate symbol".
+rusqlite = { version = "0.32", default-features = false, features = ["bundled"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 
 [profile.release]

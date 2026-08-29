@@ -121,6 +121,8 @@ fun ConfigListContentMiuix(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
     var resultMsg by remember { mutableStateOf("") }
+    // 显式成败布尔：不再靠消息文案嗅探（含“已”的失败文案会被误判为成功）。
+    var resultSuccess by remember { mutableStateOf(false) }
     var showResultDialog by remember { mutableStateOf(false) }
 
     val scrollBehavior = MiuixScrollBehavior()
@@ -208,12 +210,20 @@ fun ConfigListContentMiuix(
                                     Icon(
                                         imageVector = MiuixIcons.Basic.Close,
                                         contentDescription = "清除",
-                                        modifier = Modifier.clickable(interactionSource = null, indication = null) { searchQuery = "" },
+                                        // 触摸目标 ≥ 48dp：裸 24dp 图标加 clickable 不满足无障碍标准。
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .padding(12.dp)
+                                            .clickable(interactionSource = null, indication = null) { searchQuery = "" },
                                     )
                                 }
                             },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { isSearching = false }),
+                            keyboardActions = KeyboardActions(onDone = {
+                                // 与取消路径对齐：隐藏搜索框的同时清空过滤词，
+                                // 否则列表继续被隐藏条件过滤而用户无从得知。
+                                isSearching = false; searchQuery = ""
+                            }),
                         )
                     }
                 },
@@ -240,18 +250,21 @@ fun ConfigListContentMiuix(
                 }
                 filteredGames.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"，
-                        // DB 无数据才显示"数据库中暂无配置记录"
+                        // Bug 7: 先判搜索词——有搜索词时命中为空显示"未找到匹配的应用"；
+                        // 数据库不可访问（未授 Root/检测失败）与“库为空”分开提示，
+                        // 避免把“打不开库”误报成“暂无记录”误导新建。
                         Text(
                             text = when {
                                 qt.isNotEmpty() -> "未找到匹配的应用"
+                                !systemStatus.checked -> "正在检测..."
+                                !systemStatus.dbAvailable -> "无法访问数据库，请先授予 Root 权限"
                                 !hasDbData -> "数据库中暂无配置记录"
                                 else -> "未找到匹配的应用"
                             },
                             fontSize = 14.sp,
                             color = colorScheme.onSurfaceVariantSummary,
                         )
-                        if (qt.isEmpty() && !hasDbData && systemStatus.isRooted) {
+                        if (qt.isEmpty() && !hasDbData && systemStatus.dbAvailable) {
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 text = "点击右下角 + 按钮新建配置",
@@ -287,13 +300,15 @@ fun ConfigListContentMiuix(
                             },
                         ) {
                             BasicComponent(
-                                // BasicComponent 无 onLongClick 槽：用 combinedClickable 包裹实现长按删除
-                                // （不传 onClick 避免与 combinedClickable 双重触发）
+                                // BasicComponent 无 onLongClick 槽：用 combinedClickable 包裹实现长按删除。
+                                // ripple 与 Material 版对齐，提供点击/长按触摸反馈；
+                                // onLongClickLabel 让读屏用户知晓长按是删除操作。
                                 modifier = Modifier.combinedClickable(
                                     interactionSource = null,
-                                    indication = null,
+                                    indication = androidx.compose.material3.ripple(),
                                     onClick = { onGameClick(summary.packageName) },
                                     onLongClick = { showDeleteConfirm = summary.packageName },
+                                    onLongClickLabel = "删除",
                                 ),
                                 title = if (summary.isInstalled) summary.appName else summary.packageName,
                                 summary = summary.packageName,
@@ -374,20 +389,19 @@ fun ConfigListContentMiuix(
         }
     }
 
-    // 结果弹窗
+    // 结果弹窗（成败由回调布尔驱动，不再嗅探消息文案）
     if (showResultDialog) {
-        val success = resultMsg.contains("成功") || resultMsg.contains("已")
         WindowDialog(
             show = showResultDialog,
-            title = if (success) "操作成功" else "操作失败",
+            title = if (resultSuccess) "操作成功" else "操作失败",
             onDismissRequest = { showResultDialog = false },
         ) {
             Column(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (success) MiuixIcons.Ok else Icons.Default.Info,
+                        imageVector = if (resultSuccess) MiuixIcons.Ok else Icons.Default.Info,
                         contentDescription = null,
-                        tint = colorScheme.primary,
+                        tint = if (resultSuccess) colorScheme.primary else colorScheme.error,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -428,7 +442,7 @@ fun ConfigListContentMiuix(
                             viewModel.clearGameData { success, msg ->
                                 // Bug 4：清除成功后右窗格指向的包已被清 → 清空选中
                                 if (success && dualPaneSelected != null) onDualPaneSelect("")
-                                resultMsg = msg; showResultDialog = true
+                                resultSuccess = success; resultMsg = msg; showResultDialog = true
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -464,7 +478,7 @@ fun ConfigListContentMiuix(
                             viewModel.deleteConfig(pkg) { success, msg ->
                                 // Bug 4：删除成功且右窗格正显示该包 → 清空选中，避免残留已删 JSON
                                 if (success && pkg == dualPaneSelected) onDualPaneSelect("")
-                                resultMsg = msg; showResultDialog = true
+                                resultSuccess = success; resultMsg = msg; showResultDialog = true
                             }
                         },
                         modifier = Modifier.weight(1f),

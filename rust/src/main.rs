@@ -75,7 +75,13 @@ fn value_to_json(value: ValueRef<'_>, sql_type: &str) -> Value {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(number) => Value::from(number),
         ValueRef::Real(number) if number.is_finite() => {
-            if number.fract() == 0.0 {
+            // Only convert whole numbers that fit into i64; Rust's float->int
+            // `as` cast saturates out-of-range values, which would silently
+            // corrupt the exported (and later re-written) data.
+            if number.fract() == 0.0
+                && number >= i64::MIN as f64
+                && number < i64::MAX as f64
+            {
                 Value::from(number as i64)
             } else {
                 Value::from(number)
@@ -146,12 +152,13 @@ fn install_protection(conn: &Connection, cols: &Columns) -> Result<()> {
     Ok(())
 }
 
-fn finish(conn: Connection, db: &Path) {
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
-    drop(conn);
-
+/// Restore the ownership of the SQLite sidecar files (-wal/-shm/-journal)
+/// to the main database file's owner. We run as root while the target app
+/// runs under its own uid, so any sidecar created by us must be given back
+/// to the app, otherwise it fails with SQLITE_CANTOPEN.
+fn chown_sidecars(db: &Path) {
     if let Ok(metadata) = fs::metadata(db) {
-        for suffix in ["-wal", "-shm"] {
+        for suffix in ["-wal", "-shm", "-journal"] {
             let sidecar = db.with_file_name(format!(
                 "{}{}",
                 db.file_name().unwrap_or_default().to_string_lossy(),
@@ -162,6 +169,12 @@ fn finish(conn: Connection, db: &Path) {
             }
         }
     }
+}
+
+fn finish(conn: Connection, db: &Path) {
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+    drop(conn);
+    chown_sidecars(db);
 }
 
 fn package_column(cols: &Columns) -> Result<String> {
@@ -199,6 +212,8 @@ fn cmd_list() -> Result<bool> {
 
 fn cmd_read(package: &str, output: Option<&str>) -> Result<bool> {
     for db in db_paths() {
+        // Heal sidecars possibly left root-owned by a previous interrupted run.
+        chown_sidecars(&db);
         let conn = Connection::open(&db)?;
         let cols = columns(&conn)?;
         let package_name = package_column(&cols)?;
@@ -352,6 +367,9 @@ fn write_one(
 }
 
 fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
+    if EXCLUDED.contains(&package) {
+        return Err("该包名为内部配置，禁止写入".into());
+    }
     let json: Value = serde_json::from_str(&fs::read_to_string(json_path)?)?;
     let object = json.as_object().ok_or("JSON 顶层必须是对象")?;
     if object.is_empty() {
@@ -368,50 +386,92 @@ fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
     let mut skipped = BTreeSet::new();
     let mut failures: Vec<String> = Vec::new();
     for db in &dbs {
+        // Heal sidecars possibly left root-owned by a previous interrupted run.
+        chown_sidecars(db);
         if let Err(err) = write_one(db, package, object, &mut skipped) {
             failures.push(format!("write failed on {}: {}", db.display(), err));
+            // The write may have created/used sidecars owned by root before
+            // failing; hand them back so the target app keeps working.
+            chown_sidecars(db);
         }
     }
 
+    if !failures.is_empty() {
+        // Report failures first: printing the skipped-field note beforehand
+        // would be picked up as the only visible line by the app, hiding the
+        // actual per-database failure details.
+        return Err(failures.join("\n").into());
+    }
     if !skipped.is_empty() {
         eprintln!(
             "已忽略未知字段: {}",
             skipped.into_iter().collect::<Vec<_>>().join(", ")
         );
     }
-
-    if !failures.is_empty() {
-        return Err(failures.join("\n").into());
-    }
     println!("{package} 配置写入成功");
     Ok(true)
 }
 
-fn cmd_delete(package: &str) -> Result<bool> {
-    let dbs = db_paths();
-    if dbs.is_empty() {
-        return Err("未找到数据库".into());
-    }
-    for db in &dbs {
-        let conn = Connection::open(db)?;
-        let cols = columns(&conn)?;
-        let package_name = package_column(&cols)?;
-        conn.execute_batch("DROP TRIGGER IF EXISTS protect_local_pkg_delete")?;
-        if let Err(err) = conn.execute(
+fn delete_one(db: &Path, package: &str) -> Result<()> {
+    // Heal sidecars possibly left root-owned by a previous interrupted run.
+    chown_sidecars(db);
+    let conn = Connection::open(db)?;
+    let cols = columns(&conn)?;
+    let package_name = package_column(&cols)?;
+    conn.execute_batch("DROP TRIGGER IF EXISTS protect_local_pkg_delete")?;
+    let mut result: Result<()> = conn
+        .execute(
             &format!(
                 "DELETE FROM {} WHERE {} = ?",
                 quote_identifier(TABLE),
                 quote_identifier(&package_name)
             ),
             [package],
-        ) {
-            // DELETE 前已 DROP 保护触发器，失败时必须立即恢复，
-            // 避免该库的本地配置保护被永久破坏。
-            let _ = install_protection(&conn, &cols);
-            return Err(format!("delete failed on {}: {}", db.display(), err).into());
+        )
+        .map(|_| ())
+        .map_err(|e| -> Box<dyn Error> { e.into() });
+    if result.is_ok() {
+        result = install_protection(&conn, &cols);
+    }
+    match result {
+        Ok(()) => {
+            finish(conn, db);
+            Ok(())
         }
-        install_protection(&conn, &cols)?;
-        finish(conn, db);
+        Err(err) => {
+            // The protection trigger was dropped before the operation; any
+            // failure from this point on must restore it. Never swallow the
+            // restore error, otherwise the local-config protection of this
+            // database is left permanently broken without any signal.
+            match install_protection(&conn, &cols) {
+                Ok(()) => Err(err),
+                Err(restore_err) => {
+                    Err(format!("{err}; 保护触发器恢复失败: {restore_err}").into())
+                }
+            }
+        }
+    }
+}
+
+fn cmd_delete(package: &str) -> Result<bool> {
+    if EXCLUDED.contains(&package) {
+        return Err("该包名为内部配置，禁止删除".into());
+    }
+    let dbs = db_paths();
+    if dbs.is_empty() {
+        return Err("未找到数据库".into());
+    }
+    // 逐库独立执行：任一库失败不影响其他库的删除与结果收集；
+    // 整体失败时错误信息标明具体失败的库，与 write 语义保持一致。
+    let mut failures: Vec<String> = Vec::new();
+    for db in &dbs {
+        if let Err(err) = delete_one(db, package) {
+            failures.push(format!("delete failed on {}: {}", db.display(), err));
+            chown_sidecars(db);
+        }
+    }
+    if !failures.is_empty() {
+        return Err(failures.join("\n").into());
     }
     println!("{package} 已删除");
     Ok(true)
@@ -423,6 +483,7 @@ fn cmd_protect() -> Result<bool> {
         return Err("未找到数据库".into());
     }
     for db in &dbs {
+        chown_sidecars(db);
         let conn = Connection::open(db)?;
         let cols = columns(&conn)?;
         install_protection(&conn, &cols)?;

@@ -31,6 +31,7 @@ import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.LocalMainPagerState
+import com.remoteconfig.override.ui.component.DiscardChangesDialog
 import com.remoteconfig.override.ui.component.bottombar.BottomBar
 import com.remoteconfig.override.ui.component.bottombar.SideRail
 import com.remoteconfig.override.ui.component.bottombar.rememberMainPagerState
@@ -86,6 +87,39 @@ fun MainScreen(viewModel: MainViewModel) {
 
     // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
     var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
+    // 脏检查待切换目标：编辑中有未保存修改时切换/新建先弹“放弃修改”确认。
+    var pendingDualPaneSelect by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingNewConfig by rememberSaveable { mutableStateOf<String?>(null) }
+
+    /** 宽屏切换目标包：脏状态下先弹确认，否则直接切换。 */
+    val selectDualPane: (String) -> Unit = { pkg ->
+        if (pkg != dualPaneSelected && viewModel.isEditingDirty() && pkg.isNotEmpty()) {
+            pendingDualPaneSelect = pkg
+        } else {
+            dualPaneSelected = pkg
+        }
+    }
+    if (pendingDualPaneSelect != null) {
+        DiscardChangesDialog(
+            onConfirm = {
+                val pkg = pendingDualPaneSelect.orEmpty()
+                pendingDualPaneSelect = null
+                dualPaneSelected = pkg
+            },
+            onDismiss = { pendingDualPaneSelect = null },
+        )
+    }
+    if (pendingNewConfig != null) {
+        DiscardChangesDialog(
+            onConfirm = {
+                val pkg = pendingNewConfig.orEmpty()
+                pendingNewConfig = null
+                viewModel.createNewConfig(pkg)
+                dualPaneSelected = pkg
+            },
+            onDismiss = { pendingNewConfig = null },
+        )
+    }
 
     val surfaceColor = when (uiMode) {
         UiMode.Material -> MaterialTheme.colorScheme.surface // Blur is not used in Material, this is just a placeholder
@@ -127,19 +161,24 @@ fun MainScreen(viewModel: MainViewModel) {
                             onGameClick = { pkg ->
                                 if (expanded) {
                                     // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
-                                    dualPaneSelected = pkg
+                                    selectDualPane(pkg)
                                 } else {
                                     viewModel.loadConfig(pkg)
                                     navigator.push(Route.ConfigEditor(pkg))
                                 }
                             },
                             onNewConfig = { pkg ->
-                                viewModel.createNewConfig(pkg)
-                                if (expanded) dualPaneSelected = pkg
-                                else navigator.push(Route.ConfigEditor(pkg))
+                                // 新建配置同样会重置编辑缓冲区：脏状态下先确认。
+                                if (expanded && viewModel.isEditingDirty()) {
+                                    pendingNewConfig = pkg
+                                } else {
+                                    viewModel.createNewConfig(pkg)
+                                    if (expanded) dualPaneSelected = pkg
+                                    else navigator.push(Route.ConfigEditor(pkg))
+                                }
                             },
                             dualPaneSelected = if (expanded) dualPaneSelected else null,
-                            onDualPaneSelect = { dualPaneSelected = it },
+                            onDualPaneSelect = selectDualPane,
                         )
 
                         2 -> if (isCurrentPage || contentReady) SettingsContent(bottomInnerPadding)
@@ -160,9 +199,9 @@ fun MainScreen(viewModel: MainViewModel) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                // 应用 Scaffold 的 top/bottom inset（状态栏/导航栏不重叠），
-                                // 左侧 rail 的 start inset 由 consumeWindowInsets 处理
-                                .padding(top = innerPadding.calculateTopPadding())
+                                // rail 模式外层 Scaffold 无 topBar，其 top inset 即状态栏高度；
+                                // 而三个 Pager 页面各自带 TopAppBar 已自行避让，此处再叠加会多出一条
+                                // 状态栏高度的空白，故不再应用（与非 rail 分支一致）。
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)
@@ -178,7 +217,7 @@ fun MainScreen(viewModel: MainViewModel) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(top = innerPadding.calculateTopPadding())
+                                // 同上：不叠加状态栏避让，避免双重顶栏空白。
                                 .consumeWindowInsets(startInsets)
                         ) {
                             pagerContent(navBarBottomPadding)

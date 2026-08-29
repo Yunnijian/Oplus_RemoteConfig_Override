@@ -47,12 +47,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    /**
+     * 编辑器写入/删除/清除守护 —— 防止 root shell 慢（最长 10s）时重复触发并发操作，
+     * 且不再驱动列表的全屏 spinner（避免双窗下编辑器操作把左列表盖成 loading）。
+     */
+    private val _isWriting = MutableStateFlow(false)
+    val isWriting: StateFlow<Boolean> = _isWriting.asStateFlow()
+
     /** 编辑器/窗格加载 loading —— 仅 loadConfig 置位（与列表刷新分离，避免双窗串扰） */
     private val _isEditorLoading = MutableStateFlow(false)
     val isEditorLoading: StateFlow<Boolean> = _isEditorLoading.asStateFlow()
 
     private val _hasDbData = MutableStateFlow(false)
     val hasDbData: StateFlow<Boolean> = _hasDbData.asStateFlow()
+
+    /**
+     * 编辑基准文本（最近一次从数据库/模板载入的原文）——与 [editingJson] 比较
+     * 得出脏标记，用于退出/切换/导入前的“未保存修改”拦截，避免静默丢稿。
+     */
+    private val _baselineJson = MutableStateFlow<String?>(null)
+    val baselineJson: StateFlow<String?> = _baselineJson.asStateFlow()
 
     /** 预加载的应用图标缓存 — 包名 → Bitmap（IO 线程写、UI 线程读，用并发容器保证安全） */
     private val iconCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
@@ -92,7 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else ""
             SystemStatus(isRooted, dbAvailable, configuredCount) to ver
         }
-        _systemStatus.value = status
+        _systemStatus.value = status.copy(checked = true)
         if (status.isRooted) {
             _cosaVersion.value = version
         }
@@ -172,10 +186,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 校验包名：若加载期间用户又切到别的包，本次结果丢弃（防 A 配置写入 B 包）
                 if (_editingPackageName.value == packageName) {
                     _editingJson.value = json
+                    _baselineJson.value = json
                 }
             } catch (_: Exception) {
                 if (_editingPackageName.value == packageName) {
                     _editingJson.value = null
+                    _baselineJson.value = null
                 }
             } finally {
                 _isEditorLoading.value = false
@@ -185,11 +201,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 创建新的空白配置。
+     * 必须先取消在途的 loadConfig，否则它的回调守卫只按包名判重，
+     * 会用数据库结果（不存在的包为 null）静默覆盖刚写入的模板。
+     * 若该包已有配置，改为加载真实数据，避免空白模板写入时静默部分覆盖旧列。
      */
     fun createNewConfig(packageName: String) {
-        _editingJson.value = """{"package_name":"$packageName"}"""
+        loadConfigJob?.cancel()
+        val existing = _gameList.value.any { it.packageName == packageName }
+        if (existing) {
+            loadConfig(packageName)
+            return
+        }
+        val template = """{"package_name":"$packageName"}"""
+        _editingJson.value = template
+        _baselineJson.value = template
         _editingPackageName.value = packageName
     }
+
+    /** 当前编辑内容相对基准是否有未保存修改（供退出/切换/导入前拦截）。 */
+    fun isEditingDirty(): Boolean =
+        _editingPackageName.value != null && _editingJson.value != _baselineJson.value
 
     fun updateEditingJson(json: String) {
         _editingJson.value = json
@@ -197,29 +228,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearEditingConfig() {
         _editingJson.value = null
+        _baselineJson.value = null
         _editingPackageName.value = null
     }
 
     fun injectConfig(onComplete: (Boolean, String) -> Unit) {
+        // 写入守护：防止慢速 root shell 期间重复触发并发写入。
+        if (_isWriting.value) return
         val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
         val json = _editingJson.value ?: run { onComplete(false, "无编辑内容"); return }
         viewModelScope.launch {
-            _isLoading.value = true
+            _isWriting.value = true
             try {
                 val result = if (_systemStatus.value.isRooted) {
                     withContext(Dispatchers.IO) { dbManager.writeConfig(pkg, json) }
                 } else {
                     DatabaseManager.WriteResult(false, "未授予 Root 权限")
                 }
-                if (result.success) refreshAll()
+                if (result.success) {
+                    // 写入成功后编辑内容已落库，同步基准消除脏标记。
+                    _baselineJson.value = _editingJson.value
+                    refreshAll()
+                }
                 onComplete(result.success, result.message)
             } catch (e: Exception) { onComplete(false, "注入失败: ${e.message}") }
-            finally { _isLoading.value = false }
+            finally { _isWriting.value = false }
         }
     }
 
     fun deleteConfig(packageName: String, onComplete: (Boolean, String) -> Unit) {
+        if (_isWriting.value) return
         viewModelScope.launch {
+            _isWriting.value = true
             _isLoading.value = true
             try {
                 if (!_systemStatus.value.isRooted) {
@@ -231,15 +271,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onComplete(false, result.message)
                     return@launch
                 }
+                // 删除成功后若正在编辑被删包，清空编辑态避免残留旧 JSON。
+                if (_editingPackageName.value == packageName) clearEditingConfig()
                 refreshAll(); onComplete(true, "配置 $packageName 已删除")
             } catch (e: Exception) { onComplete(false, "删除失败: ${e.message}") }
-            finally { _isLoading.value = false }
+            finally {
+                _isLoading.value = false
+                _isWriting.value = false
+            }
         }
     }
 
     /** 清除应用增强服务数据 */
     fun clearGameData(onComplete: (Boolean, String) -> Unit) {
+        if (_isWriting.value) return
         viewModelScope.launch {
+            _isWriting.value = true
             _isLoading.value = true
             try {
                 val result = withContext(Dispatchers.IO) { dbManager.clearGameData() }
@@ -255,6 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onComplete(false, "清除失败: ${e.message ?: "未知错误"}")
             } finally {
                 _isLoading.value = false
+                _isWriting.value = false
             }
         }
     }
@@ -272,6 +320,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     data class SystemStatus(
         val isRooted: Boolean = false,
         val dbAvailable: Boolean = false,
-        val configuredCount: Int = 0
+        val configuredCount: Int = 0,
+        /** 检测是否已完成：冷启动时 Root/数据库检测需数秒，完成前 UI 不应据此报错 */
+        val checked: Boolean = false
     )
 }

@@ -31,20 +31,22 @@
 - JDK 21（Gradle 运行与 Kotlin/JVM 目标均为 21）
 - Android SDK 37（compileSdk；Compose BOM 2026.08.00 / material-kolor 5.0.0 要求 minCompileSdk 37）
 - Rust stable、Android NDK（需包含 `aarch64-linux-android` 工具链）
-- 目标设备需提供 `/system/lib64/libsqlite.so`（Android 系统 SQLite）。构建机上的库文件如果叫 `libsqlite.so`，需要在同一目录提供 `libsqlite3.so` 这个链接名给 Cargo 的 `-lsqlite3` 查找逻辑。
+- SQLite 采用 `bundled` 特性随二进制内嵌编译，**不再依赖目标设备的系统 `libsqlite.so`**。
+  （历史背景：旧版动态链接系统 SQLite，Android 13 设备系统库为 3.32，缺少 `modern_sqlite`
+  绑定需要的 `sqlite3_changes64`/`sqlite3_error_offset` 符号（≥3.38），导致 CLI 无法加载、全部功能失效。）
+- 重建 `libcosa.so` 后可用 `rust/build-android.sh` 自检产物是否包含预期功能字符串，避免再次发布陈旧二进制。
 
 ### 编译
 
 ```bash
-# 编译 Rust 数据库工具并放入 APK 的 native 库目录
+# 编译 Rust 数据库工具并放入 APK 的 native 库目录（含产物自检）
 cd rust
-NDK=/path/to/android-ndk
-export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-SQLITE3_LIB_DIR=/path/to/system-sqlite
-ln -sf "$SQLITE3_LIB_DIR/libsqlite.so" "$SQLITE3_LIB_DIR/libsqlite3.so"
-CC_aarch64_linux_android="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" \
-  SQLITE3_LIB_DIR="$SQLITE3_LIB_DIR" cargo build --release --target aarch64-linux-android
-cp target/aarch64-linux-android/release/cosa ../android/app/src/main/jniLibs/arm64-v8a/libcosa.so
+NDK=/path/to/android-ndk ./build-android.sh
+# 等价手工步骤：
+# export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+# CC_aarch64_linux_android=aarch64-linux-android24-clang \
+#   cargo build --release --target aarch64-linux-android
+# cp target/aarch64-linux-android/release/cosa ../android/app/src/main/jniLibs/arm64-v8a/libcosa.so
 
 cd android
 
@@ -83,7 +85,7 @@ aapt2 通过参数覆盖：
 - **Root 交互**: libsu (topjohnwu)
 - **数据库**: `com.oplus.cosa` SQLite (Rust `rusqlite` 原生工具，通过 Root Shell 操作)
 
-Rust 工具动态链接系统的 `libsqlite.so`，APK 不再携带 SQLite 实现；当前构建目标为
+Rust 工具内嵌编译的 SQLite（`bundled` 特性），不依赖设备系统库；当前构建目标为
 64 位 Android（`arm64-v8a`）。
 - **序列化**: kotlinx-serialization-json
 - **语法高亮**: 自定义轻量状态机解析器（无第三方依赖）
