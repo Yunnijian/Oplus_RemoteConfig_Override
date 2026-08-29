@@ -13,7 +13,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
@@ -21,7 +20,6 @@ import androidx.compose.ui.unit.Density
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
-import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Navigator
@@ -50,21 +48,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val viewModel: MainViewModel = viewModel()
-            // 对齐 KernelSU：设置由 SharedPreferences 仓库驱动，MainActivity 注册
-            // OnSharedPreferenceChangeListener，任一主题字段变更 → settingsVersion++ →
-            // 重组 → getAppSettings 重新读取（主题/底栏即时响应）。
+            // 对齐 KernelSU：设置由 SharedPreferences 仓库驱动。仓库为快照可观察
+            // （SettingsRepositoryImpl → SettingsStates），任一主题字段写入即时通知重组
+            // （主题/底栏/取色页显示均即时响应），无需手动 settingsVersion 驱动。
             val settingsRepository = remember { SettingsRepositoryImpl() }
-            var settingsVersion by remember { mutableIntStateOf(0) }
-            DisposableEffect(settingsRepository) {
-                val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-                    settingsVersion++
-                }
-                settingsRepository.prefs.registerOnSharedPreferenceChangeListener(listener)
-                onDispose {
-                    settingsRepository.prefs.unregisterOnSharedPreferenceChangeListener(listener)
-                }
-            }
-            val appSettings = remember(settingsVersion) { ThemeController.getAppSettings(settingsRepository) }
+            val appSettings = ThemeController.getAppSettings(settingsRepository)
             val uiMode = UiMode.fromValue(settingsRepository.uiMode)
 
             // Bug 3：系统栏图标明暗必须跟随应用主题（colorMode），而非系统深色。

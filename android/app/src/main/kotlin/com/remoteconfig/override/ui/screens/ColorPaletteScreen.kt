@@ -36,7 +36,7 @@ data class ColorPaletteUiState(
 /**
  * 取色屏动作 — 对齐 KernelSU `ColorPaletteScreenActions`。
  * 全部写入走 [com.remoteconfig.override.settings.SettingsRepositoryImpl] setter，
- * 主题即时响应（MainActivity 注册的 prefs 监听 → settingsVersion++ → 重组）。
+ * 主题即时响应（仓库为快照可观察状态，写入即通知本页重组 → uiState 重建）。
  */
 @Immutable
 data class ColorPaletteScreenActions(
@@ -58,8 +58,8 @@ data class ColorPaletteScreenActions(
 /**
  * 主题取色屏 — 分发器（对齐 KernelSU `ColorPaletteScreen.kt`）。
  *
- * 数据源为 [SettingsRepositoryImpl]，每次重组读仓库最新值（MainActivity 的
- * settingsVersion 状态驱动重组），按 [LocalUiMode] 分发 Miuix / Material 实现。
+ * 数据源为 [SettingsRepositoryImpl]（快照可观察：组合期读取即订阅，任一字段写入
+ * 即时重组本页 → uiState 重建为最新值），按 [LocalUiMode] 分发 Miuix / Material 实现。
  */
 @Composable
 fun ColorPaletteScreen() {

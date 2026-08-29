@@ -365,7 +365,8 @@ fun ColorPaletteContentMiuix(
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                             SwitchPreference(
                                 title = "预测性返回手势",
-                                summary = "启用对预测性返回手势的支持",
+                                // 反射写入 ApplicationInfo 只在进程启动时被框架读取：重启应用后生效。
+                                summary = "启用对预测性返回手势的支持（重启应用后生效）",
                                 startAction = {
                                     Icon(
                                         Icons.AutoMirrored.Rounded.MenuOpen,
