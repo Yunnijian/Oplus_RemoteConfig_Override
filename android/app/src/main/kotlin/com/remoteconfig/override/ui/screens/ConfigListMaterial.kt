@@ -76,6 +76,9 @@ fun ConfigListContentMaterial(
     }
 
     Scaffold(
+        // 背景与设置页/主题页对齐（ExpressiveScaffold 默认 surfaceContainer），
+        // Material 模式下三页背景统一（与 MainScreen 的 MaterialScaffold 一致）。
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             LargeTopAppBar(
@@ -129,8 +132,8 @@ fun ConfigListContentMaterial(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                 ),
                 scrollBehavior = scrollBehavior
             )

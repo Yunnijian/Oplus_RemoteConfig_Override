@@ -2,13 +2,23 @@ package com.remoteconfig.override.ui.screens
 
 import android.annotation.SuppressLint
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,8 +34,12 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,61 +53,62 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CallToAction
-import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.remoteconfig.override.R
 import com.remoteconfig.override.settings.ColorMode
 import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
+import com.remoteconfig.override.ui.component.material.ExpressiveToggleButton
 import com.remoteconfig.override.ui.component.material.SegmentedColumn
 import com.remoteconfig.override.ui.component.material.SegmentedDropdownItem
 import com.remoteconfig.override.ui.component.material.SegmentedSwitchItem
 import com.remoteconfig.override.ui.component.material.expressiveTopAppBarColors
+import com.remoteconfig.override.ui.theme.RemoteConfigSchemeCache
 import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.ui.theme.keyColorOptions
 import com.remoteconfig.override.ui.theme.rememberRemoteConfigColorScheme
-
-/**
- * 强调色下拉预设名 — 完整对齐 KernelSU `ColorPaletteScreenMiuix.kt` 的 colorItems
- * （strings.xml 中文文案硬编码，顺序与 keyColorOptions 一一对应；首项「默认」= keyColor 0）。
- */
-private val KeyColorNames: List<String> = listOf(
-    "默认",
-    "红色", "粉色", "紫色", "深紫", "靛青", "蓝色", "青色", "青绿",
-    "绿色", "黄色", "琥珀", "橙色", "棕色", "灰蓝", "樱花",
-)
+import kotlinx.coroutines.awaitAll
 
 /**
  * 主题取色屏 — Material 3 实现（与 Miuix 版同三组，组件对齐 KernelSU
@@ -176,39 +191,122 @@ fun ColorPaletteContentMaterial(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // 强调色色块选择（对齐 KernelSU v3.3.0 ColorPaletteScreenMaterial：LazyRow
+            // ColorButtonMaterial，首项「默认」= keyColor 0 = 动态取色）。
+            //
+            // 根因修复（主线程堆栈实证）：Spec2025 单次取色 ≈ 56ms（HctSolver 二分求解），
+            // 16 个按钮逐个在组合期同步执行 ≈ 900ms 主线程冻结（转场因此过期消失）。
+            // 方案：17 套方案由根主题 PrewarmRemoteConfigSchemes 在进页前后台并行预取
+            // 进进程缓存（RemoteConfigSchemeCache），组合期仅读缓存 → 首帧零取色、
+            // 色块随页面内容一并呈现；未命中的参数组合才在页内并行补齐。
+            val context = LocalContext.current
+            val defaultSeed = remember(isDark) {
+                // 「默认」= 系统动态取色的 primary 作为种子（与 rememberRemoteConfigColorScheme 相同解析）
+                (if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)).primary
+            }
+            val seeds = remember(defaultSeed) { listOf(defaultSeed) + keyColorOptions.map { Color(it) } }
+            // 首值直接读预热缓存（根主题 PrewarmRemoteConfigSchemes 已按当前
+            // 深色/AMOLED/风格/标准 预取整套）→ 命中时色块随页面首帧呈现，无空白占位；
+            // 个别未命中（中途切风格/标准/深色）才走后台并行补齐，仍与预取去重。
+            val buttonSchemes by produceState<List<ColorScheme?>>(
+                initialValue = seeds.map {
+                    RemoteConfigSchemeCache.peek(it, isDark, isAmoled, colorStyle, colorSpec)
+                },
+                seeds, isDark, isAmoled, colorStyle, colorSpec,
+            ) {
+                if (value.any { it == null }) {
+                    value = seeds.map {
+                        RemoteConfigSchemeCache.prefetch(it, isDark, isAmoled, colorStyle, colorSpec)
+                    }.awaitAll()
+                }
+            }
+            val schemesReady = buttonSchemes.size == seeds.size && buttonSchemes.none { it == null }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+            ) {
+                if (schemesReady) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        item {
+                            val scheme = buttonSchemes[0] ?: return@item
+                            ColorButtonMaterial(
+                                colorScheme = scheme,
+                                isSelected = currentKeyColor == 0,
+                                onClick = { actions.onSetKeyColor(0) },
+                            )
+                        }
+
+                        itemsIndexed(keyColorOptions) { index, colorArgb ->
+                            val scheme = buttonSchemes[index + 1] ?: return@itemsIndexed
+                            ColorButtonMaterial(
+                                colorScheme = scheme,
+                                isSelected = currentKeyColor == colorArgb,
+                                onClick = { actions.onSetKeyColor(colorArgb) },
+                            )
+                        }
+                    }
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 主题模式（跟随系统/浅色/深色）
-                val themeModes = listOf(
-                    Triple(0, "跟随系统", Icons.Filled.Brightness4),
-                    Triple(1, "浅色", Icons.Filled.Brightness7),
-                    Triple(2, "深色", Icons.Filled.Brightness3),
+                // 主题模式（跟随系统/浅色/深色/AMOLED 深色）— 对齐 KernelSU v3.3.0
+                // ExpressiveToggleButton ButtonGroup 四态（原 SegmentedButton 三态缺 AMOLED 入口）
+                val themeModeOptions = listOf(
+                    listOf(ColorMode.SYSTEM) to Icons.Filled.Brightness4,
+                    listOf(ColorMode.LIGHT) to Icons.Filled.Brightness7,
+                    listOf(ColorMode.DARK) to Icons.Filled.Brightness3,
+                    listOf(ColorMode.DARK_AMOLED) to Icons.Filled.Brightness1,
                 )
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    themeModes.forEachIndexed { index, (mode, label, icon) ->
-                        SegmentedButton(
-                            selected = (if (uiState.themeMode >= 3) uiState.themeMode - 3 else uiState.themeMode) == mode,
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                actions.onSetThemeMode(mode)
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = themeModes.size),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = label,
-                            )
+                themeModeOptions.chunked(4).forEach { rowOptions ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
+                    ) {
+                        rowOptions.forEachIndexed { index, (modes, icon) ->
+                            ExpressiveToggleButton(
+                                checked = currentColorMode in modes,
+                                onCheckedChange = {
+                                    if (it) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                        actions.onSetThemeMode(modes.first().value)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .semantics { role = Role.RadioButton },
+                                shapes = when (index) {
+                                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                    rowOptions.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = when (modes.first()) {
+                                        ColorMode.SYSTEM -> "跟随系统"
+                                        ColorMode.LIGHT -> "浅色"
+                                        ColorMode.DARK -> "深色"
+                                        ColorMode.DARK_AMOLED -> "深色 AMOLED"
+                                        else -> "跟随系统"
+                                    }
+                                )
+                            }
                         }
                     }
                 }
 
                 // 第一组：主题
-                val colorValues = listOf(0) + keyColorOptions
                 SegmentedColumn(
                     modifier = Modifier.padding(top = 4.dp),
                     content = {
@@ -220,19 +318,7 @@ fun ColorPaletteContentMaterial(
                                 onCheckedChange = actions.onSetMiuixMonet,
                             )
                         }
-                        // 强调色在 Monet 关闭时依然生效（主题引擎按 keyColor != 0 应用），
-                        // 故始终可见，避免孤儿设置；风格/标准仅在有强调色时展示。
-                        item {
-                            SegmentedDropdownItem(
-                                icon = Icons.Rounded.Colorize,
-                                title = "强调色",
-                                items = KeyColorNames,
-                                selectedIndex = colorValues.indexOf(uiState.keyColor).takeIf { it >= 0 } ?: 0,
-                                onItemSelected = { index ->
-                                    actions.onSetKeyColor(colorValues[index])
-                                },
-                            )
-                        }
+                        // 色彩风格/标准仅在有强调色时展示（Monet 动态色下两者不参与取色）。
                         item(visible = uiState.keyColor != 0) {
                             val styles = PaletteStyle.entries
                             SegmentedDropdownItem(
@@ -497,6 +583,96 @@ private fun ThemePreviewCard(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 强调色色块按钮 — 对齐 KernelSU v3.3.0 `ColorPaletteScreenMaterial.ColorButtonMaterial`：
+ * 72dp 圆角方块内以该强调色生成的主题绘制上半/下半双弧预览，选中态放大 + 描边圆环。
+ * 取色方案由调用方批量预计算传入（[buttonSchemes]），本组件组合期零取色计算。
+ */
+@Composable
+private fun ColorButtonMaterial(
+    colorScheme: ColorScheme,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+
+    Surface(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+            onClick()
+        },
+        shape = RoundedCornerShape(20.dp),
+        color = colorScheme.surfaceContainer,
+        modifier = Modifier.size(72.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.size(48.dp)) {
+                drawArc(
+                    color = colorScheme.primaryContainer,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = true
+                )
+                drawArc(
+                    color = colorScheme.tertiaryContainer,
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = true
+                )
+            }
+
+            val scale by animateFloatAsState(targetValue = if (isSelected) 1.1f else 1.0f)
+            Box(
+                modifier = Modifier.graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                AnimatedVisibility(
+                    visible = isSelected,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .border(2.dp, colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(colorScheme.primary, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = colorScheme.onPrimary,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .size(16.dp)
+                            )
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = !isSelected,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .background(colorScheme.primary, CircleShape)
+                    )
                 }
             }
         }

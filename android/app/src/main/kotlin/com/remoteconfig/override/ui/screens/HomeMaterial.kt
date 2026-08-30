@@ -68,8 +68,8 @@ fun HomeContentMaterial(
                 LargeTopAppBar(
                     title = { Text("Color云控修改", style = MaterialTheme.typography.headlineLarge) },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                     ),
                     scrollBehavior = scrollBehavior
                 )

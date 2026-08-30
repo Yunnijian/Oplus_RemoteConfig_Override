@@ -2,18 +2,21 @@ package com.remoteconfig.override.ui.screens
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.settings.ColorMode
-import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalUiMode
+import com.remoteconfig.override.viewmodel.SettingsViewModel
 
 /**
  * 取色屏状态 — 对齐 KernelSU `ColorPaletteUiState.kt`。
- * 字段来自 [com.remoteconfig.override.settings.SettingsRepository]（SharedPreferences 即时读写）。
+ * 字段来自 [com.remoteconfig.override.viewmodel.SettingsViewModel] 的 StateFlow。
  */
 @Immutable
 data class ColorPaletteUiState(
@@ -35,8 +38,7 @@ data class ColorPaletteUiState(
 
 /**
  * 取色屏动作 — 对齐 KernelSU `ColorPaletteScreenActions`。
- * 全部写入走 [com.remoteconfig.override.settings.SettingsRepositoryImpl] setter，
- * 主题即时响应（仓库为快照可观察状态，写入即通知本页重组 → uiState 重建）。
+ * 全部写入走 [SettingsViewModel] setter（repo 落盘 + StateFlow 更新）。
  */
 @Immutable
 data class ColorPaletteScreenActions(
@@ -58,8 +60,8 @@ data class ColorPaletteScreenActions(
 /**
  * 主题取色屏 — 分发器（对齐 KernelSU `ColorPaletteScreen.kt`）。
  *
- * 数据源为 [SettingsRepositoryImpl]（快照可观察：组合期读取即订阅，任一字段写入
- * 即时重组本页 → uiState 重建为最新值），按 [LocalUiMode] 分发 Miuix / Material 实现。
+ * 数据源为 [SettingsViewModel]（对齐 KernelSU：StateFlow 驱动，无快照观察），
+ * 按 [LocalUiMode] 分发 Miuix / Material 实现。
  */
 @Composable
 fun ColorPaletteScreen() {
@@ -73,7 +75,7 @@ fun ColorPaletteScreen() {
 }
 
 /**
- * 构建取色屏状态与动作（数据源 [SettingsRepositoryImpl]）。
+ * 构建取色屏状态与动作（数据源 [SettingsViewModel]）。
  *
  * 全屏路由（[ColorPaletteScreen]）与宽屏双窗右侧 pane（SettingsScreen 内 ThemePane）共用。
  * [onBack] 由调用方注入：全屏 = navigator.pop()，pane = 空操作（pane 无返回按钮，
@@ -81,46 +83,47 @@ fun ColorPaletteScreen() {
  */
 @Composable
 internal fun rememberColorPaletteStateAndActions(onBack: () -> Unit): Pair<ColorPaletteUiState, ColorPaletteScreenActions> {
-    val repo = remember { SettingsRepositoryImpl() }
+    val viewModel: SettingsViewModel = viewModel()
+    val settingsState by viewModel.uiState.collectAsStateWithLifecycle()
     val uiState = ColorPaletteUiState(
-        themeMode = repo.themeMode,
-        miuixMonet = repo.miuixMonet,
-        keyColor = repo.keyColor,
-        colorStyle = repo.colorStyle,
-        colorSpec = repo.colorSpec,
-        enableBlur = repo.enableBlur,
-        enableFloatingBottomBar = repo.enableFloatingBottomBar,
-        enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur,
-        enableNavigationBadge = repo.enableNavigationBadge,
-        enablePredictiveBack = repo.enablePredictiveBack,
-        pageScale = repo.pageScale,
-        currentColorMode = ColorMode.fromValue(repo.themeMode),
+        themeMode = settingsState.themeMode,
+        miuixMonet = settingsState.miuixMonet,
+        keyColor = settingsState.keyColor,
+        colorStyle = settingsState.colorStyle,
+        colorSpec = settingsState.colorSpec,
+        enableBlur = settingsState.enableBlur,
+        enableFloatingBottomBar = settingsState.enableFloatingBottomBar,
+        enableFloatingBottomBarBlur = settingsState.enableFloatingBottomBarBlur,
+        enableNavigationBadge = settingsState.enableNavigationBadge,
+        enablePredictiveBack = settingsState.enablePredictiveBack,
+        pageScale = settingsState.pageScale,
+        currentColorMode = ColorMode.fromValue(settingsState.themeMode),
         currentPaletteStyle = try {
-            PaletteStyle.valueOf(repo.colorStyle)
+            PaletteStyle.valueOf(settingsState.colorStyle)
         } catch (_: Exception) {
             PaletteStyle.TonalSpot
         },
         currentColorSpec = try {
-            ColorSpec.SpecVersion.valueOf(repo.colorSpec)
+            ColorSpec.SpecVersion.valueOf(settingsState.colorSpec)
         } catch (_: Exception) {
             ColorSpec.SpecVersion.SPEC_2025
         },
     )
-    val actions = remember(repo) {
+    val actions = remember(viewModel) {
         ColorPaletteScreenActions(
             onBack = onBack,
-            onSetThemeMode = { repo.themeMode = it },
-            onSetMiuixMonet = { repo.miuixMonet = it },
-            onSetKeyColor = { repo.keyColor = it },
-            onSetColorMode = { repo.themeMode = it.value },
-            onSetColorStyle = { repo.colorStyle = it },
-            onSetColorSpec = { repo.colorSpec = it },
-            onSetEnableBlur = { repo.enableBlur = it },
-            onSetEnableFloatingBottomBar = { repo.enableFloatingBottomBar = it },
-            onSetEnableFloatingBottomBarBlur = { repo.enableFloatingBottomBarBlur = it },
-            onSetEnableNavigationBadge = { repo.enableNavigationBadge = it },
-            onSetEnablePredictiveBack = { repo.enablePredictiveBack = it },
-            onSetPageScale = { repo.pageScale = it },
+            onSetThemeMode = viewModel::setThemeMode,
+            onSetMiuixMonet = viewModel::setMiuixMonet,
+            onSetKeyColor = viewModel::setKeyColor,
+            onSetColorMode = viewModel::setColorMode,
+            onSetColorStyle = viewModel::setColorStyle,
+            onSetColorSpec = viewModel::setColorSpec,
+            onSetEnableBlur = viewModel::setEnableBlur,
+            onSetEnableFloatingBottomBar = viewModel::setEnableFloatingBottomBar,
+            onSetEnableFloatingBottomBarBlur = viewModel::setEnableFloatingBottomBarBlur,
+            onSetEnableNavigationBadge = viewModel::setEnableNavigationBadge,
+            onSetEnablePredictiveBack = viewModel::setEnablePredictiveBack,
+            onSetPageScale = viewModel::setPageScale,
         )
     }
     return uiState to actions

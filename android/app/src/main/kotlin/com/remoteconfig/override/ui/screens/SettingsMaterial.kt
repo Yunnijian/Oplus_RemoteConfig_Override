@@ -29,22 +29,23 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
-import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
 import com.remoteconfig.override.ui.component.material.SegmentedColumn
 import com.remoteconfig.override.ui.component.material.SegmentedDropdownItem
 import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.ui.component.material.expressiveTopAppBarColors
+import com.remoteconfig.override.viewmodel.SettingsViewModel
 
 private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
 
@@ -68,8 +69,9 @@ fun SettingsContentMaterial(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val navigator = LocalNavigator.current
     var showAbout by rememberSaveable { mutableStateOf(false) }
-    // 数据源：KernelSU 风格 SettingsRepository（SharedPreferences 即时读写，主题即时响应）
-    val repo = remember { SettingsRepositoryImpl() }
+    // 数据源：KernelSU 风格 SettingsViewModel（StateFlow 驱动，写入即时更新）
+    val settingsViewModel: SettingsViewModel = viewModel()
+    val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
     ExpressiveScaffold(
         topBar = {
@@ -99,9 +101,9 @@ fun SettingsContentMaterial(
                             title = "界面风格",
                             summary = "选择应用的界面风格",
                             items = listOf("Miuix", "Material"),
-                            selectedIndex = if (UiMode.fromValue(repo.uiMode) == UiMode.Material) 1 else 0,
+                            selectedIndex = if (UiMode.fromValue(settingsState.uiMode) == UiMode.Material) 1 else 0,
                             onItemSelected = { index ->
-                                repo.uiMode = if (index == 1) UiMode.Material.value else UiMode.Miuix.value
+                                settingsViewModel.setUiMode(if (index == 1) UiMode.Material.value else UiMode.Miuix.value)
                             },
                         )
                     }

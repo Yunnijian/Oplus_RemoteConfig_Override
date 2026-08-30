@@ -20,7 +20,6 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -28,13 +27,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
-import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.util.BlurredBar
 import com.remoteconfig.override.ui.util.rememberBlurBackdrop
+import com.remoteconfig.override.viewmodel.SettingsViewModel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -81,8 +82,9 @@ fun SettingsContentMiuix(
     val barColor = if (blurActive) Color.Transparent else colorScheme.surface
     val navigator = LocalNavigator.current
     var showAbout by rememberSaveable { mutableStateOf(false) }
-    // 数据源：KernelSU 风格 SettingsRepository（SharedPreferences 即时读写，主题即时响应）
-    val repo = remember { SettingsRepositoryImpl() }
+    // 数据源：KernelSU 风格 SettingsViewModel（StateFlow 驱动，写入即时更新）
+    val settingsViewModel: SettingsViewModel = viewModel()
+    val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -129,9 +131,9 @@ fun SettingsContentMiuix(
                                     tint = colorScheme.onBackground,
                                 )
                             },
-                            selectedIndex = if (UiMode.fromValue(repo.uiMode) == UiMode.Material) 1 else 0,
+                            selectedIndex = if (UiMode.fromValue(settingsState.uiMode) == UiMode.Material) 1 else 0,
                             onSelectedIndexChange = { index ->
-                                repo.uiMode = if (index == 1) UiMode.Material.value else UiMode.Miuix.value
+                                settingsViewModel.setUiMode(if (index == 1) UiMode.Material.value else UiMode.Miuix.value)
                             },
                         )
                         ArrowPreference(
