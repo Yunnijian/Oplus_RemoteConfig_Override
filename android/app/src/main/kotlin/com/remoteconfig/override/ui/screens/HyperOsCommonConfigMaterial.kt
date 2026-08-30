@@ -186,7 +186,6 @@ fun HyperOsCommonConfigMaterial(
                                 )
                                 TextButton(
                                     onClick = if (state.frozen) onUnfreeze else onFreeze,
-                                    enabled = !state.writing,
                                     modifier = Modifier.align(Alignment.End),
                                 ) {
                                     Text(if (state.frozen) "解冻" else "冻结")
@@ -233,7 +232,7 @@ fun HyperOsCommonConfigMaterial(
                             SegmentedColumn(
                                 modifier = Modifier.fillMaxWidth(),
                                 title = group,
-                                content = rows.map { row -> { SwitchItemMaterial(row, !state.writing, onToggle) } },
+                                content = rows.map { row -> { SwitchItemMaterial(row, onToggle) } },
                             )
                         }
                     }
@@ -251,13 +250,12 @@ fun HyperOsCommonConfigMaterial(
 /**
  * 单行开关（Material）— 复刻 SegmentedList.kt `SegmentedSwitchItem` 的现成写法：
  * 整行点击切换（带 haptic）+ [ExpressiveSwitch] trailing 共享 interactionSource
- * （switch 本身 onCheckedChange 为 null，由行点击承担切换）。[enabled] = !writing。
+ * （switch 本身 onCheckedChange 为 null，由行点击承担切换）。
  * label（headline，SemiBold）+ name（supporting，mono 小字）。
  */
 @Composable
 private fun SwitchItemMaterial(
     row: HyperOsViewModel.SwitchRow,
-    enabled: Boolean,
     onToggle: (HyperOsViewModel.SwitchRow) -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -268,7 +266,6 @@ private fun SwitchItemMaterial(
             haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
             onToggle(row)
         },
-        enabled = enabled,
         interactionSource = interactionSource,
         headlineContent = {
             Text(
@@ -286,7 +283,6 @@ private fun SwitchItemMaterial(
         trailingContent = {
             ExpressiveSwitch(
                 checked = row.value,
-                enabled = enabled,
                 onCheckedChange = null,
                 interactionSource = interactionSource,
             )

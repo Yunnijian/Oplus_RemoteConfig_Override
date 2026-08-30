@@ -186,7 +186,6 @@ fun HyperOsCommonConfigMiuix(
                                 summary = "云控版本 ${state.version ?: "未知"} · " +
                                     if (state.frozen) "已冻结（云端不会覆盖）" else "未冻结（云端会周期性覆盖）",
                                 checked = state.frozen,
-                                enabled = !state.writing,
                                 onCheckedChange = { frozen ->
                                     if (frozen) onFreeze() else onUnfreeze()
                                 },
@@ -251,7 +250,6 @@ fun HyperOsCommonConfigMiuix(
                                         title = row.label,
                                         summary = row.name,
                                         checked = row.value,
-                                        enabled = !state.writing,
                                         onCheckedChange = { onToggle(row) },
                                     )
                                 }

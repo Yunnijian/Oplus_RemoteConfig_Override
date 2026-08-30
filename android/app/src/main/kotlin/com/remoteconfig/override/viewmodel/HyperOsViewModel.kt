@@ -123,10 +123,9 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
     private fun JoyoseManager.ListResult?.cloudConfigVersion(): String? =
         this?.cloudConfig?.firstOrNull { it.configName == JoyoseManager.CONFIG_BOOSTER }?.version?.toString()
 
-    /** 乐观更新 + 写后回读；失败回滚并呈现 CLI 错误文本。
-     *  成功不弹横幅——开关状态本身就是反馈（写后回读刷新）。
-     *  writing 置位在主线程同步完成（先于协程调度），防止整行点击与开关
-     *  双事件穿透并发守护造成竞争写入。 */
+    /** 乐观更新 + 写后确认；失败回滚并呈现 CLI 错误文本。
+     *  成功不做整页回读刷新（CLI 内部已回读校验），且不整页禁用——
+     *  开关状态本身就是反馈；并发由 writing 守卫拦截（主线程同步置位）。 */
     fun toggleSwitch(row: SwitchRow) {
         if (_commonState.value.writing) return
         _commonState.update { it.copy(writing = true, error = null) }
@@ -141,7 +140,6 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                 joyose.toggleBoolean(row.path, !row.value)
             }
             if (result.success) {
-                withContext(Dispatchers.IO) { refreshCommonBlocking() }
                 _commonState.update { it.copy(writing = false) }
             } else {
                 // 回滚乐观更新
@@ -158,42 +156,27 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** 冻结/解冻：乐观置位 frozen，失败回滚（frozen 即开关状态，无需整页刷新）。 */
     fun freeze() {
         if (_commonState.value.writing) return
-        _commonState.update { it.copy(writing = true, error = null) }
+        _commonState.update { it.copy(writing = true, error = null, frozen = true) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { joyose.freeze() }
-            withContext(Dispatchers.IO) { refreshCommonBlocking() }
             _commonState.update {
                 if (result.success) it.copy(writing = false)
-                else it.copy(writing = false, error = result.message)
+                else it.copy(writing = false, frozen = false, error = result.message)
             }
         }
     }
 
     fun unfreeze() {
         if (_commonState.value.writing) return
-        _commonState.update { it.copy(writing = true, error = null) }
+        _commonState.update { it.copy(writing = true, error = null, frozen = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { joyose.unfreeze() }
-            withContext(Dispatchers.IO) { refreshCommonBlocking() }
             _commonState.update {
                 if (result.success) it.copy(writing = false)
-                else it.copy(writing = false, error = result.message)
-            }
-        }
-    }
-
-    private suspend fun refreshCommonBlocking() {
-        val stat = joyose.stat()
-        val view = joyose.appView(BOOSTER)
-        if (stat != null && view != null) {
-            _commonState.update {
-                it.copy(
-                    switches = view.globalSwitches.map { p -> p.toSwitchRow() },
-                    version = joyose.list().cloudConfigVersion(),
-                    frozen = stat.sp.frozen,
-                )
+                else it.copy(writing = false, frozen = true, error = result.message)
             }
         }
     }
