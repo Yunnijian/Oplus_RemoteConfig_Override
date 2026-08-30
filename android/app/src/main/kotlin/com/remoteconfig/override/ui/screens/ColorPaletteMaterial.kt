@@ -51,14 +51,9 @@ import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.rounded.AspectRatio
-import androidx.compose.material.icons.rounded.BlurOn
-import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DesignServices
-import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.Style
-import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -111,13 +106,14 @@ import com.remoteconfig.override.ui.theme.rememberRemoteConfigColorScheme
 import kotlinx.coroutines.awaitAll
 
 /**
- * 主题取色屏 — Material 3 实现（与 Miuix 版同三组，组件对齐 KernelSU
+ * 主题取色屏 — Material 3 实现（组件对齐 KernelSU
  * `ColorPaletteScreenMaterial.kt`：SegmentedColumn / SegmentedDropdownItem /
  * SegmentedSwitchItem / ExpressiveSwitch）。
  *
- * 主题模式分段按钮 → 第一组（启用 Monet 颜色 / 强调色 / 色彩风格 / 色彩标准）
- * → 第二组（模糊 / 悬浮底栏 / 液态玻璃 / 导航栏角标）
- * → 第三组（预测性返回手势 / 界面缩放）。
+ * 主题模式分段按钮 → 第一组（色彩风格 / 色彩标准）
+ * → 第二组（预测性返回手势）→ 界面缩放。
+ * （对齐 KernelSU Material 取色屏：不含 Monet/模糊/悬浮底栏/液态玻璃等
+ * Material 模式不生效的开关。）
  *
  * [showTopBar]：全屏路由 true（带返回按钮）；宽屏双窗右侧 pane 传 false（无顶栏返回按钮，
  * 由左侧设置列表选择控制）。无顶栏时 contentWindowInsets 去掉 Top（左侧列表顶栏已消费状态栏），
@@ -306,19 +302,11 @@ fun ColorPaletteContentMaterial(
                     }
                 }
 
-                // 第一组：主题
+                // 第一组：色彩风格/标准（对齐 KernelSU Material 取色屏，无 Monet/效果开关）。
+                // 仅在有强调色时展示（keyColor==0 且 Monet 开启时走系统动态色，两者不参与取色）。
                 SegmentedColumn(
                     modifier = Modifier.padding(top = 4.dp),
                     content = {
-                        item {
-                            SegmentedSwitchItem(
-                                icon = Icons.Rounded.Wallpaper,
-                                title = "启用 Monet 颜色",
-                                checked = uiState.miuixMonet,
-                                onCheckedChange = actions.onSetMiuixMonet,
-                            )
-                        }
-                        // 色彩风格/标准仅在有强调色时展示（Monet 动态色下两者不参与取色）。
                         item(visible = uiState.keyColor != 0) {
                             val styles = PaletteStyle.entries
                             SegmentedDropdownItem(
@@ -346,41 +334,7 @@ fun ColorPaletteContentMaterial(
                     }
                 )
 
-                // 第二组：效果
-                SegmentedColumn(
-                    modifier = Modifier.padding(top = 4.dp),
-                    content = {
-                        item(visible = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            SegmentedSwitchItem(
-                                icon = Icons.Rounded.BlurOn,
-                                title = "模糊",
-                                summary = "启用顶栏和底栏的模糊效果",
-                                checked = uiState.enableBlur,
-                                onCheckedChange = actions.onSetEnableBlur,
-                            )
-                        }
-                        item {
-                            SegmentedSwitchItem(
-                                icon = Icons.Rounded.CallToAction,
-                                title = "悬浮底栏",
-                                summary = "使用 Apple 风格的悬浮底栏",
-                                checked = uiState.enableFloatingBottomBar,
-                                onCheckedChange = actions.onSetEnableFloatingBottomBar,
-                            )
-                        }
-                        item(visible = uiState.enableFloatingBottomBar && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            SegmentedSwitchItem(
-                                icon = Icons.Rounded.WaterDrop,
-                                title = "液态玻璃",
-                                summary = "启用悬浮底栏的液态玻璃效果",
-                                checked = uiState.enableFloatingBottomBarBlur,
-                                onCheckedChange = actions.onSetEnableFloatingBottomBarBlur,
-                            )
-                        }
-                    }
-                )
-
-                // 第三组：其他
+                // 第二组：其他
                 SegmentedColumn(
                     modifier = Modifier.padding(top = 4.dp),
                     content = {
