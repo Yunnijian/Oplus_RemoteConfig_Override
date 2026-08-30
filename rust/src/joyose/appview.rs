@@ -804,11 +804,11 @@ impl AppView {
 
 type CliResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// `joyose-app <pkg> <booster_params.json> [common_params.json]`
+/// `joyose-app <pkg> [booster_params.json] [common_params.json]`
 ///
-/// File-based source for development/golden testing; Phase 1 swaps the file
-/// arguments for the on-device DB read while keeping `collect()` and the
-/// output protocol unchanged.
+/// Without file arguments the documents are read from the on-device Joyose
+/// DBs (P1 source swap; `collect()` and the output protocol are unchanged).
+/// File arguments remain for development/golden testing.
 pub fn cmd_app_view(
     package: Option<&String>,
     booster_path: Option<&String>,
@@ -817,13 +817,14 @@ pub fn cmd_app_view(
     let Some(package) = package else {
         return Err("缺少包名".into());
     };
-    let Some(booster_path) = booster_path else {
-        return Err("缺少 booster params JSON 文件路径".into());
+    let params = match booster_path {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("读取 {path} 失败: {e}"))?;
+            serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?
+        }
+        None => super::store::read_params_any("booster_config")?.1,
     };
-    let text = std::fs::read_to_string(booster_path)
-        .map_err(|e| format!("读取 {booster_path} 失败: {e}"))?;
-    let params: Value =
-        serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?;
     let common = match common_path {
         Some(path) => {
             let text = std::fs::read_to_string(path)
@@ -836,7 +837,9 @@ pub fn cmd_app_view(
                 value.get("params").cloned().unwrap_or(Value::Null)
             })
         }
-        None => None,
+        None => super::store::read_params_any("common_config")
+            .ok()
+            .map(|(_, v)| v),
     };
 
     let view = collect(&params, package, common.as_ref())

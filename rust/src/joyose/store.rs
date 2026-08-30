@@ -148,7 +148,7 @@ fn stat_one(path: &str) -> Value {
 /// (e.g. common_config only exists in teg rules on real devices).
 /// teg `rule_content` may be a pseudo-row wrapper `{config_name,…,params}`;
 /// it is unwrapped so callers always see the bare params document.
-fn read_params_any(config: &str) -> CliResult<(String, Value)> {
+pub fn read_params_any(config: &str) -> CliResult<(String, Value)> {
     if Path::new(SMARTP).exists() {
         let conn = open_ro(SMARTP)?;
         if let Ok(text) = conn.query_row(

@@ -499,7 +499,7 @@ fn usage() -> &'static str {
     "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect\n\
      joyose: stat [备份根目录] | list | read <配置名> | write <配置名> <json文件> | freeze | unfreeze\n\
              backup <备份根目录> [标签] | backup-list <备份根目录> | revert <备份根目录> <名称>\n\
-             apps | app <包名> <booster_params.json> [common_params.json]"
+             apps | app <包名> [booster_params.json] [common_params.json]"
 }
 
 fn main() -> ExitCode {

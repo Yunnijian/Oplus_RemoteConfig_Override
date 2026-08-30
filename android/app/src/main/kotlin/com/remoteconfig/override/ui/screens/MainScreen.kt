@@ -34,6 +34,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.unit.Dp
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
+import com.remoteconfig.override.platform.Platform
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.LocalMainPagerState
 import com.remoteconfig.override.ui.component.DiscardChangesDialog
@@ -45,6 +46,7 @@ import com.remoteconfig.override.ui.component.rememberContentReady
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBar
 import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBarBlur
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isExpandedWidth
 import com.remoteconfig.override.ui.util.rememberBlurBackdrop
@@ -54,7 +56,11 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+/** ColorOS 分页数：3 页（首页 / 配置 / 设置）。 */
 private const val PAGE_COUNT = 3
+
+/** HyperOS 分页数（P2.0）：4 页（首页 / 应用配置 / 通用配置 / 设置）。 */
+private const val HYPEROS_PAGE_COUNT = 4
 
 /**
  * 截断 Pager 各页内容向外层 HorizontalPager 的可见性请求（bringIntoView）：
@@ -90,8 +96,11 @@ private fun PageBringIntoViewBarrier(content: @Composable () -> Unit) {
  * - [BottomBar]/[SideRail]：按 LocalUiMode 分发 Miuix/Material 双模式；
  *   Miuix 底栏读 LocalEnableFloatingBottomBar/LocalEnableFloatingBottomBarBlur
  *   走 FloatingBottomBar（悬浮液态玻璃）或普通 NavigationBar。
- * - 保留：3 tab（首页/配置/设置）、双窗（Expanded rail + 配置 list-detail）、
- *   rememberContentReady 延迟组装、isCurrentPage（settledPage）门控。
+ * - 保留：双窗（Expanded rail + 配置 list-detail）、rememberContentReady 延迟组装、
+ *   isCurrentPage（settledPage）门控。
+ * - 平台分页分支（P2.0）：HyperOS 4 tab（首页/应用配置/通用配置/设置），ColorOS 维持
+ *   3 tab（首页/配置/设置）完全不变；页数经 rememberPagerState 的 pageCount lambda
+ *   每次重组刷新，设置内切换平台后分页/底栏即时生效。
  */
 @Composable
 fun MainScreen(
@@ -106,8 +115,15 @@ fun MainScreen(
     val contentReady = rememberContentReady()
     val navigator = LocalNavigator.current
     val expanded = isExpandedWidth()
+    // 平台分页分支（P2.0）：在分页宿主处读一次 LocalPlatform。HyperOS 4 页
+    // （首页/应用配置/通用配置/设置），ColorOS 维持现有 3 页完全不变。
+    val hyperOS = LocalPlatform.current == Platform.HyperOS
 
-    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { PAGE_COUNT })
+    val pagerState = rememberPagerState(
+        initialPage = initialPage,
+        // pageCount lambda 每次重组都会被 rememberPagerState 刷新，平台切换后即时生效
+        pageCount = { if (hyperOS) HYPEROS_PAGE_COUNT else PAGE_COUNT },
+    )
     val mainPagerState = rememberMainPagerState(pagerState)
 
     // 手势滑动 → 实时同步 tab（isNavigating=false 时才生效，点击滚动中被协调器屏蔽）
@@ -215,35 +231,53 @@ fun MainScreen(
                             HomePage(viewModel, bottomInnerPadding, isCurrentPage)
                         }
                         1 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
-                            ConfigListPage(
-                                viewModel = viewModel,
-                                bottomInnerPadding = bottomInnerPadding,
-                                isCurrentPage = isCurrentPage,
-                                onGameClick = { pkg ->
-                                    if (expanded) {
-                                        // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
-                                        selectDualPane(pkg)
-                                    } else {
-                                        viewModel.loadConfig(pkg)
-                                        navigator.push(Route.ConfigEditor(pkg))
-                                    }
-                                },
-                                onNewConfig = { pkg ->
-                                    // 新建配置同样会重置编辑缓冲区：脏状态下先确认。
-                                    if (expanded && viewModel.isEditingDirty()) {
-                                        pendingNewConfig = pkg
-                                    } else {
-                                        viewModel.createNewConfig(pkg)
-                                        if (expanded) dualPaneSelected = pkg
-                                        else navigator.push(Route.ConfigEditor(pkg))
-                                    }
-                                },
-                                dualPaneSelected = if (expanded) dualPaneSelected else null,
-                                onDualPaneSelect = selectDualPane,
-                            )
+                            if (hyperOS) {
+                                // HyperOS：应用配置页（ColorOS 此页仍为云控配置列表）
+                                HyperOsAppListScreen(
+                                    bottomInnerPadding = bottomInnerPadding,
+                                    isCurrentPage = isCurrentPage,
+                                )
+                            } else {
+                                ConfigListPage(
+                                    viewModel = viewModel,
+                                    bottomInnerPadding = bottomInnerPadding,
+                                    isCurrentPage = isCurrentPage,
+                                    onGameClick = { pkg ->
+                                        if (expanded) {
+                                            // 宽屏双窗：只选中，右侧窗格即时切换，不 push 路由
+                                            selectDualPane(pkg)
+                                        } else {
+                                            viewModel.loadConfig(pkg)
+                                            navigator.push(Route.ConfigEditor(pkg))
+                                        }
+                                    },
+                                    onNewConfig = { pkg ->
+                                        // 新建配置同样会重置编辑缓冲区：脏状态下先确认。
+                                        if (expanded && viewModel.isEditingDirty()) {
+                                            pendingNewConfig = pkg
+                                        } else {
+                                            viewModel.createNewConfig(pkg)
+                                            if (expanded) dualPaneSelected = pkg
+                                            else navigator.push(Route.ConfigEditor(pkg))
+                                        }
+                                    },
+                                    dualPaneSelected = if (expanded) dualPaneSelected else null,
+                                    onDualPaneSelect = selectDualPane,
+                                )
+                            }
                         }
 
                         2 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
+                            if (hyperOS) {
+                                // HyperOS：通用配置页（ColorOS 此页仍为设置）
+                                HyperOsCommonConfigScreen(bottomInnerPadding)
+                            } else {
+                                SettingsContent(bottomInnerPadding)
+                            }
+                        }
+
+                        3 -> if (hyperOS && (isCurrentPage || contentReady)) PageBringIntoViewBarrier {
+                            // 仅 HyperOS 存在第 4 页：设置（ColorOS 分页数恒为 3，不会组装）
                             SettingsContent(bottomInnerPadding)
                         }
                     }

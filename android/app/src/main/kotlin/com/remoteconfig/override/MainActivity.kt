@@ -29,6 +29,8 @@ import com.remoteconfig.override.platform.detectPlatform
 import com.remoteconfig.override.platform.resolvePlatform
 import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
+import com.remoteconfig.override.ui.screens.HyperOsAppDetailScreen
+import com.remoteconfig.override.ui.screens.HyperOsCommonConfigScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
@@ -149,6 +151,15 @@ class MainActivity : ComponentActivity() {
                                         navigator.pop()
                                     },
                                 )
+                            }
+                            // HyperOS 路由（P2.0b）：应用配置详情 / 通用配置。
+                            // 两个 Screen 组合函数由并行任务提供（ui/screens/HyperOsAppDetailScreen.kt /
+                            // HyperOsCommonConfigScreen.kt），数据加载由各自内部完成，这里只做路由挂载。
+                            entry<Route.HyperOsAppDetail> { key ->
+                                HyperOsAppDetailScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsCommonConfig> {
+                                HyperOsCommonConfigScreen()
                             }
                         },
                     )
