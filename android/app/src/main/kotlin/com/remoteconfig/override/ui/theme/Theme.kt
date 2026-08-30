@@ -79,14 +79,13 @@ object ThemeController {
 /**
  * 双主题分发入口 — 对齐 KernelSU KernelSUTheme，按 [uiMode] 分发到
  * MiuixTheme / MaterialTheme。
- * [appSettings]/[miuixMonet] 由 MainActivity 传入（数据源为
+ * [appSettings] 由 MainActivity 传入（数据源为
  * MainActivityViewModel 的 prefs 监听 StateFlow，对齐 KernelSU）。
  */
 @Composable
 fun RemoteConfigTheme(
     appSettings: AppSettings = ThemeController.getAppSettings(),
     uiMode: UiMode = LocalUiMode.current,
-    miuixMonet: Boolean = SettingsRepositoryImpl().miuixMonet,
     content: @Composable () -> Unit
 ) {
     when (uiMode) {
@@ -97,7 +96,6 @@ fun RemoteConfigTheme(
 
         UiMode.Material -> RemoteConfigMaterialTheme(
             appSettings = appSettings,
-            miuixMonet = miuixMonet,
             content = content,
         )
     }

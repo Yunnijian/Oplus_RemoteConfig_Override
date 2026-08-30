@@ -302,12 +302,12 @@ fun ColorPaletteContentMaterial(
                     }
                 }
 
-                // 第一组：色彩风格/标准（对齐 KernelSU Material 取色屏，无 Monet/效果开关）。
-                // 仅在有强调色时展示（keyColor==0 且 Monet 开启时走系统动态色，两者不参与取色）。
+                // 第一组：色彩风格/标准（对齐 KernelSU Material 取色屏：无条件展示，
+                // Material 模式始终走 materialkolor，默认色块下两者同样生效）。
                 SegmentedColumn(
                     modifier = Modifier.padding(top = 4.dp),
                     content = {
-                        item(visible = uiState.keyColor != 0) {
+                        item {
                             val styles = PaletteStyle.entries
                             SegmentedDropdownItem(
                                 icon = Icons.Rounded.Style,
@@ -319,7 +319,7 @@ fun ColorPaletteContentMaterial(
                                 },
                             )
                         }
-                        item(visible = uiState.keyColor != 0) {
+                        item {
                             val specs = ColorSpec.SpecVersion.entries
                             SegmentedDropdownItem(
                                 icon = Icons.Rounded.DesignServices,

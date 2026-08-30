@@ -18,7 +18,6 @@ import com.remoteconfig.override.ui.theme.ThemeController
  */
 data class MainActivityUiState(
     val appSettings: AppSettings,
-    val miuixMonet: Boolean = true,
     val pageScale: Float = 1.0f,
     val enableBlur: Boolean = false,
     val enableFloatingBottomBar: Boolean = false,
@@ -59,7 +58,6 @@ class MainActivityViewModel : ViewModel() {
     private fun readUiState(): MainActivityUiState {
         return MainActivityUiState(
             appSettings = ThemeController.getAppSettings(settingRepo),
-            miuixMonet = settingRepo.miuixMonet,
             pageScale = settingRepo.pageScale,
             enableBlur = settingRepo.enableBlur,
             enableFloatingBottomBar = settingRepo.enableFloatingBottomBar,

@@ -103,7 +103,6 @@ class MainActivity : ComponentActivity() {
                 RemoteConfigTheme(
                     appSettings = appSettings,
                     uiMode = uiMode,
-                    miuixMonet = uiState.miuixMonet,
                 ) {
                     NavDisplay(
                         backStack = navigator.backStack,
