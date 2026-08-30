@@ -27,7 +27,8 @@ fun initSettingsRepository(context: Context) {
  *
  * Prefs 名与键名均与 KernelSU 一致（ui_mode / color_mode / key_color / color_style /
  * color_spec / enable_blur / enable_floating_bottom_bar / enable_floating_bottom_bar_blur /
- * miuix_monet / enable_predictive_back / page_scale / enable_navigation_badge）。
+ * miuix_monet / enable_predictive_back / page_scale / enable_navigation_badge /
+ * platform_mode）。
  */
 class SettingsRepositoryImpl(
     context: Context = settingsAppContext,
@@ -83,6 +84,10 @@ class SettingsRepositoryImpl(
         get() = prefs.getBoolean(KEY_ENABLE_NAVIGATION_BADGE, true)
         set(value) = prefs.edit { putBoolean(KEY_ENABLE_NAVIGATION_BADGE, value) }
 
+    override var platformMode: String
+        get() = prefs.getString(KEY_PLATFORM_MODE, "auto") ?: "auto"
+        set(value) = prefs.edit { putString(KEY_PLATFORM_MODE, value) }
+
     companion object {
         const val SETTINGS_PREFS_FILE = "settings"
         const val KEY_UI_MODE = "ui_mode"
@@ -97,5 +102,6 @@ class SettingsRepositoryImpl(
         const val KEY_ENABLE_PREDICTIVE_BACK = "enable_predictive_back"
         const val KEY_PAGE_SCALE = "page_scale"
         const val KEY_ENABLE_NAVIGATION_BADGE = "enable_navigation_badge"
+        const val KEY_PLATFORM_MODE = "platform_mode"
     }
 }

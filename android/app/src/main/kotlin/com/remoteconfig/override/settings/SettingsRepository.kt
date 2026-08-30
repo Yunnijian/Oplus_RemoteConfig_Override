@@ -16,6 +16,7 @@ package com.remoteconfig.override.settings
  * - [enablePredictiveBack]：预测性返回手势开关
  * - [pageScale]：全局界面缩放比例（0.8f..1.1f）
  * - [enableNavigationBadge]：导航栏角标开关
+ * - [platformMode]：平台选择（"auto" / "coloros" / "hyperos"），默认 auto，自动按系统属性检测
  */
 interface SettingsRepository {
     var uiMode: String
@@ -30,4 +31,5 @@ interface SettingsRepository {
     var enablePredictiveBack: Boolean
     var pageScale: Float
     var enableNavigationBadge: Boolean
+    var platformMode: String
 }

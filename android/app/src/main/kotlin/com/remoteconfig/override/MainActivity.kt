@@ -25,6 +25,8 @@ import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Navigator
 import com.remoteconfig.override.navigation.Route
 import com.remoteconfig.override.navigation.rememberNavigator
+import com.remoteconfig.override.platform.detectPlatform
+import com.remoteconfig.override.platform.resolvePlatform
 import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
 import com.remoteconfig.override.ui.screens.MainScreen
@@ -32,6 +34,7 @@ import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBar
 import com.remoteconfig.override.ui.theme.LocalEnableFloatingBottomBarBlur
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.LocalWindowWidthClass
 import com.remoteconfig.override.ui.theme.RemoteConfigTheme
@@ -54,6 +57,11 @@ class MainActivity : ComponentActivity() {
             val selectedMainPage by mainActivityViewModel.selectedMainPage.collectAsStateWithLifecycle()
             val appSettings = uiState.appSettings
             val uiMode = uiState.uiMode
+
+            // 平台检测（P2.0a）：反射读系统属性开销大，remember 缓存避免每次重组重复检测；
+            // platformMode 为用户设置（auto/coloros/hyperos），auto 及未知值时跟随检测结果。
+            val detectedPlatform = remember { detectPlatform() }
+            val platform = resolvePlatform(appSettings.platformMode, detectedPlatform)
 
             // Bug 3：系统栏图标明暗必须跟随应用主题（colorMode），而非系统深色。
             // 若强制 ColorMode 与系统相反，isSystemInDarkTheme() 会导致
@@ -96,6 +104,7 @@ class MainActivity : ComponentActivity() {
                 LocalDensity provides density,
                 LocalUiMode provides uiMode,
                 LocalColorMode provides appSettings.colorMode.value,
+                LocalPlatform provides platform,
                 LocalEnableBlur provides uiState.enableBlur,
                 LocalEnableFloatingBottomBar provides uiState.enableFloatingBottomBar,
                 LocalEnableFloatingBottomBarBlur provides uiState.enableFloatingBottomBarBlur,

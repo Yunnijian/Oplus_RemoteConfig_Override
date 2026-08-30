@@ -95,6 +95,7 @@ class MainActivityViewModel(
             SettingsRepositoryImpl.KEY_ENABLE_FLOATING_BOTTOM_BAR,
             SettingsRepositoryImpl.KEY_ENABLE_FLOATING_BOTTOM_BAR_BLUR,
             SettingsRepositoryImpl.KEY_ENABLE_NAVIGATION_BADGE,
+            SettingsRepositoryImpl.KEY_PLATFORM_MODE,
         )
     }
 }

@@ -20,6 +20,8 @@ data class AppSettings(
     val keyColor: Int,
     val paletteStyle: PaletteStyle,
     val colorSpec: ColorSpec.SpecVersion,
+    /** 平台选择原始值（"auto" / "coloros" / "hyperos"），由 MainActivity 经 resolvePlatform 解析生效平台。 */
+    val platformMode: String,
 )
 
 /** 仅这些样式支持 2025 动态取色规范（对齐 KernelSU Theme.kt supportsSpec2025）。 */
@@ -72,7 +74,7 @@ object ThemeController {
             ColorSpec.SpecVersion.SPEC_2025
         }
 
-        return AppSettings(colorMode, keyColor, paletteStyle, colorSpec)
+        return AppSettings(colorMode, keyColor, paletteStyle, colorSpec, repo.platformMode)
     }
 }
 
