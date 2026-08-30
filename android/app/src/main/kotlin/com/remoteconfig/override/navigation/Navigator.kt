@@ -22,7 +22,11 @@ class Navigator(initialKey: NavKey) {
     }
 
     fun pop() {
-        backStack.removeLastOrNull()
+        // 根路由不可弹出：NavDisplay 的 backstack 为空会直接抛
+        // "NavDisplay backstack cannot be empty"（系统返回连按两下的场景）
+        if (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        }
     }
 
     fun current(): NavKey? = backStack.lastOrNull()

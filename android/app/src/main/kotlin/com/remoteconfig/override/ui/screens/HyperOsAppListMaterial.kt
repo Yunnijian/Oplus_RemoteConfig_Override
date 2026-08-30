@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,10 +42,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -153,9 +156,22 @@ fun HyperOsAppListMaterial(
                         ) {
                             ListItem(
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                leadingContent = {
+                                    // 应用图标：ColorOS 路径预加载缓存（IO 线程解码），组合期零查询
+                                    val icon = viewModel.getCachedIcon(app.pkg)
+                                    if (icon != null) {
+                                        Image(
+                                            bitmap = icon.asImageBitmap(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(MaterialTheme.shapes.small),
+                                        )
+                                    }
+                                },
                                 headlineContent = {
                                     Text(
-                                        text = app.pkg,
+                                        text = state.labels[app.pkg] ?: app.pkg,
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,8 +50,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.remoteconfig.override.R
+import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.platform.Platform
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
+import com.remoteconfig.override.viewmodel.HyperOsViewModel
 import com.remoteconfig.override.viewmodel.MainViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
@@ -89,6 +95,13 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
     val cosaVersion by viewModel.cosaVersion.collectAsState()
     val context = LocalContext.current
 
+    // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
+    val hyperOS = LocalPlatform.current == Platform.HyperOS
+    val hyperOsViewModel: HyperOsViewModel = composeViewModel()
+    val joyoseStat by hyperOsViewModel.statState.collectAsState()
+    val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
+    LaunchedEffect(hyperOS) { if (hyperOS) hyperOsViewModel.refreshStat() }
+
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
     }
@@ -120,8 +133,17 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
                 .padding(start = 12.dp, end = 12.dp, top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            RootStatusCard(systemStatus = systemStatus)
-            DeviceInfoCard(kernelVersion = kernelVersion, cosaVersion = cosaVersion)
+            if (hyperOS) {
+                JoyoseStatusCard(stat = joyoseStat)
+            } else {
+                RootStatusCard(systemStatus = systemStatus)
+            }
+            DeviceInfoCard(
+                kernelVersion = kernelVersion,
+                hyperOS = hyperOS,
+                joyoseVersion = joyoseVersion,
+                cosaVersion = cosaVersion,
+            )
             AuthorCard(
                 onCoolapkClick = {
                     try {
@@ -233,18 +255,97 @@ private fun RootStatusCard(systemStatus: MainViewModel.SystemStatus) {
     }
 }
 
+// ── Joyose 状态卡（HyperOS）──
+// 数据源 = HyperOsViewModel.statState（joyose-stat 轻量查询）。
+// 双库任一存在 → primaryContainer 正常态；双库全缺 → errorContainer 不可用态；
+// stat 未返回前 → surfaceContainer 检测中态（避免闪红）。
+@Composable
+private fun JoyoseStatusCard(stat: JoyoseManager.Stat?) {
+    val connected = stat != null && (stat.smartp.exists || stat.teg.exists)
+    val containerColor = when {
+        stat == null -> colorScheme.surfaceContainer
+        connected -> colorScheme.primaryContainer
+        else -> colorScheme.errorContainer
+    }
+    val onContainerColor = when {
+        stat == null -> colorScheme.onSurfaceVariantSummary
+        connected -> colorScheme.onPrimaryContainer
+        else -> colorScheme.onErrorContainer
+    }
+    val icon = when {
+        stat == null -> Icons.Filled.HourglassEmpty
+        connected -> Icons.Filled.Verified
+        else -> Icons.Filled.GppBad
+    }
+    val title = when {
+        stat == null -> "正在检测..."
+        connected -> "Joyose 云控正常"
+        else -> "Joyose 云控不可用"
+    }
+    val subtitle = when {
+        stat == null -> "正在读取 Joyose 数据库状态"
+        connected -> "SmartP / teg_config 已连接 · " +
+            if (stat.sp.frozen) "云控已冻结" else "云控未冻结"
+        else -> "未找到 Joyose 数据库，请确认设备为 HyperOS"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.defaultColors(color = containerColor),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = onContainerColor,
+                modifier = Modifier.size(40.dp),
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = onContainerColor,
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 14.sp,
+                    color = onContainerColor.copy(alpha = 0.7f),
+                )
+            }
+        }
+    }
+}
+
 // ── 设备信息卡 ──
 // 设备型号对齐 KernelSU：resolveDeviceName() 解析各厂商市场名（remember 缓存一次）。
 // 内核版本与 KernelSU Home 一致：Os.uname().release。
+// HyperOS 平台末行切 Joyose 云控服务（com.xiaomi.joyose，PackageManager 版本）。
 @Composable
-private fun DeviceInfoCard(kernelVersion: String, cosaVersion: String) {
+private fun DeviceInfoCard(
+    kernelVersion: String,
+    hyperOS: Boolean,
+    joyoseVersion: String,
+    cosaVersion: String,
+) {
     val deviceModel = remember { resolveDeviceName() }
     Card(Modifier.fillMaxWidth()) {
         Column {
             BasicComponent(title = "设备型号", summary = deviceModel)
             BasicComponent(title = "安卓版本", summary = "Android ${Build.VERSION.RELEASE}")
             BasicComponent(title = "内核版本", summary = kernelVersion)
-            BasicComponent(title = "应用增强服务", summary = "v$cosaVersion · com.oplus.cosa")
+            if (hyperOS) {
+                BasicComponent(
+                    title = "Joyose 云控服务",
+                    summary = "v$joyoseVersion · com.xiaomi.joyose",
+                )
+            } else {
+                BasicComponent(title = "应用增强服务", summary = "v$cosaVersion · com.oplus.cosa")
+            }
         }
     }
 }

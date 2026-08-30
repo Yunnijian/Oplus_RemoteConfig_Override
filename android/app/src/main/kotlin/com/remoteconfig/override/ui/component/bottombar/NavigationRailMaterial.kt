@@ -1,6 +1,7 @@
 // Ported from KernelSU me.weishu.kernelsu.ui.component.bottombar.NavigationRailMaterial.
 // - 移除了 KernelSU 特有的 Natives/rootAvailable/fullFeatured 门控与 navigationBadge。
-// - 3 项 tab（首页/配置/设置），M3 WideNavigationRail + filled/outlined 双态图标。
+// - tab 数按平台分支：ColorOS 3 项，HyperOS 4 项（首页/应用配置/通用配置/设置），
+//   图标对齐 BottomBarMaterial 的平台分支。
 
 package com.remoteconfig.override.ui.component.bottombar
 
@@ -16,11 +17,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +39,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.remoteconfig.override.platform.Platform
 import com.remoteconfig.override.ui.LocalMainPagerState
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import kotlinx.coroutines.launch
 
 @Composable
@@ -42,12 +49,22 @@ fun NavigationRailMaterial(
     modifier: Modifier = Modifier,
 ) {
     val mainPagerState = LocalMainPagerState.current
+    val hyperOS = LocalPlatform.current == Platform.HyperOS
 
-    val items = listOf(
-        Triple("首页", Icons.Filled.Home, Icons.Outlined.Home),
-        Triple("配置", Icons.AutoMirrored.Filled.List, Icons.AutoMirrored.Outlined.List),
-        Triple("设置", Icons.Filled.Settings, Icons.Outlined.Settings)
-    )
+    val items = if (hyperOS) {
+        listOf(
+            Triple("首页", Icons.Filled.Home, Icons.Outlined.Home),
+            Triple("应用配置", Icons.Filled.Apps, Icons.Outlined.Apps),
+            Triple("通用配置", Icons.Filled.Tune, Icons.Outlined.Tune),
+            Triple("设置", Icons.Filled.Settings, Icons.Outlined.Settings)
+        )
+    } else {
+        listOf(
+            Triple("首页", Icons.Filled.Home, Icons.Outlined.Home),
+            Triple("配置", Icons.AutoMirrored.Filled.List, Icons.AutoMirrored.Outlined.List),
+            Triple("设置", Icons.Filled.Settings, Icons.Outlined.Settings)
+        )
+    }
 
     val state = rememberWideNavigationRailState()
     val scope = rememberCoroutineScope()

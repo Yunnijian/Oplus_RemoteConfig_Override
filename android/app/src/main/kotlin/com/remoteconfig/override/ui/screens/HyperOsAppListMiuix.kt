@@ -1,5 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,9 +29,11 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -147,9 +150,21 @@ fun HyperOsAppListMiuix(
                                     .padding(horizontal = 12.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                // 应用图标：ColorOS 路径预加载缓存（IO 线程解码），组合期零查询
+                                val icon = viewModel.getCachedIcon(app.pkg)
+                                if (icon != null) {
+                                    Image(
+                                        bitmap = icon.asImageBitmap(),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                }
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        text = app.pkg,
+                                        text = state.labels[app.pkg] ?: app.pkg,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = colorScheme.onSurface,

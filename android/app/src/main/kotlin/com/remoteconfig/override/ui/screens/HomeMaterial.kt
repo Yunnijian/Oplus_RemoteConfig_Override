@@ -25,8 +25,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.R
+import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.platform.Platform
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
+import com.remoteconfig.override.viewmodel.HyperOsViewModel
 import com.remoteconfig.override.viewmodel.MainViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 
 /**
  * 首页 — Material 3 实现（原 HomeScreen.kt 的 HomeContent 迁入）。
@@ -49,6 +54,13 @@ fun HomeContentMaterial(
     val systemStatus by viewModel.systemStatus.collectAsState()
     val cosaVersion by viewModel.cosaVersion.collectAsState()
     val context = LocalContext.current
+
+    // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
+    val hyperOS = LocalPlatform.current == Platform.HyperOS
+    val hyperOsViewModel: HyperOsViewModel = composeViewModel()
+    val joyoseStat by hyperOsViewModel.statState.collectAsState()
+    val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
+    LaunchedEffect(hyperOS) { if (hyperOS) hyperOsViewModel.refreshStat() }
 
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
@@ -85,7 +97,11 @@ fun HomeContentMaterial(
                     .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // ── Root 状态卡 ──
+                // ── Root / Joyose 状态卡（HyperOS 分支：Joyose 状态卡）──
+                // 检测未完成前显示中性“正在检测”卡，避免冷启动闪现红色错误卡误导用户。
+                if (hyperOS) {
+                    JoyoseStatusCardMaterial(joyoseStat)
+                } else {
                 // 检测未完成前显示中性“正在检测”卡，避免冷启动闪现红色错误卡误导用户。
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -152,6 +168,7 @@ fun HomeContentMaterial(
                         }
                     }
                 }
+                } // if (hyperOS) else 旧 Root 状态卡
 
                 // ── 设备信息卡 ──
                 Card(
@@ -167,7 +184,11 @@ fun HomeContentMaterial(
                         Spacer(Modifier.height(16.dp))
                         InfoCardItem(label = "内核版本", content = kernelVersion, icon = Icons.Filled.Memory)
                         Spacer(Modifier.height(16.dp))
-                        InfoCardItem(label = "应用增强服务", content = "v${cosaVersion} · com.oplus.cosa", icon = Icons.Filled.SettingsSuggest)
+                        if (hyperOS) {
+                            InfoCardItem(label = "Joyose 云控服务", content = "v$joyoseVersion · com.xiaomi.joyose", icon = Icons.Filled.SettingsSuggest)
+                        } else {
+                            InfoCardItem(label = "应用增强服务", content = "v${cosaVersion} · com.oplus.cosa", icon = Icons.Filled.SettingsSuggest)
+                        }
                     }
                 }
 
@@ -285,6 +306,72 @@ private fun InfoCardItem(label: String, content: String, icon: androidx.compose.
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(text = content, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+// ── Joyose 状态卡（HyperOS）──
+// 数据源 = HyperOsViewModel.statState（joyose-stat 轻量查询），状态视觉与 Root 状态卡一致。
+@Composable
+private fun JoyoseStatusCardMaterial(stat: JoyoseManager.Stat?) {
+    val connected = stat != null && (stat.smartp.exists || stat.teg.exists)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                stat == null -> MaterialTheme.colorScheme.surfaceVariant
+                connected -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.errorContainer
+            }
+        ),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = when {
+                    stat == null -> Icons.Filled.HourglassEmpty
+                    connected -> Icons.Filled.Verified
+                    else -> Icons.Filled.GppBad
+                },
+                contentDescription = null,
+                tint = when {
+                    stat == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    connected -> MaterialTheme.colorScheme.onPrimaryContainer
+                    else -> MaterialTheme.colorScheme.onErrorContainer
+                },
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = when {
+                        stat == null -> "正在检测..."
+                        connected -> "Joyose 云控正常"
+                        else -> "Joyose 云控不可用"
+                    },
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    color = when {
+                        stat == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                        connected -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onErrorContainer
+                    }
+                )
+                Text(
+                    text = when {
+                        stat == null -> "正在读取 Joyose 数据库状态"
+                        connected -> "SmartP / teg_config 已连接 · " +
+                            if (stat.sp.frozen) "云控已冻结" else "云控未冻结"
+                        else -> "未找到 Joyose 数据库，请确认设备为 HyperOS"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = when {
+                        stat == null -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        connected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        else -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                    }
+                )
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
 package com.remoteconfig.override.viewmodel
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.JoyoseManager
@@ -20,12 +22,77 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     private val joyose = JoyoseManager(application)
 
+    // ── 首页状态卡 ───────────────────────────────────────────
+
+    private val _statState = MutableStateFlow<JoyoseManager.Stat?>(null)
+    val statState = _statState.asStateFlow()
+
+    /** 轻量刷新：仅 stat（双库存在性 + 冻结状态），首页状态卡用。 */
+    fun refreshStat() {
+        viewModelScope.launch {
+            _statState.value = withContext(Dispatchers.IO) { joyose.stat() }
+        }
+    }
+
+    /** Joyose 应用版本（PackageManager 查询，无 root 开销）。 */
+    val joyoseVersion: String get() = joyose.joyoseVersion()
+
+    // ── 应用图标与应用名预加载（对齐 MainViewModel 的 ColorOS 实测做法）──
+    // 解码/绘制全部在 IO 线程完成，UI 只读缓存（组合期零 PackageManager 调用）；
+    // 异常包（图标损坏 / 未安装）记入 missingIconPackages 跳过重复尝试。
+
+    /** 图标缓存 — 包名 → Bitmap（IO 线程写、UI 线程读，并发容器保证安全） */
+    private val iconCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+
+    /** 已确认无图标/图标损坏的包名集合 —— 跳过每轮 refresh 的重复尝试。 */
+    private val missingIconPackages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private val _appLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val appLabels = _appLabels.asStateFlow()
+
+    /** 公开给 UI 层读取缓存图标（缓存未命中 = 占位）。 */
+    fun getCachedIcon(pkg: String): Bitmap? = iconCache[pkg]
+
+    private fun preloadIconsAndLabels(
+        apps: List<JoyoseManager.AppIndexEntry>,
+    ): Map<String, String> {
+        val context = getApplication<Application>()
+        val pm = context.packageManager
+        val densityDpi = context.resources.displayMetrics.density
+        if (iconCache.size > MAX_CACHED_ICONS) iconCache.clear()
+        val labels = HashMap<String, String>()
+        for (app in apps) {
+            val pkg = app.pkg
+            if (missingIconPackages.contains(pkg)) continue
+            try {
+                val info = pm.getApplicationInfo(pkg, 0)
+                labels[pkg] = pm.getApplicationLabel(info).toString()
+                if (!iconCache.containsKey(pkg)) {
+                    val drawable = pm.getApplicationIcon(info)
+                    val px = (44 * densityDpi).toInt().coerceAtLeast(48)
+                    val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+                    val c = Canvas(bmp)
+                    drawable.setBounds(0, 0, px, px)
+                    drawable.draw(c)
+                    iconCache[pkg] = bmp
+                }
+                missingIconPackages.remove(pkg)
+            } catch (_: Exception) {
+                // 图标损坏 / 未安装：跳过重复尝试，UI 走占位
+                iconCache.remove(pkg)
+                missingIconPackages.add(pkg)
+            }
+        }
+        return labels
+    }
+
     // ── 应用列表 ─────────────────────────────────────────────
 
     data class ListState(
         val loading: Boolean = false,
         val unavailable: Boolean = false,
         val apps: List<JoyoseManager.AppIndexEntry> = emptyList(),
+        val labels: Map<String, String> = emptyMap(),
         val frozen: Boolean = false,
         val error: String? = null,
     )
@@ -42,7 +109,10 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                 if (stat == null || (!stat.smartp.exists && !stat.teg.exists)) {
                     ListState(unavailable = true)
                 } else {
-                    ListState(apps = joyose.apps(), frozen = stat.sp.frozen)
+                    val apps = joyose.apps()
+                    // 图标与应用名在 IO 线程预加载（对齐 ColorOS 路径），UI 只读缓存
+                    val labels = preloadIconsAndLabels(apps)
+                    ListState(apps = apps, labels = labels, frozen = stat.sp.frozen)
                 }
             }
             _listState.value = state
@@ -196,6 +266,9 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val BOOSTER = JoyoseManager.CONFIG_BOOSTER
+
+        /** 图标缓存容量上限（超过整体清空，下一轮 refresh 只重建当前列表） */
+        private const val MAX_CACHED_ICONS = 500
     }
 }
 

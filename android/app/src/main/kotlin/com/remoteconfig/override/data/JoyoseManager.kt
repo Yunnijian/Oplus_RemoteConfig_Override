@@ -164,6 +164,12 @@ class JoyoseManager(context: Context) {
 
     // ── 数据操作（阻塞调用，调用方须置于 IO 调度器）──
 
+    /** Joyose 应用版本（PackageManager 查询，无需 root）。 */
+    fun joyoseVersion(): String = runCatching {
+        val info = appContext.packageManager.getPackageInfo(PKG, 0)
+        info.versionName ?: "未知"
+    }.getOrDefault("未知")
+
     /** 双库指纹 + 冻结状态；Joyose 不可用（缺 DB 等）时返回 null。 */
     fun stat(): Stat? = runCatching { exec<Stat>("joyose-stat", dataRoot.absolutePath) }.getOrNull()
 
@@ -271,6 +277,7 @@ class JoyoseManager(context: Context) {
 
     companion object {
         private const val TAG = "JoyoseManager"
+        private const val PKG = "com.xiaomi.joyose"
         const val CONFIG_BOOSTER = "booster_config"
         const val CONFIG_COMMON = "common_config"
     }
