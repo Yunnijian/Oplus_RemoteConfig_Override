@@ -43,7 +43,7 @@ DEST="../android/app/src/main/jniLibs/arm64-v8a/libcosa.so"
 # 否则说明源码改动未进入本次构建(陈旧二进制)。
 # 注意:必须用 LC_ALL=C + grep -o, 否则 BSD grep 在 UTF-8 locale 下会因二进制中的
 # 非法字节序列跳过匹配(中文功能串会漏报)。
-for marker in "write failed on" "delete failed on" "protect_local_pkg_delete" "已忽略未知字段"; do
+for marker in "write failed on" "delete failed on" "protect_local_pkg_delete" "已忽略未知字段" "joyose-app"; do
     if ! LC_ALL=C grep -aoF "$marker" "$BINARY" | head -1 | grep -q .; then
         echo "错误: 产物缺少功能字符串 '$marker'，构建可能使用了陈旧缓存，请清理后重试" >&2
         exit 1

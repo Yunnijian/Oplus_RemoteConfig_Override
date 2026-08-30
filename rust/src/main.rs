@@ -11,6 +11,8 @@ use std::os::unix::fs::{chown, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod joyose;
+
 const DB_PATHS: [&str; 2] = [
     "/data/data/com.oplus.cosa/databases/db_game_database",
     "/data/user_de/0/com.oplus.cosa/databases/db_game_database",
@@ -494,7 +496,7 @@ fn cmd_protect() -> Result<bool> {
 }
 
 fn usage() -> &'static str {
-    "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect"
+    "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect | joyose-app <包名> <booster_params.json> [common_params.json]"
 }
 
 fn main() -> ExitCode {
@@ -514,6 +516,9 @@ fn main() -> ExitCode {
             None => Err(usage().into()),
         },
         Some("protect") => cmd_protect(),
+        Some("joyose-app") => {
+            joyose::appview::cmd_app_view(args.get(2), args.get(3), args.get(4))
+        }
         Some("help") | Some("--help") | Some("-h") | None => Err(usage().into()),
         Some(_) => Err(usage().into()),
     };
