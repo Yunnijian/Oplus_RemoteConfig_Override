@@ -10,13 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,31 +20,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.component.rememberContentReady
+import com.remoteconfig.override.ui.editor.NativeJsonEditorView
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -58,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlin.math.abs
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
@@ -76,93 +60,16 @@ private val DARK_BG = Color(0xFF1E1E1E)
 private val LIGHT_BG = Color(0xFFFFFFFF)
 private val DARK_TEXT = Color(0xFFD4D4D4)
 private val LIGHT_TEXT = Color(0xFF333333)
-private val DARK_LINE = Color(0xFF858585)
-private val LIGHT_LINE = Color(0xFF9AA0A6)
-private val DARK_LINE_BG = Color(0xFF252526)
-private val LIGHT_LINE_BG = Color(0xFFF5F5F5)
 private val DARK_STATUS = Color(0xFF252526)
 private val LIGHT_STATUS = Color(0xFFF5F5F5)
-private val DARK_CURSOR = Color(0xFF569CD6)
-private val LIGHT_CURSOR = Color(0xFF1A73E8)
-
-// ── JSON 语法高亮配色（暗色 / 亮色）──
-private val DARK_STR = Color(0xFFCE9178)  // 字符串
-private val LIGHT_STR = Color(0xFF0451A5)
-private val DARK_NUM = Color(0xFFB5CEA8)  // 数字
-private val LIGHT_NUM = Color(0xFF098658)
-private val DARK_KEY = Color(0xFF9CDCFE)  // 键名
-private val LIGHT_KEY = Color(0xFF881280)
-private val DARK_BOOL = Color(0xFF569CD6) // true/false
-private val LIGHT_BOOL = Color(0xFF267F99)
-private val DARK_NULL = Color(0xFFF44747) // null
-private val LIGHT_NULL = Color(0xFFE51400)
-private val DARK_BRACE = Color(0xFFFFD700)// {}[]
-private val LIGHT_BRACE = Color(0xFF800000)
-private val DARK_PUNCT = Color(0xFF808080)// :,
-private val LIGHT_PUNCT = Color(0xFFA0A0A0)
-
-// ── JSON 语法高亮解析器（轻量状态机）──
-private fun highlightJson(text: String, dark: Boolean): AnnotatedString {
-    val strColor = if (dark) DARK_STR else LIGHT_STR
-    val numColor = if (dark) DARK_NUM else LIGHT_NUM
-    val keyColor = if (dark) DARK_KEY else LIGHT_KEY
-    val boolColor = if (dark) DARK_BOOL else LIGHT_BOOL
-    val nullColor = if (dark) DARK_NULL else LIGHT_NULL
-    val braceColor = if (dark) DARK_BRACE else LIGHT_BRACE
-    val punctColor = if (dark) DARK_PUNCT else LIGHT_PUNCT
-    val defColor = if (dark) DARK_TEXT else LIGHT_TEXT
-
-    return buildAnnotatedString {
-        var i = 0
-        var expectKey = true
-
-        while (i < text.length) {
-            when {
-                text[i] == '"' -> {
-                    val start = i
-                    i++
-                    while (i < text.length && !(text[i] == '"' && text[i - 1] != '\\')) i++
-                    if (i < text.length) i++ // skip closing "
-                    val color = if (expectKey) keyColor else strColor
-                    withStyle(SpanStyle(color = color)) { append(text.substring(start, i)) }
-                    expectKey = false
-                }
-                text[i] == '-' || text[i].isDigit() -> {
-                    val start = i
-                    if (text[i] == '-') i++
-                    while (i < text.length && (text[i].isDigit() || text[i] == '.' || text[i] == 'e' || text[i] == 'E' || text[i] == '+' || text[i] == '-')) {
-                        if ((text[i] == '+' || text[i] == '-') && i > start + 1 && text[i-1] != 'e' && text[i-1] != 'E') break
-                        i++
-                    }
-                    withStyle(SpanStyle(color = numColor)) { append(text.substring(start, i)) }
-                }
-                text.startsWith("true", i) -> {
-                    withStyle(SpanStyle(color = boolColor)) { append("true") }; i += 4
-                }
-                text.startsWith("false", i) -> {
-                    withStyle(SpanStyle(color = boolColor)) { append("false") }; i += 5
-                }
-                text.startsWith("null", i) -> {
-                    withStyle(SpanStyle(color = nullColor)) { append("null") }; i += 4
-                }
-                text[i] == '{' || text[i] == '}' || text[i] == '[' || text[i] == ']' -> {
-                    withStyle(SpanStyle(color = braceColor)) { append(text[i].toString()) }; i++
-                    expectKey = i < text.length && (text[i] == '{' || text[i] == '[')
-                }
-                text[i] == ':' -> { withStyle(SpanStyle(color = punctColor)) { append(":") }; i++; expectKey = true }
-                text[i] == ',' -> { withStyle(SpanStyle(color = punctColor)) { append(",") }; i++; expectKey = false }
-                else -> { withStyle(SpanStyle(color = defColor)) { append(text[i].toString()) }; i++ }
-            }
-        }
-    }
-}
 
 /**
  * 配置编辑器页分发器：按当前 UI 风格 [LocalUiMode] 选择 Miuix / Material 外壳。
  *
  * 签名 `(viewModel, onBack)` 保持不变（MainActivity / 列表页调用方不变）。
- * 编辑器自研核心（语法高亮 / 行号 / 捏合缩放 / IME 跟随 / 校验）完全不动，
- * 仅 Scaffold / TopAppBar / 结果弹窗 三处外壳按 isMiuix 分支。
+ * 编辑内核改为原生 `NativeJsonEditorView`（android.widget.EditText 托管文本布局/
+ * 光标/选区/IME，外层 View 负责行号 gutter 与捏合缩放），仅外壳（Scaffold /
+ * TopAppBar / 结果弹窗）按 isMiuix 分支；高亮由原生注入 ForegroundColorSpan。
  */
 @Composable
 fun ConfigEditorScreen(viewModel: MainViewModel, onBack: () -> Unit) {
@@ -262,15 +169,9 @@ private fun ConfigEditorContent(
     var resultSuccess by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var fontSize by rememberSaveable { mutableStateOf(13f) }
-    var highlighted by remember(dark) { mutableStateOf(AnnotatedString("")) }
     var editorVisible by rememberSaveable { mutableStateOf(false) }
-    var editorFocused by remember { mutableStateOf(false) }
-    // rememberSaveable：旋转/重建后保留光标位置（与同层 fontSize/editorVisible 的保存策略一致）
-    var fieldValue by rememberSaveable(editingPackageName, stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue())
-    }
-    var cursorRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-    val latestTextLayout = remember { arrayOfNulls<TextLayoutResult>(1) }
+    // 原生编辑器引用：供 onDispose 收起输入法、顶栏/关闭路径 dismissInput、外部同步。
+    val editorHolder = remember { mutableStateOf<NativeJsonEditorView?>(null) }
 
     // 未保存修改拦截：退出/关闭/系统返回均先弹确认，避免静默丢稿。
     var showDiscardDialog by remember { mutableStateOf(false) }
@@ -279,12 +180,15 @@ private fun ConfigEditorContent(
     }
     BackHandler(enabled = isDirty) { showDiscardDialog = true }
 
-    val bg = if (dark) DARK_BG else LIGHT_BG
     val textColor = if (dark) DARK_TEXT else LIGHT_TEXT
-    val lineColor = if (dark) DARK_LINE else LIGHT_LINE
-    val lineBg = if (dark) DARK_LINE_BG else LIGHT_LINE_BG
     val statusBg = if (dark) DARK_STATUS else LIGHT_STATUS
-    val cursorColor = if (dark) DARK_CURSOR else LIGHT_CURSOR
+    val editorBg = if (dark) DARK_BG else LIGHT_BG
+
+    // 导航可能在本目的地还挂着 IME 时移除 AndroidView：dispose 时收起原生输入，
+    // 避免键盘残留在上一屏（对齐测试项目 NativeJsonEditorView 集成）。
+    DisposableEffect(Unit) {
+        onDispose { editorHolder.value?.dismissInput() }
+    }
 
     val currentText = editingJson.orEmpty()
     val density = LocalDensity.current
@@ -297,27 +201,11 @@ private fun ConfigEditorContent(
     } else {
         bottomInnerPadding.coerceAtLeast(with(density) { navBarBottomPx.toDp() })
     }
-    LaunchedEffect(currentText) {
-        if (fieldValue.text != currentText) {
-            val cursor = fieldValue.selection.end.coerceIn(0, currentText.length)
-            fieldValue = TextFieldValue(currentText, TextRange(cursor))
-            cursorRect = null
-            latestTextLayout[0] = null
-        }
-    }
-    LaunchedEffect(fieldValue.selection.end, currentText) {
-        // Selection changes do not necessarily trigger onTextLayout. Re-read the
-        // caret from the latest layout when the user taps another line.
-        latestTextLayout[0]?.let { layout ->
-            val nextRect = layout.getCursorRect(fieldValue.selection.end)
-            if (nextRect != cursorRect) cursorRect = nextRect
-        }
-    }
     // Bug 3：editorVisible 纳入 currentText 判定——空文档（DB 无记录/全选删除后）也可编辑；
     // 导入文件（updateEditingJson）会改变 currentText 触发本效果重新运行，保证导入后可见。
     // P1（对齐 KernelSU DeferredContent）：转场期间保持 spinner 占位，转场结束 +1 帧后才
-    // 揭幕编辑器全树——push 转场中段组合整文档行号 + 整高 BasicTextField 是列表进编辑器
-    // 卡顿的根因。双窗 pane 嵌在 Main entry 内（其转场早已结束），ready 恒为 true，行为不变。
+    // 揭幕编辑器全树——push 转场中段组装整文档是列表进编辑器卡顿的根因。
+    // 双窗 pane 嵌在 Main entry 内（其转场早已结束），ready 恒为 true，行为不变。
     val contentReady = rememberContentReady()
     LaunchedEffect(isEditorLoading, editingPackageName, currentText, contentReady) {
         if (isEditorLoading) {
@@ -327,19 +215,6 @@ private fun ConfigEditorContent(
             // editor tree, then reveal it without a first-frame jump.
             withFrameNanos { }
             editorVisible = true
-        }
-    }
-    LaunchedEffect(currentText, dark) {
-        // P2（对齐 KernelSU produceState(占位) 思路）：揭幕前（spinner 期）文档未上屏、
-        // 无输入竞争，直接在后台完成全量高亮——揭幕即带色，消除“先素文 120ms 后突变彩色”；
-        // 揭幕后的键入路径保持素文先行 + 空闲窗口重上色，保证输入响应。
-        val snapshot = currentText
-        if (!editorVisible) {
-            highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
-        } else {
-            highlighted = AnnotatedString(snapshot)
-            delay(120)
-            highlighted = withContext(Dispatchers.Default) { highlightJson(snapshot, dark) }
         }
     }
     LaunchedEffect(currentText) {
@@ -485,161 +360,50 @@ private fun ConfigEditorContent(
                                     style = TextStyle(fontSize = 10.sp, color = textColor.copy(alpha = 0.4f)))
                             }
 
-                            val textScroll = rememberScrollState()
-                            val horizontalScroll = rememberScrollState()
-                            LaunchedEffect(
-                                fieldValue.selection.end,
-                                cursorRect,
-                                editorFocused,
-                                imeBottom,
-                                editorVisible,
-                                textScroll.viewportSize
-                            ) {
-                                val caret = cursorRect ?: return@LaunchedEffect
-                                if (!editorFocused || !editorVisible || textScroll.viewportSize <= 0) {
-                                    return@LaunchedEffect
-                                }
-                                // windowInsetsPadding(WindowInsets.ime) 在 verticalScroll 内侧——滚动视口是
-                                // 全屏高度，需手动扣除键盘高度，否则光标会被滚到键盘下方（API 30+）
-                                delay(if (imeBottom > 0) 120 else 60)
-                                val margin = with(density) { 28.dp.toPx() }
-                                val top = textScroll.value.toFloat()
-                                // Bug 5: 键盘开启时视口底界 = 视口底 - imeBottom，光标保持在键盘上方可视区
-                                val viewportBottom = top + textScroll.viewportSize - (if (imeBottom > 0) imeBottom else 0)
-                                val target = when {
-                                    caret.bottom + margin > viewportBottom ->
-                                        textScroll.value + (caret.bottom + margin - viewportBottom).toInt()
-                                    caret.top - margin < top ->
-                                        textScroll.value - (top - caret.top + margin).toInt()
-                                    else -> null
-                                }?.coerceIn(0, textScroll.maxValue)
-                                if (target != null && target != textScroll.value) {
-                                    textScroll.animateScrollTo(target, tween(180))
-                                }
-                            }
-                            val lineNumbers = remember(lineCount) {
-                                buildString {
-                                    for (line in 1..lineCount) {
-                                        if (line > 1) append('\n')
-                                        append(line)
-                                    }
-                                }
-                            }
-                            var gestureScale by remember { mutableFloatStateOf(1f) }
-                            val transformState = rememberTransformableState { zoomChange, _, _ ->
-                                if (zoomChange != 1f) {
-                                    // Keep the gesture on the GPU layer. Re-measuring the
-                                    // complete document for every touch event causes jank.
-                                    gestureScale = (gestureScale * zoomChange).coerceIn(0.65f, 2.5f)
-                                }
-                            }
-                            LaunchedEffect(transformState.isTransformInProgress) {
-                                if (!transformState.isTransformInProgress && gestureScale != 1f) {
-                                    val appliedScale = gestureScale
-                                    gestureScale = 1f
-                                    fontSize = (fontSize * appliedScale).coerceIn(8f, 32f)
-                                }
-                            }
-                            val gestureLayer = if (gestureScale == 1f) {
-                                Modifier
-                            } else {
-                                Modifier.graphicsLayer {
-                                    scaleX = gestureScale
-                                    scaleY = gestureScale
-                                    transformOrigin = TransformOrigin(0f, 0f)
-                                }
-                            }
-                            Column(
-                                Modifier
+                            // 原生编辑器：EditText 托管文本布局/光标/选区/IME，外层 View
+                            // 负责行号 gutter 与捏合缩放；高亮/滚动/输入由原生自管，
+                            // Compose 侧不再重建整文档文本树。
+                            AndroidView(
+                                modifier = Modifier
                                     .fillMaxSize()
-                                    .background(bg)
-                                    .verticalScroll(textScroll)
-                                    .windowInsetsPadding(WindowInsets.ime)
-                            ) {
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .then(gestureLayer)
-                                ) {
-                                    Text(
-                                        text = lineNumbers,
-                                        modifier = Modifier
-                                            .width(40.dp)
-                                            .background(lineBg)
-                                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                                        style = TextStyle(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = (fontSize * 0.85f).sp,
-                                            lineHeight = (fontSize * 1.5f).sp,
-                                            color = lineColor,
-                                            textAlign = TextAlign.End
-                                        )
-                                    )
-
-                                    Box(
-                                        Modifier
-                                            .weight(1f)
-                                            .horizontalScroll(horizontalScroll)
-                                            // 捏合缩放：transformable 只在多指时产生 zoom 变化，
-                                            // 单指点击/拖动正常透传给 BasicTextField（输入/光标）与滚动。
-                                            .transformable(
-                                                state = transformState,
-                                                canPan = { false },
-                                                lockRotationOnZoomPan = true
-                                            )
-                                    ) {
-                                        BasicTextField(
-                                            value = fieldValue,
-                                            onValueChange = { newValue ->
-                                                fieldValue = newValue
-                                                viewModel.updateEditingJson(newValue.text)
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 8.dp)
-                                                .onFocusChanged { editorFocused = it.isFocused },
-                                            textStyle = TextStyle(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = fontSize.sp,
-                                                lineHeight = (fontSize * 1.5f).sp,
-                                                color = Color.Transparent
-                                            ),
-                                            minLines = lineCount.coerceAtLeast(1),
-                                            cursorBrush = SolidColor(cursorColor),
-                                            onTextLayout = { layout: TextLayoutResult ->
-                                                latestTextLayout[0] = layout
-                                                val nextRect = layout.getCursorRect(fieldValue.selection.end)
-                                                if (nextRect != cursorRect) cursorRect = nextRect
-                                            },
-                                            decorationBox = { innerTextField ->
-                                                Box {
-                                                    Text(
-                                                        text = highlighted,
-                                                        style = TextStyle(
-                                                            fontFamily = FontFamily.Monospace,
-                                                            fontSize = fontSize.sp,
-                                                            lineHeight = (fontSize * 1.5f).sp
-                                                        )
-                                                    )
-                                                    if (text.isEmpty()) {
-                                                        // Bug 3：空文档占位提示（不拦截输入，仅引导）
-                                                        Text(
-                                                            text = "请输入 JSON",
-                                                            style = TextStyle(
-                                                                fontFamily = FontFamily.Monospace,
-                                                                fontSize = fontSize.sp,
-                                                                lineHeight = (fontSize * 1.5f).sp,
-                                                                color = lineColor.copy(alpha = 0.5f)
-                                                            )
-                                                        )
-                                                    }
-                                                    innerTextField()
-                                                }
+                                    .background(editorBg),
+                                factory = { viewContext ->
+                                    NativeJsonEditorView(viewContext).apply {
+                                        editorHolder.value = this
+                                        onTextChanged = { value ->
+                                            if (viewModel.editingJson.value != value) {
+                                                viewModel.updateEditingJson(value)
                                             }
-                                        )
+                                        }
+                                        onFontSizeChanged = { value ->
+                                            if (abs(fontSize - value) > 0.01f) fontSize = value
+                                        }
+                                        setDarkTheme(dark)
+                                        setImeBottomInset(imeBottom)
+                                        setFontSize(fontSize)
+                                        setEditorTextIfChanged(currentText)
                                     }
-                                }
-                            }
+                                },
+                                update = { view ->
+                                    editorHolder.value = view
+                                    view.onTextChanged = { value ->
+                                        if (viewModel.editingJson.value != value) {
+                                            viewModel.updateEditingJson(value)
+                                        }
+                                    }
+                                    view.onFontSizeChanged = { value ->
+                                        if (abs(fontSize - value) > 0.01f) fontSize = value
+                                    }
+                                    view.setDarkTheme(dark)
+                                    view.setImeBottomInset(imeBottom)
+                                    view.setFontSize(fontSize)
+                                    view.setEditorTextIfChanged(currentText)
+                                },
+                                onRelease = { view ->
+                                    view.dismissInput()
+                                    if (editorHolder.value === view) editorHolder.value = null
+                                },
+                            )
                         }
                     }
                 }
