@@ -146,6 +146,175 @@ fn novatek_params(raw: &str) -> Vec<Param> {
     params
 }
 
+// ── package index (P1.5, single pass) ───────────────────────────────────────
+
+/// One app in the per-app feature index.
+pub struct PackageIndexEntry {
+    pub package: String,
+    pub group: Option<String>,
+    pub features: usize,
+}
+
+/// Build the per-app feature index in a single pass over `game_booster`.
+///
+/// Counting rules mirror [`collect`]'s scans: group-alias entries
+/// (`booster_config.ovrride_config[].game_name` referring to a
+/// `game_group_mapping_config` group) expand to every member package;
+/// token strings count their head token; whitelist arrays / package-keyed
+/// objects / pkg fields count each mention. Global structures and the
+/// common_config whitelists (`game_list`/`support_app`) are excluded —
+/// membership there is not a per-app config.
+pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
+    use std::collections::HashMap;
+
+    // group name → member packages
+    let mut groups: HashMap<&str, Vec<&str>> = HashMap::new();
+    for entry in arr(gb, "game_group_mapping_config") {
+        let Some(name) = get(entry, "game_group_name").as_str() else {
+            continue;
+        };
+        let list: Vec<&str> = arr(entry, "package_list")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        if !list.is_empty() {
+            groups.insert(name, list);
+        }
+    }
+    let group_of = |pkg: &str| -> Option<String> {
+        groups
+            .iter()
+            .find(|(_, list)| list.contains(&pkg))
+            .map(|(g, _)| g.to_string())
+    };
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    fn bump<'a>(counts: &mut HashMap<&'a str, usize>, key: &'a str) {
+        if !key.is_empty() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    // ① ovrride_config: group alias → expand to member packages.
+    for entry in arr(get(gb, "booster_config"), "ovrride_config") {
+        let Some(key) = get(entry, "game_name").as_str() else {
+            continue;
+        };
+        match groups.get(key) {
+            Some(pkgs) => {
+                for pkg in pkgs {
+                    bump(&mut counts, pkg);
+                }
+            }
+            None => bump(&mut counts, key),
+        }
+    }
+
+    // ② token strings: `_` `:` `@` `;` heads are package names.
+    for (field, sep) in [
+        ("novatek_game_params", '_'),
+        ("migt", ';'),
+        ("cgame_df", '@'),
+        ("support_highfps_app", ':'),
+        ("mqs_enhance_list", ':'),
+        ("force_scale_app_list", ':'),
+    ] {
+        for raw in arr(gb, field) {
+            if let Some(raw) = raw.as_str() {
+                bump(&mut counts, raw.split(sep).next().unwrap_or(""));
+            }
+        }
+    }
+    let ext = get(gb, "novatek_extend_config");
+    for raw in arr(ext, "novatek_non_playing_config") {
+        if let Some(raw) = raw.as_str() {
+            bump(&mut counts, raw.split('_').next().unwrap_or(""));
+        }
+    }
+    for raw in arr(ext, "novatek_gex_fps_limit") {
+        if let Some(raw) = raw.as_str() {
+            bump(&mut counts, raw.split(':').next().unwrap_or(""));
+        }
+    }
+
+    // ③ plain package arrays.
+    for field in [
+        "novatek_black_app",
+        "SOC_GameList",
+        "support_vrs_app",
+        "support_dynamic_refresh_rate_games",
+        "invalid_low_display_scenes_games",
+        "game_light_support_list",
+        "support_predownload_app_list",
+        "support_motor_app",
+        "support_scale_app_list",
+    ] {
+        for value in arr(gb, field) {
+            if let Some(pkg) = value.as_str() {
+                bump(&mut counts, pkg);
+            }
+        }
+    }
+
+    // ④ alias+cmdlines objects.
+    for (container, inner) in [("mivk_settings", "app_params"), ("migl_settings", "game_params")] {
+        for entry in arr(get(gb, container), inner) {
+            for cmdline in arr(entry, "app_cmdlines")
+                .iter()
+                .chain(arr(entry, "game_cmdlines").iter())
+            {
+                if let Some(pkg) = cmdline.as_str() {
+                    bump(&mut counts, pkg);
+                }
+            }
+        }
+    }
+
+    // ⑤ fisr game_list (OTHER is a wildcard, not a package).
+    for entry in arr(get(gb, "fisr_config"), "enhance_config") {
+        for value in arr(entry, "game_list") {
+            if let Some(pkg) = value.as_str() {
+                if pkg != "OTHER" {
+                    bump(&mut counts, pkg);
+                }
+            }
+        }
+    }
+
+    // ⑥ package-keyed objects / pkg fields / package_list.
+    if let Some(m) = get(gb, "self_gpu_tuner_config").as_object() {
+        for key in m.keys() {
+            bump(&mut counts, key);
+        }
+    }
+    if let Some(m) = get(gb, "low_display_refresh_rate_scenes_by_single_game").as_object() {
+        for key in m.keys() {
+            bump(&mut counts, key);
+        }
+    }
+    for entry in arr(gb, "support_resolution_enhance_config") {
+        if let Some(pkg) = get(entry, "pkg").as_str() {
+            bump(&mut counts, pkg);
+        }
+    }
+    for value in arr(get(gb, "game_scenario_control_config"), "package_list") {
+        if let Some(pkg) = value.as_str() {
+            bump(&mut counts, pkg);
+        }
+    }
+
+    let mut entries: Vec<PackageIndexEntry> = counts
+        .into_iter()
+        .map(|(pkg, features)| PackageIndexEntry {
+            package: pkg.to_owned(),
+            group: group_of(pkg),
+            features,
+        })
+        .collect();
+    entries.sort_unstable_by(|a, b| b.features.cmp(&a.features).then(a.package.cmp(&b.package)));
+    entries
+}
+
 // ── collection ──────────────────────────────────────────────────────────────
 
 /// Scan a booster_config params document (or its `{config_name,…,params}`
@@ -927,5 +1096,25 @@ mod tests {
             gate("booster_override"),
             Some(Some(("booster_enable", true)))
         );
+    }
+
+    #[test]
+    fn package_index_counts_features_and_expands_groups() {
+        let doc = doc();
+        let gb = doc.get("game_booster").unwrap();
+        let apps = package_index(gb);
+        let find = |pkg: &str| {
+            apps.iter()
+                .find(|e| e.package == pkg)
+                .map(|e| (e.features, e.group.as_deref()))
+        };
+        // sgame: ovrride(组展开) + novatek + gex + fisr + highfps + scale + migt + soc + cgame_df + resolution_enhance
+        assert_eq!(find("com.a.sgame"), Some((10, Some("SGAME"))));
+        // sgamece: ovrride(同组展开)+novatek = 2 —— 组条目对组内每个成员都生效
+        assert_eq!(find("com.a.sgamece"), Some((2, Some("SGAME"))));
+        assert_eq!(find("com.miHoYo.Yuanshen"), Some((1, Some("YUANSHEN"))));
+        assert_eq!(find("com.miHoYo.hkrpg"), Some((1, None))); // mivk only
+        // 排序：features 降序
+        assert!(apps.windows(2).all(|w| w[0].features >= w[1].features));
     }
 }

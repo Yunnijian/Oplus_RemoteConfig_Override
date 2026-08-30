@@ -496,7 +496,10 @@ fn cmd_protect() -> Result<bool> {
 }
 
 fn usage() -> &'static str {
-    "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect | joyose-app <包名> <booster_params.json> [common_params.json]"
+    "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect\n\
+     joyose: stat [备份根目录] | list | read <配置名> | write <配置名> <json文件> | freeze | unfreeze\n\
+             backup <备份根目录> [标签] | backup-list <备份根目录> | revert <备份根目录> <名称>\n\
+             apps | app <包名> <booster_params.json> [common_params.json]"
 }
 
 fn main() -> ExitCode {
@@ -516,6 +519,16 @@ fn main() -> ExitCode {
             None => Err(usage().into()),
         },
         Some("protect") => cmd_protect(),
+        Some("joyose-stat") => joyose::store::cmd_stat(args.get(2)),
+        Some("joyose-list") => joyose::store::cmd_list(),
+        Some("joyose-read") => joyose::store::cmd_read(args.get(2)),
+        Some("joyose-write") => joyose::store::cmd_write(args.get(2), args.get(3)),
+        Some("joyose-freeze") => joyose::store::cmd_freeze(),
+        Some("joyose-unfreeze") => joyose::store::cmd_unfreeze(),
+        Some("joyose-backup") => joyose::store::cmd_backup(args.get(2), args.get(3)),
+        Some("joyose-backup-list") => joyose::store::cmd_backup_list(args.get(2)),
+        Some("joyose-revert") => joyose::store::cmd_revert(args.get(2), args.get(3)),
+        Some("joyose-apps") => joyose::store::cmd_apps(),
         Some("joyose-app") => {
             joyose::appview::cmd_app_view(args.get(2), args.get(3), args.get(4))
         }

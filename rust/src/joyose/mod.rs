@@ -5,3 +5,4 @@
 
 pub mod appview;
 pub mod resolve;
+pub mod store;
