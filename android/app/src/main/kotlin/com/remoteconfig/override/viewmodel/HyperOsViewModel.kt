@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.settings.SettingsRepositoryImpl
+import com.remoteconfig.override.ui.util.PinyinUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +25,9 @@ import kotlinx.serialization.json.JsonObject
 class HyperOsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val joyose = JoyoseManager(application)
+
+    /** 排序选择等持久化设置（对齐 KernelSU：ViewModel 直接读写仓库，观察性由各自的 StateFlow 承担）。 */
+    private val settings = SettingsRepositoryImpl()
 
     // ── 首页状态卡 ───────────────────────────────────────────
 
@@ -49,75 +54,184 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
     /** 已确认无图标/图标损坏的包名集合 —— 跳过每轮 refresh 的重复尝试。 */
     private val missingIconPackages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    private val _appLabels = MutableStateFlow<Map<String, String>>(emptyMap())
-    val appLabels = _appLabels.asStateFlow()
-
     /** 公开给 UI 层读取缓存图标（缓存未命中 = 占位）。 */
     fun getCachedIcon(pkg: String): Bitmap? = iconCache[pkg]
 
-    private fun preloadIconsAndLabels(
+    /** 展示与排序所需的包元数据；一次 getPackageInfo 同时取到 label、时间戳与在装状态。 */
+    private data class AppMeta(
+        val label: String,
+        val installTime: Long,
+        val updateTime: Long,
+        val installed: Boolean,
+    )
+
+    private fun preloadMeta(
         apps: List<JoyoseManager.AppIndexEntry>,
-    ): Map<String, String> {
+    ): Map<String, AppMeta> {
         val context = getApplication<Application>()
         val pm = context.packageManager
         val densityDpi = context.resources.displayMetrics.density
         if (iconCache.size > MAX_CACHED_ICONS) iconCache.clear()
-        val labels = HashMap<String, String>()
+        val meta = HashMap<String, AppMeta>()
         for (app in apps) {
             val pkg = app.pkg
-            if (missingIconPackages.contains(pkg)) continue
-            try {
-                val info = pm.getApplicationInfo(pkg, 0)
-                labels[pkg] = pm.getApplicationLabel(info).toString()
-                if (!iconCache.containsKey(pkg)) {
-                    val drawable = pm.getApplicationIcon(info)
-                    val px = (44 * densityDpi).toInt().coerceAtLeast(48)
-                    val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
-                    val c = Canvas(bmp)
-                    drawable.setBounds(0, 0, px, px)
-                    drawable.draw(c)
-                    iconCache[pkg] = bmp
-                }
-                missingIconPackages.remove(pkg)
+            val info = try {
+                pm.getPackageInfo(pkg, 0)
             } catch (_: Exception) {
-                // 图标损坏 / 未安装：跳过重复尝试，UI 走占位
+                continue // 已卸载：既无 label 也无图标
+            }
+            val applicationInfo = info.applicationInfo
+            val label = if (applicationInfo != null) {
+                pm.getApplicationLabel(applicationInfo).toString()
+            } else {
+                pkg // 未安装：以包名兜底展示，仍可编辑其云控片段
+            }
+            meta[pkg] = AppMeta(
+                label = label,
+                installTime = info.firstInstallTime,
+                updateTime = info.lastUpdateTime,
+                installed = applicationInfo != null,
+            )
+            if (applicationInfo == null) continue
+            if (iconCache.containsKey(pkg) || missingIconPackages.contains(pkg)) continue
+            try {
+                val px = (44 * densityDpi).toInt().coerceAtLeast(48)
+                val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                val drawable = pm.getApplicationIcon(applicationInfo)
+                drawable.setBounds(0, 0, px, px)
+                drawable.draw(c)
+                iconCache[pkg] = bmp
+            } catch (_: Exception) {
+                // 图标损坏：跳过重复尝试，UI 走占位（label 与时间戳仍可用）
                 iconCache.remove(pkg)
                 missingIconPackages.add(pkg)
             }
         }
-        return labels
+        return meta
     }
 
     // ── 应用列表 ─────────────────────────────────────────────
 
+    /** 一次刷新在 IO 线程产出的结果（避免往主线程回传三元组）。 */
+    private data class Loaded(
+        val rows: List<AppRow>,
+        val frozen: Boolean,
+        val sort: AppSortConfig,
+        val installedOnly: Boolean,
+    )
+
     data class ListState(
         val loading: Boolean = false,
+        /** 下拉刷新中。与首屏 loading 分开：列表不清空，指示器由 PullToRefresh 驱动。 */
+        val refreshing: Boolean = false,
         val unavailable: Boolean = false,
-        val apps: List<JoyoseManager.AppIndexEntry> = emptyList(),
-        val labels: Map<String, String> = emptyMap(),
+        /** 全部行（含未安装），已按 [sortConfig] 排序；[apps] 是它按可见性过滤后的结果。 */
+        val allRows: List<AppRow> = emptyList(),
+        val apps: List<AppRow> = emptyList(),
         val frozen: Boolean = false,
+        val sortConfig: AppSortConfig = AppSortConfig(),
+        /** 右上角筛选：true = 只显示已安装应用的配置。 */
+        val showInstalledOnly: Boolean = false,
         val error: String? = null,
     )
 
     private val _listState = MutableStateFlow(ListState())
     val listState = _listState.asStateFlow()
 
-    fun refreshList() {
-        if (_listState.value.loading) return
+    /** 可见性 + 排序的唯一出口（对齐 KernelSU updateVisibleApps 的单一职责）。 */
+    private fun visibleRows(
+        all: List<AppRow>,
+        config: AppSortConfig,
+        installedOnly: Boolean,
+    ): List<AppRow> = sortApps(all.filter { !installedOnly || it.installed }, config)
+
+    fun refreshList(pullToRefresh: Boolean = false) {
+        val current = _listState.value
+        if (current.loading || current.refreshing) return
         viewModelScope.launch {
-            _listState.update { it.copy(loading = true, error = null) }
-            val state = withContext(Dispatchers.IO) {
+            _listState.update {
+                it.copy(
+                    loading = !pullToRefresh && it.apps.isEmpty(),
+                    refreshing = pullToRefresh,
+                    error = null,
+                )
+            }
+            val loaded: Loaded? = withContext(Dispatchers.IO) {
                 val stat = joyose.stat()
                 if (stat == null || (!stat.smartp.exists && !stat.teg.exists)) {
-                    ListState(unavailable = true)
+                    null
                 } else {
-                    val apps = joyose.apps()
-                    // 图标与应用名在 IO 线程预加载（对齐 ColorOS 路径），UI 只读缓存
-                    val labels = preloadIconsAndLabels(apps)
-                    ListState(apps = apps, labels = labels, frozen = stat.sp.frozen)
+                    val config = AppSortConfig.fromInt(settings.hyperOsAppSortOption)
+                    val installedOnly = settings.hyperOsAppShowInstalledOnly
+                    val entries = joyose.apps()
+                    val meta = preloadMeta(entries)
+                    val rows = entries.map { entry ->
+                        val m = meta[entry.pkg]
+                        val label = m?.label ?: entry.pkg
+                        AppRow(
+                            pkg = entry.pkg,
+                            group = entry.group,
+                            features = entry.features,
+                            label = label,
+                            firstInstallTime = m?.installTime ?: 0L,
+                            lastUpdateTime = m?.updateTime ?: 0L,
+                            installed = m?.installed ?: false,
+                            pinyin = PinyinUtil.toPinyin(label),
+                        )
+                    }
+                    Loaded(sortApps(rows, config), stat.sp.frozen, config, installedOnly)
                 }
             }
-            _listState.value = state
+            _listState.update {
+                if (loaded == null) {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        unavailable = true,
+                        allRows = emptyList(),
+                        apps = emptyList(),
+                    )
+                } else {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        unavailable = false,
+                        allRows = loaded.rows,
+                        apps = visibleRows(loaded.rows, loaded.sort, loaded.installedOnly),
+                        frozen = loaded.frozen,
+                        sortConfig = loaded.sort,
+                        showInstalledOnly = loaded.installedOnly,
+                    )
+                }
+            }
+        }
+    }
+
+    /** 下拉刷新（对齐 KernelSU onRefresh）：保留列表内容，只转刷新指示器。 */
+    fun refreshFromPull() {
+        refreshList(pullToRefresh = true)
+    }
+
+    /** 改排序：持久化选择 + 就地重排，不重新读库。 */
+    fun updateSortConfig(config: AppSortConfig) {
+        settings.hyperOsAppSortOption = config.toInt()
+        _listState.update {
+            it.copy(
+                sortConfig = config,
+                apps = visibleRows(it.allRows, config, it.showInstalledOnly),
+            )
+        }
+    }
+
+    /** 右上角筛选切换：所有应用配置 / 只显示已安装应用配置。 */
+    fun setShowInstalledOnly(value: Boolean) {
+        settings.hyperOsAppShowInstalledOnly = value
+        _listState.update {
+            it.copy(
+                showInstalledOnly = value,
+                apps = visibleRows(it.allRows, it.sortConfig, value),
+            )
         }
     }
 

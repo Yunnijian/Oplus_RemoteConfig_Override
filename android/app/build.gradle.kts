@@ -107,6 +107,8 @@ dependencies {
     implementation("androidx.navigation3:navigation3-runtime:1.1.6")
     // NavDisplay（androidx.navigation3.ui）由 Miuix Navigation3 UI 提供（对齐 KernelSU 用法）
     implementation("top.yukonga.miuix.kmp:miuix-navigation3-ui-android:$miuix")
+    // 搜索栏展开时接管系统返回键（KernelSU SuperSearchBar 的 NavigationBackHandler，版本对齐）
+    implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
 
     // Activity & Lifecycle
     implementation("androidx.activity:activity-compose:1.13.0")

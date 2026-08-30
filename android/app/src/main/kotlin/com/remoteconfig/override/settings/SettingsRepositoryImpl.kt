@@ -88,6 +88,14 @@ class SettingsRepositoryImpl(
         get() = prefs.getString(KEY_PLATFORM_MODE, "auto") ?: "auto"
         set(value) = prefs.edit { putString(KEY_PLATFORM_MODE, value) }
 
+    override var hyperOsAppSortOption: Int
+        get() = prefs.getInt(KEY_HYPEROS_APP_SORT_OPTION, 0)
+        set(value) = prefs.edit { putInt(KEY_HYPEROS_APP_SORT_OPTION, value) }
+
+    override var hyperOsAppShowInstalledOnly: Boolean
+        get() = prefs.getBoolean(KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY, false)
+        set(value) = prefs.edit { putBoolean(KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY, value) }
+
     companion object {
         const val SETTINGS_PREFS_FILE = "settings"
         const val KEY_UI_MODE = "ui_mode"
@@ -103,5 +111,7 @@ class SettingsRepositoryImpl(
         const val KEY_PAGE_SCALE = "page_scale"
         const val KEY_ENABLE_NAVIGATION_BADGE = "enable_navigation_badge"
         const val KEY_PLATFORM_MODE = "platform_mode"
+        const val KEY_HYPEROS_APP_SORT_OPTION = "hyperos_app_sort_option"
+        const val KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY = "hyperos_app_show_installed_only"
     }
 }
