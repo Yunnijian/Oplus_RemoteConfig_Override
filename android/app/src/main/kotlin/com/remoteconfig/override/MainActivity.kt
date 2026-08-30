@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
             // collectAsStateWithLifecycle 订阅，根主题/CompositionLocal 即时响应。
             val mainActivityViewModel: MainActivityViewModel = viewModel()
             val uiState by mainActivityViewModel.uiState.collectAsStateWithLifecycle()
+            val selectedMainPage by mainActivityViewModel.selectedMainPage.collectAsStateWithLifecycle()
             val appSettings = uiState.appSettings
             val uiMode = uiState.uiMode
 
@@ -116,7 +117,11 @@ class MainActivity : ComponentActivity() {
                         },
                         entryProvider = entryProvider {
                             entry<Route.Main> {
-                                MainScreen(viewModel = viewModel)
+                                MainScreen(
+                                    viewModel = viewModel,
+                                    initialPage = selectedMainPage,
+                                    onPageChanged = mainActivityViewModel::setSelectedMainPage,
+                                )
                             }
                             entry<Route.ColorPalette> { ColorPaletteScreen() }
                             entry<Route.ConfigEditor> { key ->

@@ -2,6 +2,7 @@ package com.remoteconfig.override.viewmodel
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,12 +32,15 @@ data class MainActivityUiState(
  * 命中即整体重读并推送 StateFlow；MainActivity 经 collectAsStateWithLifecycle
  * 订阅，驱动根主题与各 CompositionLocal。无 Compose 快照参与。
  */
-class MainActivityViewModel : ViewModel() {
+class MainActivityViewModel(
+    savedStateHandle: SavedStateHandle,
+) : ViewModel() {
 
     private val prefs: SharedPreferences = settingsAppContext.getSharedPreferences(
         SettingsRepositoryImpl.SETTINGS_PREFS_FILE, Context.MODE_PRIVATE
     )
     private val settingRepo: SettingsRepository = SettingsRepositoryImpl()
+    private val mainPageState = MainPageState(savedStateHandle)
 
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null || key in OBSERVED_KEYS) {
@@ -47,12 +51,24 @@ class MainActivityViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(readUiState())
     val uiState: StateFlow<MainActivityUiState> = _uiState.asStateFlow()
 
+    /**
+     * 当前选中主页 tab — 对齐 KernelSU selectedMainPage（SavedStateHandle 持久化）。
+     * 切换界面风格（uiMode）会使主题分支下的整棵子树丢弃重建，裸 remember 的
+     * pagerState 随之重置；tab 选择外置到此，重建时经 initialPage 注回
+     * （见 MainActivity/MainScreen），不再跳回首页。
+     */
+    val selectedMainPage: StateFlow<Int> = mainPageState.selectedPage
+
     init {
         prefs.registerOnSharedPreferenceChangeListener(listener)
     }
 
     override fun onCleared() {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun setSelectedMainPage(page: Int) {
+        mainPageState.updateSelectedPage(page)
     }
 
     private fun readUiState(): MainActivityUiState {
@@ -81,4 +97,25 @@ class MainActivityViewModel : ViewModel() {
             SettingsRepositoryImpl.KEY_ENABLE_NAVIGATION_BADGE,
         )
     }
+}
+
+private const val SELECTED_MAIN_PAGE_KEY = "selected_main_page"
+
+/** 对齐 KernelSU MainPageState：选中 tab 存于 SavedStateHandle（进程重建亦保留）。 */
+private class MainPageState(
+    private val savedStateHandle: SavedStateHandle,
+) {
+    val selectedPage: StateFlow<Int> = savedStateHandle.getStateFlow(SELECTED_MAIN_PAGE_KEY, 0)
+
+    fun updateSelectedPage(page: Int) {
+        savedStateHandle[SELECTED_MAIN_PAGE_KEY] = MainPagerConfig.coercePage(page)
+    }
+}
+
+/** 对齐 KernelSU MainPagerConfig（本项目 3 tab：首页/配置/设置）。 */
+object MainPagerConfig {
+    const val PAGE_COUNT = 3
+    const val LAST_PAGE_INDEX = PAGE_COUNT - 1
+
+    fun coercePage(page: Int): Int = page.coerceIn(0, LAST_PAGE_INDEX)
 }

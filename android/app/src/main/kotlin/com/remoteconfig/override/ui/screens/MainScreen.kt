@@ -94,7 +94,11 @@ private fun PageBringIntoViewBarrier(content: @Composable () -> Unit) {
  *   rememberContentReady 延迟组装、isCurrentPage（settledPage）门控。
  */
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    initialPage: Int = 0,
+    onPageChanged: (Int) -> Unit = {},
+) {
     val uiMode = LocalUiMode.current
     val enableBlur = LocalEnableBlur.current
     val enableFloatingBottomBar = LocalEnableFloatingBottomBar.current
@@ -103,7 +107,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val navigator = LocalNavigator.current
     val expanded = isExpandedWidth()
 
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { PAGE_COUNT })
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { PAGE_COUNT })
     val mainPagerState = rememberMainPagerState(pagerState)
 
     // 手势滑动 → 实时同步 tab（isNavigating=false 时才生效，点击滚动中被协调器屏蔽）
@@ -113,6 +117,11 @@ fun MainScreen(viewModel: MainViewModel) {
     }
     // 内容门控用 settledPage（停稳才算当前页）
     val settledPage = pagerState.settledPage
+    // tab 选择上报持久化（对齐 KernelSU onPageChanged）：切换界面风格会重建整棵
+    // 子树，裸 remember 的 pagerState 被重置，靠外置的选中页经 initialPage 恢复。
+    LaunchedEffect(settledPage) {
+        onPageChanged(settledPage)
+    }
 
     // 配置页双窗选中（宽屏 list-detail）：null = 未选；窄屏不使用（恒为 null）
     var dualPaneSelected by rememberSaveable { mutableStateOf<String?>(null) }
