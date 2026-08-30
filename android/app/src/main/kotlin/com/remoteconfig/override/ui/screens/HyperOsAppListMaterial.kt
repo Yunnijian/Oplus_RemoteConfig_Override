@@ -372,18 +372,6 @@ fun HyperOsAppListMaterial(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    // 云控状态行：冻结徽标 + 应用计数
-                    item(key = "status") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            FreezeStatusBadgeMaterial(frozen = state.frozen)
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                "共 ${state.apps.size} 个应用",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                     itemsIndexed(filtered, key = { _, item -> item.pkg }) { _, app ->
                         appRow(app)
                     }
@@ -464,34 +452,6 @@ private fun FilterRowMaterial(
         onCheckedChange = { onClick() },
         shapes = MenuDefaults.itemShape(index = 0, count = 1),
     )
-}
-
-/** 云控冻结状态徽标（Material 配色：胶囊底 secondaryContainer + 状态圆点）。 */
-@Composable
-private fun FreezeStatusBadgeMaterial(frozen: Boolean) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(
-                    if (frozen) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = if (frozen) "云控已冻结" else "云控未冻结",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-    }
 }
 
 /** 应用行次级文本：group 别名（如有）+ 功能数。 */

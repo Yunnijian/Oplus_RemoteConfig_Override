@@ -61,6 +61,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hasDbData = MutableStateFlow(false)
     val hasDbData: StateFlow<Boolean> = _hasDbData.asStateFlow()
 
+    // ── 列表排序/可见性（对齐 HyperOsViewModel，组件对齐 KernelSU）──
+    private val settings = com.remoteconfig.override.settings.SettingsRepositoryImpl()
+
+    /** 下拉刷新中（与首屏 isLoading 分开：不清空列表，只转指示器）。 */
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    private val _sortConfig = MutableStateFlow(
+        AppSortConfig.fromInt(settings.colorosAppSortOption),
+    )
+    val sortConfig: StateFlow<AppSortConfig> = _sortConfig.asStateFlow()
+
+    private val _showInstalledOnly = MutableStateFlow(settings.colorosAppShowInstalledOnly)
+    val showInstalledOnly: StateFlow<Boolean> = _showInstalledOnly.asStateFlow()
+
+    /** 全部行（含未安装）；[gameList] 是它按可见性 + 排序过滤后的结果。 */
+    private var allRows: List<GameConfigSummary> = emptyList()
+
+    private fun visibleRows(
+        all: List<GameConfigSummary>,
+        config: AppSortConfig,
+        installedOnly: Boolean,
+    ): List<GameConfigSummary> =
+        sortSummaries(all.filter { !installedOnly || it.isInstalled }, config)
+
+    /** 排序实现与 AppSort.sortApps 一致（NAME 走本地化 Collator），作用于摘要行。 */
+    private fun sortSummaries(
+        rows: List<GameConfigSummary>,
+        config: AppSortConfig,
+    ): List<GameConfigSummary> {
+        val collator = java.text.Collator.getInstance(java.util.Locale.getDefault())
+        val base: Comparator<GameConfigSummary> = when (config.sortType) {
+            AppSortType.PACKAGE_NAME -> compareBy { it.packageName }
+            AppSortType.INSTALL_TIME -> compareBy { it.installTime }
+            AppSortType.UPDATE_TIME -> compareBy { it.updateTime }
+            AppSortType.NAME -> Comparator { a, b -> collator.compare(a.appName, b.appName) }
+        }
+        return rows.sortedWith(if (config.reversed) base.reversed() else base)
+    }
+
     /**
      * 编辑基准文本（最近一次从数据库/模板载入的原文）——与 [editingJson] 比较
      * 得出脏标记，用于退出/切换/导入前的“未保存修改”拦截，避免静默丢稿。
@@ -94,6 +134,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 下拉刷新（对齐 KernelSU onRefresh）：保留列表内容，只转刷新指示器。 */
+    fun refreshFromPull() {
+        if (_refreshing.value || _isLoading.value) return
+        viewModelScope.launch {
+            _refreshing.value = true
+            val configuredPkgs = checkSystemStatus()
+            loadGameList(configuredPkgs)
+            _refreshing.value = false
+        }
+    }
+
+    /** 改排序：持久化选择 + 就地重排，不重新读库。 */
+    fun updateSortConfig(config: AppSortConfig) {
+        settings.colorosAppSortOption = config.toInt()
+        _sortConfig.value = config
+        _gameList.value = visibleRows(allRows, config, _showInstalledOnly.value)
+    }
+
+    /** 右上角筛选：所有应用配置 / 只显示已安装应用配置。 */
+    fun setShowInstalledOnly(value: Boolean) {
+        settings.colorosAppShowInstalledOnly = value
+        _showInstalledOnly.value = value
+        _gameList.value = visibleRows(allRows, _sortConfig.value, value)
+    }
+
     /** 检测 Root/数据库状态并返回配置包名列表（数据库不可访问时为空表）。 */
     private suspend fun checkSystemStatus(): List<String> {
         // 所有 Root Shell / 数据库调用放到 IO 线程，避免阻塞主线程导致 ANR。
@@ -122,7 +187,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _hasDbData.value = configuredPkgs.isNotEmpty()
         val context = getApplication<Application>()
 
-        // 后台线程预加载：包名 → (appLabel, iconBitmap, isInstalled)
+        // 后台线程预加载：包名 → 摘要（含 label / 图标 / 在装状态 / 时间戳 / 拼音）
         val results = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val densityDpi = context.resources.displayMetrics.density
@@ -131,15 +196,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             configuredPkgs.map { pkg ->
                 if (missingIconPackages.contains(pkg)) {
                     // Bug 3: 已知未安装（无图标）——跳过重复解码尝试，直接走占位图标
-                    Triple(pkg, pkg, false)
+                    GameConfigSummary(
+                        packageName = pkg,
+                        appName = pkg,
+                        hasConfig = true,
+                        isInstalled = false,
+                        pinyin = com.remoteconfig.override.ui.util.PinyinUtil.toPinyin(pkg),
+                    )
                 } else {
                     try {
-                        val info = pm.getApplicationInfo(pkg, 0)
-                        val label = pm.getApplicationLabel(info).toString()
+                        val info = pm.getPackageInfo(pkg, 0)
+                        val applicationInfo = info.applicationInfo
+                        val installed = applicationInfo != null
+                        val label = if (applicationInfo != null) {
+                            pm.getApplicationLabel(applicationInfo).toString()
+                        } else {
+                            pkg
+                        }
                         // Bug 3: 已缓存图标跳过重建（解码/绘 Bitmap 是主要内存与耗时来源），
                         // refreshAll 只补新增包；label 查询是廉价 Binder 调用，保持列表名最新
-                        if (!iconCache.containsKey(pkg)) {
-                            val drawable = pm.getApplicationIcon(info)
+                        if (installed && !iconCache.containsKey(pkg)) {
+                            val drawable = pm.getApplicationIcon(applicationInfo!!)
                             val px = (44 * densityDpi).toInt().coerceAtLeast(48)
                             val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
                             val c = Canvas(bmp)
@@ -148,23 +225,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             iconCache[pkg] = bmp
                         }
                         missingIconPackages.remove(pkg)
-                        Triple(pkg, label, true)
+                        GameConfigSummary(
+                            packageName = pkg,
+                            appName = label,
+                            hasConfig = true,
+                            isInstalled = installed,
+                            installTime = info.firstInstallTime,
+                            updateTime = info.lastUpdateTime,
+                            pinyin = com.remoteconfig.override.ui.util.PinyinUtil.toPinyin(label),
+                        )
                     } catch (_: Exception) {
                         // ConcurrentHashMap 不接受 null 值：移除旧缓存让 UI 走占位图标
                         iconCache.remove(pkg)
                         missingIconPackages.add(pkg)
-                        Triple(pkg, pkg, false)
+                        GameConfigSummary(
+                            packageName = pkg,
+                            appName = pkg,
+                            hasConfig = true,
+                            isInstalled = false,
+                            pinyin = com.remoteconfig.override.ui.util.PinyinUtil.toPinyin(pkg),
+                        )
                     }
                 }
             }
         }
 
-        val sorted = results
-            .sortedByDescending { it.third }
-            .map { (pkg, name, installed) ->
-                GameConfigSummary(packageName = pkg, appName = name, hasConfig = true, isInstalled = installed)
-            }
-        _gameList.value = sorted
+        allRows = results
+        _gameList.value = visibleRows(results, _sortConfig.value, _showInstalledOnly.value)
     }
 
     // ── 搜索 ─────────────────────────────────────────────────

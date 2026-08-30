@@ -96,6 +96,14 @@ class SettingsRepositoryImpl(
         get() = prefs.getBoolean(KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY, false)
         set(value) = prefs.edit { putBoolean(KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY, value) }
 
+    override var colorosAppSortOption: Int
+        get() = prefs.getInt(KEY_COLOROS_APP_SORT_OPTION, 0)
+        set(value) = prefs.edit { putInt(KEY_COLOROS_APP_SORT_OPTION, value) }
+
+    override var colorosAppShowInstalledOnly: Boolean
+        get() = prefs.getBoolean(KEY_COLOROS_APP_SHOW_INSTALLED_ONLY, false)
+        set(value) = prefs.edit { putBoolean(KEY_COLOROS_APP_SHOW_INSTALLED_ONLY, value) }
+
     companion object {
         const val SETTINGS_PREFS_FILE = "settings"
         const val KEY_UI_MODE = "ui_mode"
@@ -113,5 +121,7 @@ class SettingsRepositoryImpl(
         const val KEY_PLATFORM_MODE = "platform_mode"
         const val KEY_HYPEROS_APP_SORT_OPTION = "hyperos_app_sort_option"
         const val KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY = "hyperos_app_show_installed_only"
+        const val KEY_COLOROS_APP_SORT_OPTION = "coloros_app_sort_option"
+        const val KEY_COLOROS_APP_SHOW_INSTALLED_ONLY = "coloros_app_show_installed_only"
     }
 }

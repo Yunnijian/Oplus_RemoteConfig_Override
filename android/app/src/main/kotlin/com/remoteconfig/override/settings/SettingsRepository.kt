@@ -35,4 +35,6 @@ interface SettingsRepository {
     var platformMode: String
     var hyperOsAppSortOption: Int
     var hyperOsAppShowInstalledOnly: Boolean
+    var colorosAppSortOption: Int
+    var colorosAppShowInstalledOnly: Boolean
 }

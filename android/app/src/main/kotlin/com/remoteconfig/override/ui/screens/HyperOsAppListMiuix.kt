@@ -214,24 +214,6 @@ fun HyperOsAppListMiuix(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             overscrollEffect = null,
         ) {
-            if (interactive) {
-                item(key = "status") {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        FreezeStatusBadgeMiuix(frozen = state.frozen)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "共 ${state.apps.size} 个应用",
-                            fontSize = 12.sp,
-                            color = colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                }
-            }
             items(apps, key = { it.pkg }, contentType = { "app" }) { app ->
                 AppRowCardMiuix(
                     app = app,
@@ -576,31 +558,6 @@ private fun AppRowCardMiuix(
                 tint = colorScheme.onSurfaceVariantActions,
             )
         }
-    }
-}
-
-/** 云控冻结状态徽标（Miuix 配色：胶囊底 secondaryContainer + 状态圆点）。 */
-@Composable
-private fun FreezeStatusBadgeMiuix(frozen: Boolean) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(colorScheme.secondaryContainer)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(if (frozen) colorScheme.primary else colorScheme.onSurfaceVariantSummary),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = if (frozen) "云控已冻结" else "云控未冻结",
-            fontSize = 12.sp,
-            color = colorScheme.onSecondaryContainer,
-        )
     }
 }
 
