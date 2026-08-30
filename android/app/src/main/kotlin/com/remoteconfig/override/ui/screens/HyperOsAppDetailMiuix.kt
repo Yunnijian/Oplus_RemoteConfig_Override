@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
@@ -42,12 +43,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.navigation.LocalNavigator
+import com.remoteconfig.override.navigation.Route
 import kotlinx.serialization.json.JsonElement
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -80,12 +84,16 @@ fun HyperOsAppDetailMiuix(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 上滑大标题自动缩放（对齐 HyperOsAppListMiuix / KernelSU AppProfileMiuix）：
+    // TopAppBar 拿 scrollBehavior，列表挂 nestedScrollConnection。
+    val scrollBehavior = MiuixScrollBehavior()
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
                 title = "应用功能",
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -96,8 +104,10 @@ fun HyperOsAppDetailMiuix(
                     }
                 },
                 actions = {
+                    val navigator = LocalNavigator.current
                     IconButton(onClick = {
-                        Toast.makeText(context, "高级 JSON 编辑将在后续版本提供", Toast.LENGTH_SHORT).show()
+                        // 作用域编辑：仅编辑当前 App 名下的云控片段（秒开 + 作用域隔离）
+                        view?.packageName?.let { pkg -> navigator.push(Route.HyperOsScopedEditor(pkg)) }
                     }) {
                         Icon(
                             imageVector = Icons.Filled.Edit,
@@ -137,7 +147,9 @@ fun HyperOsAppDetailMiuix(
                     )
                 }
                 else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {

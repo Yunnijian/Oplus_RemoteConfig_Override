@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 /**
  * HyperOS 云控 ViewModel —— 应用列表 / 应用功能页 / 通用配置（布尔开关）三块状态。
@@ -145,6 +147,142 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ── 高级 JSON 编辑 ───────────────────────────────────────
+
+    data class EditorState(
+        val loading: Boolean = false,
+        val writing: Boolean = false,
+        val configName: String? = null,
+        /** 最近一次从 DB 载入的原文 —— 与 edited 比较得出保存可用性。 */
+        val json: String? = null,
+        /** 当前编辑文本（onTextChanged 实时更新）。 */
+        val edited: String? = null,
+        val error: String? = null,
+    )
+
+    private val _editorState = MutableStateFlow(EditorState())
+    val editorState = _editorState.asStateFlow()
+
+    fun loadEditor(configName: String) {
+        if (_editorState.value.configName == configName && _editorState.value.json != null) return
+        viewModelScope.launch {
+            _editorState.value = EditorState(loading = true, configName = configName)
+            val state = withContext(Dispatchers.IO) {
+                val raw = joyose.readRaw(configName)
+                if (raw == null) {
+                    EditorState(configName = configName, error = "无法读取 $configName（SmartP 与 teg 均无此配置）")
+                } else {
+                    EditorState(configName = configName, json = raw, edited = raw)
+                }
+            }
+            _editorState.value = state
+        }
+    }
+
+    fun updateEdited(text: String) {
+        _editorState.update { it.copy(edited = text, error = null) }
+    }
+
+    /** 保存：严格语法校验后走 joyose-write 双库镜像写（内部含回读校验）。 */
+    fun saveEditor() {
+        val st = _editorState.value
+        val config = st.configName ?: return
+        if (st.writing || st.edited == null || st.edited == st.json) return
+        val edited = st.edited
+        _editorState.update { it.copy(writing = true, error = null) }
+        viewModelScope.launch {
+            val error = writeValidated(edited) { joyose.writeConfig(config, it) }
+            _editorState.update {
+                if (error == null) it.copy(writing = false, json = edited)
+                else it.copy(writing = false, error = error)
+            }
+        }
+    }
+
+    // ── 作用域编辑（App 专属片段）─────────────────────────────
+    // 作用域文档 = { "<JSON Pointer>": <该 App 名下的原始片段> }，键即回写指针。
+    // 指针解析、片段抽取与格式化全部在 libcosa.so 内完成（joyose-scoped /
+    // joyose-scoped-write）：App 进程只搬运几十 KB 片段，既不必解析 346KB 整份
+    // 文档（打开慢的根因），也不会因为"整文档重序列化"波及其他 App 与全局配置。
+    // 新增/改名/删除键由 CLI 直接报错，不存在静默丢弃。
+
+    data class ScopedEditorState(
+        val loading: Boolean = false,
+        val writing: Boolean = false,
+        val packageName: String? = null,
+        /** 载入时的原文 —— 与 edited 比较得出未保存标记。 */
+        val base: String? = null,
+        /** 当前编辑文本（onTextChanged 实时更新）。 */
+        val edited: String? = null,
+        val error: String? = null,
+        /** CLI 未能解析的指针（正常为空；非空即 Rust 侧指针与文档形状脱节）。 */
+        val warning: String? = null,
+    )
+
+    private val _scopedEditorState = MutableStateFlow(ScopedEditorState())
+    val scopedEditorState = _scopedEditorState.asStateFlow()
+
+    fun loadScopedEditor(packageName: String) {
+        if (_scopedEditorState.value.packageName == packageName && _scopedEditorState.value.base != null) return
+        viewModelScope.launch {
+            _scopedEditorState.value = ScopedEditorState(loading = true, packageName = packageName)
+            val state = withContext(Dispatchers.IO) {
+                val scoped = joyose.scoped(packageName)
+                when {
+                    scoped == null ->
+                        ScopedEditorState(packageName = packageName, error = "无法读取该应用的云控片段")
+                    scoped.document.isEmpty() ->
+                        ScopedEditorState(packageName = packageName, error = "该应用没有 per-app 云控片段")
+                    else -> {
+                        val text = prettyJson.encodeToString(JsonObject.serializer(), scoped.document)
+                        ScopedEditorState(
+                            packageName = packageName,
+                            base = text,
+                            edited = text,
+                            warning = scoped.skipped.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                        )
+                    }
+                }
+            }
+            _scopedEditorState.value = state
+        }
+    }
+
+    fun updateScopedEdited(text: String) {
+        _scopedEditorState.update { it.copy(edited = text, error = null) }
+    }
+
+    /** 保存作用域编辑：CLI 按指针把片段补丁进当前库里的整份文档后双库镜像写。 */
+    fun saveScopedEditor() {
+        val st = _scopedEditorState.value
+        val pkg = st.packageName ?: return
+        if (st.writing || st.edited == null || st.edited == st.base) return
+        val edited = st.edited
+        _scopedEditorState.update { it.copy(writing = true, error = null) }
+        viewModelScope.launch {
+            val error = writeValidated(edited) { joyose.writeScoped(pkg, it) }
+            _scopedEditorState.update {
+                if (error == null) it.copy(writing = false, base = edited)
+                else it.copy(writing = false, error = error)
+            }
+        }
+    }
+
+    /**
+     * 严格 JSON 语法校验（不放过单引号/无引号键——写进云控库的必须是标准 JSON，
+     * 失败时带上解析器给出的位置），通过后交给 [write] 落库。
+     * 返回 null 表示成功，否则为可直接展示的错误文案。
+     */
+    private suspend fun writeValidated(
+        text: String,
+        write: (String) -> JoyoseManager.WriteResult,
+    ): String? = withContext(Dispatchers.IO) {
+        runCatching { strictJson.parseToJsonElement(text) }
+            .exceptionOrNull()
+            ?.let { return@withContext "JSON 语法错误：${it.message?.replace('\n', ' ')}" }
+        write(text).let { if (it.success) null else it.message }
+    }
+
     // ── 通用配置（布尔开关）──────────────────────────────────
 
     /** 一行开关：path 供写回定位（支持一层嵌套，如 mivk_settings.enable）。 */
@@ -269,6 +407,12 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
         /** 图标缓存容量上限（超过整体清空，下一轮 refresh 只重建当前列表） */
         private const val MAX_CACHED_ICONS = 500
+
+        /** kotlinx 默认实例即严格模式；作用域/整文档写回前都用它把关。 */
+        val strictJson = Json
+
+        /** 编辑器展示与载入统一 2 空格缩进（对齐应用功能页的 PrettyJson）。 */
+        val prettyJson = Json { prettyPrint = true }
     }
 }
 

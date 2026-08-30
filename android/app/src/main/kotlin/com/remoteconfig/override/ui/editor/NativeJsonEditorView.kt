@@ -88,10 +88,10 @@ class NativeJsonEditorView @JvmOverloads constructor(
         // below make the total direct drag about 2.5x, matching the requested
         // scroll speed without changing fling velocity.
         private const val DIRECT_DRAG_BOOST = 1.50f
-        // Use the real TextView layout for pinches that start close enough to
-        // the end that a scale-down could reduce the legal scroll range under
-        // the current position. This avoids a transient file-external tail
-        // without sacrificing the hardware pinch path in the middle.
+        // 手势开始位置距离文档底部不足该值时，手势结束后的字号重排会让
+        // 合法滚动范围变小，旧 scrollY 可能短暂越过新的最大值。该常量只
+        // 决定稳定期是否追加边界钳制（continueZoomBoundaryClamp），不再
+        // 影响捏合过程本身走哪条缩放路径。
         private const val ZOOM_BOTTOM_GUARD_DP = 96f
         private const val TRACE_TAG = "RemoteConfigZoom"
         private const val TRACE_MAX_BYTES = 2L * 1024L * 1024L
@@ -136,7 +136,6 @@ class NativeJsonEditorView @JvmOverloads constructor(
     private var consumeTouchUntilUp = false
     private var gestureScale = 1f
     private var gestureBaseFontSize = 13f
-    private var directFontScaleApplied = false
     private var gestureMinScale = MIN_GESTURE_SCALE
     private var gestureMaxScale = MAX_GESTURE_SCALE
     private var gesturePivotX = 0f
@@ -200,15 +199,11 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 cancelVelocityTracking()
                 gestureScale = 1f
                 gestureBaseFontSize = fontSizeSp
-                directFontScaleApplied = false
                 zoomAnchorAtDocumentEnd = isAtDocumentEnd()
                 zoomRelayoutPending = false
                 zoomRestoreToken++
-                // The native EditText owns the real content bounds and clamps
-                // its scroll position after a downscale.  At the document end
-                // also prevent the scaled text from becoming shorter than the
-                // viewport; otherwise a pinch-out necessarily exposes a blank
-                // region below the last line.
+                // 只记录手势开始时是否贴近（或正处于）文档底部：它决定
+                // 手势结束后重排稳定期的边界钳制强度，不再切换捏合路径。
                 val layoutHeight = editor.layout?.height ?: 0
                 val viewportHeight = (editor.height - editor.totalPaddingTop - editor.totalPaddingBottom)
                     .coerceAtLeast(0)
@@ -222,22 +217,19 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 // at the bottom stop shrinking at (for example) 0.85x, so a
                 // zoom-in could not be undone in one pinch.  The native
                 // TextView is the source of truth for the legal scroll range:
-                // setFontSize() predicts the new max and scrollTo() clamps it
-                // on every layout pass, so removing this artificial floor is
-                // safe even for an end-anchored gesture.
+                // scrollTo() clamps against the real layout on every pass,
+                // so removing this artificial floor is safe even for an
+                // end-anchored gesture.
                 gestureMinScale = max(
                     MIN_GESTURE_SCALE,
                     MIN_TEXT_SIZE_SP / fontSizeSp
                 )
                 gestureMaxScale = min(MAX_GESTURE_SCALE, MAX_TEXT_SIZE_SP / fontSizeSp)
-                // At the document end, a viewport-sized temporary layer can
-                // always be translated a few pixels beyond the last line
-                // while ScaleGestureDetector is still delivering samples.
-                // Use the real TextView layout for the whole end-anchored
-                // gesture instead; its scrollTo() clamp makes overscaling
-                // outside the file impossible.  Other positions retain the
-                // hardware-layer path for smooth pinch feedback.
-                directFontScaleApplied = zoomClampAtDocumentBoundary
+                // 放大与缩小统一走硬件层预览：捏合期间只改 content 的
+                // scale/translation，绝不触发 TextView 重排。旧实现在缩小
+                // （或从文档底部附近开始）时改为每个采样调用 setFontSize()，
+                // setTextSize() 造成的全文重排正是双指缩小掉帧的根因。
+                // 最终字号在 onScaleEnd() 一次性落地，位置由锚点恢复。
                 gesturePivotX = detector.focusX.coerceIn(0f, width.toFloat())
                 gesturePivotY = detector.focusY.coerceIn(0f, height.toFloat())
                 gestureLastFocusX = detector.focusX
@@ -259,32 +251,13 @@ class NativeJsonEditorView @JvmOverloads constructor(
 
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 if (!zooming) return false
-                // Keep the native document at its real end while the pinch
-                // is in progress.  TextView can receive a selection/layout
-                // pass between two scale samples; if that pass leaves an
-                // old scroll value in place, the temporary layer can expose
-                // a blank tail before onLayout() gets a chance to clamp it.
-                if (zoomClampAtDocumentBoundary) {
-                    editor.scrollTo(
-                        editor.scrollX,
-                        if (zoomAnchorAtDocumentEnd) Int.MAX_VALUE else editor.scrollY
-                    )
-                }
                 // ScaleGestureDetector's focus can move while the fingers are
                 // pinching.  Carry that pan into the temporary layer so text
-                // (and the caret) stays under the same finger position.
-                if (!directFontScaleApplied) {
-                    content.translationX += detector.focusX - gestureLastFocusX
-                    // When the gesture starts at the document end, a moving
-                    // lower finger also moves ScaleGestureDetector's focus
-                    // downward. Applying that focus delta as a vertical pan
-                    // drags the viewport past the last line and reveals the
-                    // blank tail. Keep the end vertically anchored; the
-                    // document-aware clamp still handles the scale itself.
-                    if (!zoomClampAtDocumentBoundary) {
-                        content.translationY += detector.focusY - gestureLastFocusY
-                    }
-                }
+                // (and the caret) stays under the same finger position.  靠近
+                // 文档底部也无需跳过竖直平移：clampTemporaryTransform() 的
+                // 文档末端钳制会自动把平移挡在最后一行之内。
+                content.translationX += detector.focusX - gestureLastFocusX
+                content.translationY += detector.focusY - gestureLastFocusY
                 gestureLastFocusX = detector.focusX
                 gestureLastFocusY = detector.focusY
                 gestureScale = (gestureScale * detector.scaleFactor)
@@ -293,27 +266,14 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 if (traceScaleSamples <= 3 || traceScaleSamples % 8 == 0) {
                     traceState("scale_sample n=$traceScaleSamples focus=${detector.focusX},${detector.focusY} factor=${detector.scaleFactor}")
                 }
-                if (gestureScale < 1f || directFontScaleApplied) {
-                    // A viewport-sized layer cannot be shrunk without exposing
-                    // a blank strip.  For pinch-out, resize the native
-                    // EditText itself instead; its layout remains complete and
-                    // the system caret stays attached to the text.
-                    directFontScaleApplied = true
-                    content.scaleX = 1f
-                    content.scaleY = 1f
-                    content.translationX = 0f
-                    content.translationY = 0f
-                    setFontSize(gestureBaseFontSize * gestureScale)
-                    // setFontSize() clamps against the predicted layout
-                    // height before requesting TextView's asynchronous
-                    // relayout. Do not write the old scrollY again here: on
-                    // a downscale that value can already be beyond the new
-                    // legal maximum and would briefly expose a blank tail.
-                } else {
-                    content.scaleX = gestureScale
-                    content.scaleY = gestureScale
-                    clampTemporaryTransform()
-                }
+                // 放大与缩小都只更新硬件层变换，绝不在这里调用
+                // setFontSize()：每个手势采样触发一次 setTextSize() 全文
+                // 重排正是双指缩小掉帧的根因。缩小时层比视口小，
+                // clampTemporaryTransform() 会把平移钳回 0，避免暴露层外
+                // 空白；被缩掉的相邻内容由手势结束后的真实重排展现。
+                content.scaleX = gestureScale
+                content.scaleY = gestureScale
+                clampTemporaryTransform()
                 syncGutterPreviewTransform()
                 return true
             }
@@ -342,9 +302,10 @@ class NativeJsonEditorView @JvmOverloads constructor(
                     content.translationY = 0f
                     content.setLayerType(View.LAYER_TYPE_NONE, null)
                     resetGutterPreviewTransform()
-                    if (directFontScaleApplied) {
-                        onFontSizeChanged?.invoke(fontSizeSp)
-                    } else if (abs(factor - 1f) > 0.01f) {
+                    // 硬件层预览期间真实字号未动，这里一次性落地最终值，
+                    // 整个手势只发生一次全文重排；位置由 restoreZoomAnchor()
+                    // 在新布局上恢复。
+                    if (abs(factor - 1f) > 0.01f) {
                         val next = (gestureBaseFontSize * factor)
                             .coerceIn(MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP)
                         if (abs(next - fontSizeSp) > 0.01f) {
@@ -489,32 +450,6 @@ class NativeJsonEditorView @JvmOverloads constructor(
         val savedScrollX = editor.scrollX
         val savedScrollY = editor.scrollY
         val savedAtDocumentEnd = toolbarFontChange && isAtDocumentEnd()
-        // setTextSize() relayouts asynchronously. During a pinch-out from
-        // the document end, the old layout can remain visible for one frame
-        // while its old (larger) scrollY is already past the new max, showing
-        // blank space below the last line. Move to the predicted max before
-        // requesting the relayout; EditorEditText.onLayout() then performs
-        // the exact clamp when the new layout arrives.
-        if (zooming && directFontScaleApplied) {
-            val oldLayout = editor.layout
-            val oldViewportHeight = (editor.height - editor.totalPaddingTop - editor.totalPaddingBottom)
-                .coerceAtLeast(0)
-            if (oldLayout != null && oldLayout.height > 0 && oldViewportHeight > 0) {
-                val predictedHeight =
-                    (oldLayout.height.toFloat() * (next / fontSizeSp)).roundToInt()
-                val predictedMax = (predictedHeight - oldViewportHeight).coerceAtLeast(0)
-                // Preserve the current position when it remains legal; only
-                // clamp it when the predicted new layout has a smaller max.
-                // An end-anchored gesture intentionally stays at Int.MAX,
-                // which resolves to the predicted/current real document end.
-                val targetY = if (zoomAnchorAtDocumentEnd) {
-                    predictedMax
-                } else {
-                    editor.scrollY.coerceAtMost(predictedMax)
-                }
-                editor.scrollTo(editor.scrollX, targetY)
-            }
-        }
         fontSizeSp = next
         editor.setTextSize(TypedValue.COMPLEX_UNIT_SP, next)
         if (toolbarFontChange) {
@@ -854,8 +789,9 @@ class NativeJsonEditorView @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
         val scale = gestureScale
         // Keep the transformed viewport from exposing content outside the
-        // editor.  Downscaling is handled by the text layout itself; this
-        // temporary hardware layer is used only for the >=1x part of a pinch.
+        // editor. 缩小方向同样走硬件层预览：层比视口小，任何平移都会立刻
+        // 暴露层外的空白，因此 scale < 1 时把平移钳到 0，位置误差统一交给
+        // 手势结束后的锚点恢复逻辑处理。
         var txMin: Float
         var txMax: Float
         var tyMin: Float
@@ -1432,21 +1368,6 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 // after a hardware-layer pinch, so the document never jumps
                 // to line 1 while the new size is being installed.
                 restoreZoomLayoutAnchor()
-            } else if (zooming && directFontScaleApplied) {
-                traceState("editor_layout_direct_scale")
-                if (zoomAnchorAtDocumentEnd) {
-                    // An exact end anchor deliberately follows the changing
-                    // real document end throughout the preview.
-                    editor.scrollTo(editor.scrollX, Int.MAX_VALUE)
-                } else {
-                    // Near (but not exactly at) the bottom, TextView can reset
-                    // scrollY while rebuilding its layout. Reusing that reset
-                    // value makes the live preview jump upward. Restore the
-                    // logical line under the pinch instead; scrollTo() still
-                    // clamps the result to the new legal maximum, so this
-                    // cannot expose space below the document.
-                    restoreZoomLayoutAnchor()
-                }
             }
         }
 
@@ -1592,10 +1513,17 @@ class NativeJsonEditorView @JvmOverloads constructor(
             backgroundPaint.color = gutterBackground
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
             val layout = editor.layout ?: return
-            val lineHeight = max(1, editor.lineHeight)
+            if (layout.lineCount == 0) return
             val scrollY = editor.scrollY
-            val firstLine = max(0, scrollY / lineHeight)
-            val lastLine = min(layout.lineCount - 1, (scrollY + height) / lineHeight + 1)
+            // 逐行取 Layout 的真实基线。旧实现用 editor.lineHeight 这个"标称
+            // 行高"乘以行号来估位置，而 TextView 的实际行高受折行、
+            // includeFontPadding 与行距影响，误差会随行号线性累积——越往下
+            // 行号越对不上正文。
+            val viewTop = (scrollY - editor.totalPaddingTop).coerceAtLeast(0)
+            val firstLine = layout.getLineForVertical(viewTop)
+            val lastLine = layout.getLineForVertical(
+                (viewTop + height).coerceAtMost(layout.height),
+            )
             paint.color = numberColor
             paint.textSize = editor.textSize * 0.85f
             // The gutter stays a fixed-width column while the editor can be
@@ -1611,16 +1539,12 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 paint.textSize *= availableWidth / sampleWidth
             }
             paint.textAlign = Paint.Align.RIGHT
-            val metrics = paint.fontMetrics
-            val baselineOffset = (lineHeight - (metrics.bottom - metrics.top)) / 2f - metrics.top
             val right = width - dp(4f)
             for (line in firstLine..lastLine) {
-                canvas.drawText(
-                    (line + 1).toString(),
-                    right.toFloat(),
-                    line * lineHeight - scrollY + baselineOffset + editor.paddingTop,
-                    paint
-                )
+                val baseline = layout.getLineBaseline(line) +
+                    editor.totalPaddingTop - scrollY
+                if (baseline + paint.ascent() > height || baseline + paint.descent() < 0) continue
+                canvas.drawText((line + 1).toString(), right.toFloat(), baseline.toFloat(), paint)
             }
         }
     }

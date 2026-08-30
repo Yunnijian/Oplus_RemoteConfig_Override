@@ -31,6 +31,8 @@ import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
 import com.remoteconfig.override.ui.screens.HyperOsAppDetailScreen
 import com.remoteconfig.override.ui.screens.HyperOsCommonConfigScreen
+import com.remoteconfig.override.ui.screens.HyperOsJsonEditorScreen
+import com.remoteconfig.override.ui.screens.HyperOsScopedEditorScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
@@ -160,6 +162,12 @@ class MainActivity : ComponentActivity() {
                             }
                             entry<Route.HyperOsCommonConfig> {
                                 HyperOsCommonConfigScreen()
+                            }
+                            entry<Route.HyperOsJsonEditor> { key ->
+                                HyperOsJsonEditorScreen(key.configName)
+                            }
+                            entry<Route.HyperOsScopedEditor> { key ->
+                                HyperOsScopedEditorScreen(key.packageName)
                             }
                         },
                     )

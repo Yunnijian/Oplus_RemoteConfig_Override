@@ -148,32 +148,66 @@ fn stat_one(path: &str) -> Value {
 /// (e.g. common_config only exists in teg rules on real devices).
 /// teg `rule_content` may be a pseudo-row wrapper `{config_name,…,params}`;
 /// it is unwrapped so callers always see the bare params document.
+///
+/// 读不到与不存在必须分开上报：Joyose 被 force-stop 后重启会短暂占住
+/// SmartP.db，此时若统一回"未找到配置"，用户会去找一条其实存在的配置。
 pub fn read_params_any(config: &str) -> CliResult<(String, Value)> {
-    if Path::new(SMARTP).exists() {
-        let conn = open_ro(SMARTP)?;
-        if let Ok(text) = conn.query_row(
-            "SELECT params FROM cloud_config WHERE config_name = ?1",
-            [config],
-            |r| r.get::<_, String>(0),
-        ) {
-            let value: Value = serde_json::from_str(&text)
-                .map_err(|e| format!("SmartP {config} params 解析失败: {e}"))?;
-            return Ok(("smartp".into(), value));
+    let read_side = |path: &str, sql: &str, label: &str, unwrap: bool| -> Result<Option<Value>, String> {
+        match std::fs::metadata(path) {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(format!("{label} 不可访问: {err}")),
         }
+        let conn = open_ro(path).map_err(|e| format!("{label} 打开失败: {e}"))?;
+        let text = query_optional(&conn, sql, config)
+            .map_err(|e| format!("{label} 读取失败: {e}"))?;
+        let Some(text) = text else { return Ok(None) };
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|e| format!("{label} {config} 解析失败: {e}"))?;
+        Ok(Some(if unwrap { unwrap_rule(value) } else { value }))
+    };
+
+    let mut problems = Vec::new();
+
+    match read_side(
+        SMARTP,
+        "SELECT params FROM cloud_config WHERE config_name = ?1",
+        "SmartP",
+        false,
+    ) {
+        Ok(Some(value)) => return Ok(("smartp".into(), value)),
+        Ok(None) => {}
+        Err(reason) => problems.push(reason),
     }
-    if Path::new(TEG).exists() {
-        let conn = open_ro(TEG)?;
-        if let Ok(text) = conn.query_row(
-            "SELECT rule_content FROM rules WHERE rule_module = ?1 ORDER BY _id DESC LIMIT 1",
-            [config],
-            |r| r.get::<_, String>(0),
-        ) {
-            let value: Value = serde_json::from_str(&text)
-                .map_err(|e| format!("teg {config} rule_content 解析失败: {e}"))?;
-            return Ok(("teg".into(), unwrap_rule(value)));
-        }
+    match read_side(
+        TEG,
+        "SELECT rule_content FROM rules WHERE rule_module = ?1 ORDER BY _id DESC LIMIT 1",
+        "teg",
+        true,
+    ) {
+        Ok(Some(value)) => return Ok(("teg".into(), value)),
+        Ok(None) => {}
+        Err(reason) => problems.push(reason),
     }
-    Err(format!("未找到配置: {config}").into())
+
+    if problems.is_empty() {
+        Err(format!("未找到配置: {config}").into())
+    } else {
+        Err(format!("读取 {config} 失败：{}", problems.join("；")).into())
+    }
+}
+
+/// Single-row query that distinguishes "no such row" from "query failed".
+fn query_optional(
+    conn: &Connection,
+    sql: &str,
+    config: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    match conn.query_row(sql, [config], |r| r.get::<_, String>(0)) {
+        Ok(value) => Ok(Some(value)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(other) => Err(other),
+    }
 }
 
 /// teg rule_content wrapper → bare params (pass-through when not a wrapper).
@@ -284,9 +318,8 @@ pub fn cmd_read(config: Option<&String>) -> CliResult<bool> {
     Ok(true)
 }
 
-/// `joyose-write <config> <json文件>` — dual-DB mirror write of the params
-/// document. force-stop of Joyose is performed here (before touching the
-/// DBs); `version` is preserved (no bump policy for local edits).
+/// `joyose-write <config> <json文件>` — read a params document from a file and
+/// hand it to [`write_document`].
 pub fn cmd_write(config: Option<&String>, path: Option<&String>) -> CliResult<bool> {
     let Some(config) = config else {
         return Err("缺少配置名".into());
@@ -297,6 +330,17 @@ pub fn cmd_write(config: Option<&String>, path: Option<&String>) -> CliResult<bo
     let text = fs::read_to_string(path).map_err(|e| format!("读取 {path} 失败: {e}"))?;
     let doc: Value =
         serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    println!("{}", write_document(config, doc)?);
+    Ok(true)
+}
+
+/// Dual-DB mirror write of a params document: force-stop, SmartP upsert, teg
+/// mirror, read-back verification.  Returns the report the caller prints.
+///
+/// `joyose-write` (whole document from a file) and `joyose-scoped-write`
+/// (document patched pointer by pointer) share this one write path so neither
+/// can drift away from the other's safety checks.
+pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
     if !doc.is_object() {
         return Err("JSON 顶层必须是对象".into());
     }
@@ -407,11 +451,12 @@ pub fn cmd_write(config: Option<&String>, path: Option<&String>) -> CliResult<bo
         }
     }
 
-    println!(
-        "{}",
-        json!({ "ok": true, "config": config, "smartp": smartp_result, "teg": teg_result })
-    );
-    Ok(true)
+    Ok(json!({
+        "ok": true,
+        "config": config,
+        "smartp": smartp_result,
+        "teg": teg_result,
+    }))
 }
 
 /// `joyose-freeze` / `joyose-unfreeze` — pin (or release) the teg SDK cloud

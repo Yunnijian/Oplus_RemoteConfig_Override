@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -30,12 +31,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +55,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.navigation.LocalNavigator
+import com.remoteconfig.override.navigation.Route
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -80,21 +83,27 @@ fun HyperOsAppDetailMaterial(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 上滑大标题自动缩放（对齐 HyperOsAppListMaterial）：LargeTopAppBar +
+    // exitUntilCollapsedScrollBehavior，列表挂 nestedScrollConnection。
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
-            TopAppBar(
-                title = { Text("应用功能") },
+            LargeTopAppBar(
+                title = { Text("应用功能", style = MaterialTheme.typography.headlineLarge) },
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
+                    val navigator = LocalNavigator.current
                     IconButton(onClick = {
-                        Toast.makeText(context, "高级 JSON 编辑将在后续版本提供", Toast.LENGTH_SHORT).show()
+                        // 作用域编辑：仅编辑当前 App 名下的云控片段（秒开 + 作用域隔离）
+                        view?.packageName?.let { pkg -> navigator.push(Route.HyperOsScopedEditor(pkg)) }
                     }) {
                         Icon(Icons.Filled.Edit, contentDescription = "高级编辑")
                     }
@@ -130,7 +139,9 @@ fun HyperOsAppDetailMaterial(
                     )
                 }
                 else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {

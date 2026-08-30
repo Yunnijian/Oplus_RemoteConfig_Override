@@ -5,4 +5,5 @@
 
 pub mod appview;
 pub mod resolve;
+pub mod scoped;
 pub mod store;

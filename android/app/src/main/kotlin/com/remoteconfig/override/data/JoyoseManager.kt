@@ -5,6 +5,7 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /**
@@ -196,15 +197,51 @@ class JoyoseManager(context: Context) {
     }
 
     /**
+     * 作用域片段文档（joyose-scoped 输出）：键 = JSON Pointer，值 = 该 App 名下
+     * 的原始片段。取数、指针解析与格式化全部在 CLI 内完成，App 进程不接触整份文档。
+     */
+    @Serializable
+    data class ScopedResult(
+        val ok: Boolean = false,
+        @SerialName("package") val packageName: String = "",
+        val document: JsonObject,
+        /** 本次未能解析的指针（正常恒为空；非空说明 Rust 侧指针与文档形状脱节）。 */
+        val skipped: List<String> = emptyList(),
+    )
+
+    /** 单个 App 的云控片段；解析失败返回 null（失败原因进 logcat）。 */
+    fun scoped(packageName: String): ScopedResult? =
+        runCatching { exec<ScopedResult>("joyose-scoped", packageName) }.onFailure {
+            android.util.Log.e(TAG, "scoped($packageName) 失败", it)
+        }.getOrNull()
+
+    /**
      * 双库镜像写入 params 文档。CLI 内部已完成 force-stop、双侧回读校验；
      * version 保持不变（不 bump 策略）。
      */
-    fun writeConfig(config: String, jsonText: String): WriteResult {
+    fun writeConfig(config: String, jsonText: String): WriteResult =
+        withTempJsonFile(jsonText) { path ->
+            execOk("joyose-write", config, path, successMessage = "写入成功")
+        }
+
+    /**
+     * 作用域写回：CLI 按指针把片段补丁进当前库里的整份文档，只改本 App 名下的
+     * 片段；新增/改名/删除键由 CLI 直接报错（不静默丢弃），同样走双库镜像写。
+     */
+    fun writeScoped(packageName: String, jsonText: String): WriteResult =
+        withTempJsonFile(jsonText) { path ->
+            execOk("joyose-scoped-write", packageName, path, successMessage = "写入成功")
+        }
+
+    private inline fun withTempJsonFile(
+        jsonText: String,
+        block: (path: String) -> WriteResult,
+    ): WriteResult {
         if (jsonText.isBlank()) return WriteResult(false, "JSON 内容为空")
         val tmp = File(appContext.cacheDir, "joyose-write-${System.nanoTime()}.json")
         return try {
             tmp.writeText(jsonText)
-            execOk("joyose-write", config, tmp.absolutePath, successMessage = "写入成功")
+            block(tmp.absolutePath)
         } catch (e: Exception) {
             WriteResult(false, "写入失败: ${e.message ?: "无法创建临时文件"}")
         } finally {

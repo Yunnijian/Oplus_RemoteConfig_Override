@@ -50,7 +50,9 @@ pub struct FeatureHit {
     pub source: Source,
     /// Raw key as found in the cloud config (package, alias or token head).
     pub key: String,
-    /// Human-oriented location, e.g. `game_booster.ovrride_config[3]`.
+    /// RFC 6901 JSON Pointer into the booster_config params document, e.g.
+    /// `/game_booster/booster_config/ovrride_config/3`.  `joyose-scoped`
+    /// resolves it to extract and write back exactly this fragment.
     pub path: String,
     pub params: Vec<Param>,
     /// Baseline entries overridden by this hit's values, if any.
@@ -401,7 +403,7 @@ pub fn collect(
             label: "游戏主配置（锁帧/温度/场景/perflock）",
             source,
             key: key.to_owned(),
-            path: format!("game_booster.booster_config.ovrride_config[{i}]"),
+            path: format!("/game_booster/booster_config/ovrride_config/{i}"),
             params,
             overrides,
             gate: gate_of("booster_enable"),
@@ -412,20 +414,27 @@ pub fn collect(
     }
     features.extend(override_hits);
 
-    // ② novatek (Redmi discrete display): `_`-token strings.
-    for (field, category, label) in [
-        ("novatek_game_params", "novatek_main", "Novatek 独显游戏档"),
+    // ② novatek (Redmi discrete display): `_`-token strings.  The two arrays
+    // live in different containers, so each entry carries the container it is
+    // read from plus the pointer prefix it writes back to — the path can then
+    // never drift away from where the value actually is.
+    let extend = get(gb, "novatek_extend_config");
+    for (field, container, prefix, category, label) in [
+        (
+            "novatek_game_params",
+            gb,
+            "/game_booster",
+            "novatek_main",
+            "Novatek 独显游戏档",
+        ),
         (
             "novatek_non_playing_config",
+            extend,
+            "/game_booster/novatek_extend_config",
             "novatek_non_playing",
             "Novatek 非游玩档",
         ),
     ] {
-        let container: &Value = if field == "novatek_game_params" {
-            gb
-        } else {
-            get(gb, "novatek_extend_config")
-        };
         for (i, raw) in arr(container, field).iter().enumerate() {
             let Some(raw) = raw.as_str() else { continue };
             if token_matches(raw, '_', package) {
@@ -434,7 +443,7 @@ pub fn collect(
                     label,
                     source: Source::Direct,
                     key: package.to_owned(),
-                    path: format!("game_booster.{field}[{i}]"),
+                    path: format!("{prefix}/{field}/{i}"),
                     params: novatek_params(raw),
                     overrides: Vec::new(),
                     gate: None,
@@ -455,9 +464,7 @@ pub fn collect(
                 label: "Novatek GEX 帧率上限",
                 source: Source::Direct,
                 key: package.to_owned(),
-                path: format!(
-                    "game_booster.novatek_extend_config.novatek_gex_fps_limit[{i}]"
-                ),
+                path: format!("/game_booster/novatek_extend_config/novatek_gex_fps_limit/{i}"),
                 params: token_param(raw),
                 overrides: Vec::new(),
                 gate: None,
@@ -473,7 +480,7 @@ pub fn collect(
             label: "Novatek 黑名单",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "game_booster.novatek_black_app".into(),
+            path: "/game_booster/novatek_black_app".into(),
             params: vec![param("blacklisted", Value::Bool(true))],
             overrides: Vec::new(),
             gate: None,
@@ -518,7 +525,7 @@ pub fn collect(
                     .and_then(Value::as_str)
                     .unwrap_or(package)
                     .to_owned(),
-                path: format!("game_booster.{container_key}.{inner_key}[{i}]"),
+                path: format!("/game_booster/{container_key}/{inner_key}/{i}"),
                 params,
                 overrides: Vec::new(),
                 gate: nested_gate(container_key),
@@ -552,7 +559,7 @@ pub fn collect(
                 label: "FISR 插帧/超分策略",
                 source,
                 key: package.to_owned(),
-                path: format!("game_booster.fisr_config.enhance_config[{i}]"),
+                path: format!("/game_booster/fisr_config/enhance_config/{i}"),
                 params: vec![param(
                     "enhance_policy_config",
                     get(entry, "enhance_policy_config").clone(),
@@ -581,7 +588,7 @@ pub fn collect(
             label: "高通 GPU tuner 分档属性",
             source: Source::Direct,
             key: package.to_owned(),
-            path: format!("game_booster.self_gpu_tuner_config.{package}"),
+            path: format!("/game_booster/self_gpu_tuner_config/{package}"),
             params,
             overrides: Vec::new(),
             gate: gate_of("self_gpu_tuner_enable"),
@@ -622,7 +629,7 @@ pub fn collect(
                     label,
                     source: Source::Direct,
                     key: package.to_owned(),
-                    path: format!("game_booster.{field}[{i}]"),
+                    path: format!("/game_booster/{field}/{i}"),
                     params,
                     overrides: Vec::new(),
                     gate,
@@ -668,7 +675,7 @@ pub fn collect(
                 label,
                 source: Source::Direct,
                 key: package.to_owned(),
-                path: format!("game_booster.{field}"),
+                path: format!("/game_booster/{field}"),
                 params: vec![param("enabled", Value::Bool(true))],
                 overrides: Vec::new(),
                 gate,
@@ -686,7 +693,7 @@ pub fn collect(
             label: "单游戏低刷场景表",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "game_booster.low_display_refresh_rate_scenes_by_single_game"
+            path: "/game_booster/low_display_refresh_rate_scenes_by_single_game"
                 .into(),
             params: vec![param("scene_ids", scenes.clone())],
             overrides: Vec::new(),
@@ -705,9 +712,7 @@ pub fn collect(
                 label: "分辨率增强",
                 source: Source::Direct,
                 key: package.to_owned(),
-                path: format!(
-                    "game_booster.support_resolution_enhance_config[{i}]"
-                ),
+                path: format!("/game_booster/support_resolution_enhance_config/{i}"),
                 params: vec![param(
                     "isSupportHotSwap",
                     get(entry, "isSupportHotSwap").clone(),
@@ -732,7 +737,7 @@ pub fn collect(
             label: "游戏场景控制",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "game_booster.game_scenario_control_config".into(),
+            path: "/game_booster/game_scenario_control_config".into(),
             params,
             overrides: Vec::new(),
             gate: None,
@@ -804,6 +809,25 @@ impl AppView {
 
 type CliResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+/// Read a params document from a development file, or straight from the
+/// on-device Joyose DBs (`config` is the DB-side config name).  A file may be
+/// bare params or a stored `{config_name, …, params}` row wrapper.
+pub fn load_doc(path: Option<&String>, config: &str) -> CliResult<Value> {
+    match path {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("读取 {path} 失败: {e}"))?;
+            let value: Value =
+                serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?;
+            Ok(match value.get("params") {
+                Some(inner) if value.get("game_list").is_none() => inner.clone(),
+                _ => value,
+            })
+        }
+        None => Ok(super::store::read_params_any(config)?.1),
+    }
+}
+
 /// `joyose-app <pkg> [booster_params.json] [common_params.json]`
 ///
 /// Without file arguments the documents are read from the on-device Joyose
@@ -817,29 +841,12 @@ pub fn cmd_app_view(
     let Some(package) = package else {
         return Err("缺少包名".into());
     };
-    let params = match booster_path {
-        Some(path) => {
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| format!("读取 {path} 失败: {e}"))?;
-            serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?
-        }
-        None => super::store::read_params_any("booster_config")?.1,
-    };
+    let params = load_doc(booster_path, "booster_config")?;
+    // Membership info is optional: an unreadable common_config must not stop
+    // the feature page from rendering.
     let common = match common_path {
-        Some(path) => {
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| format!("读取 {path} 失败: {e}"))?;
-            let value: Value =
-                serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?;
-            Some(if value.get("game_list").is_some() {
-                value
-            } else {
-                value.get("params").cloned().unwrap_or(Value::Null)
-            })
-        }
-        None => super::store::read_params_any("common_config")
-            .ok()
-            .map(|(_, v)| v),
+        Some(path) => Some(load_doc(Some(path), "common_config")?),
+        None => load_doc(None, "common_config").ok(),
     };
 
     let view = collect(&params, package, common.as_ref())
@@ -852,12 +859,12 @@ pub fn cmd_app_view(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
 
     /// Minimal but shape-faithful doc covering every scan branch.
-    fn doc() -> Value {
+    pub(crate) fn doc() -> Value {
         json!({
             "header": {"version": "2099000101"},
             "game_booster": {
@@ -888,7 +895,8 @@ mod tests {
                     "com.a.sgamece_90#144#90,144,1#45#43_0#0_0#0"
                 ],
                 "novatek_extend_config": {
-                    "novatek_gex_fps_limit": ["com.a.sgame:60"]
+                    "novatek_gex_fps_limit": ["com.a.sgame:60"],
+                    "novatek_non_playing_config": ["com.a.sgame_49#144#48,144,1#45#43_49#144#48"]
                 },
                 "mivk_settings": {"enable": true, "app_params": [
                     {"app": "hkrpg", "app_cmdlines": ["com.miHoYo.hkrpg"],
@@ -1111,8 +1119,8 @@ mod tests {
                 .find(|e| e.package == pkg)
                 .map(|e| (e.features, e.group.as_deref()))
         };
-        // sgame: ovrride(组展开) + novatek + gex + fisr + highfps + scale + migt + soc + cgame_df + resolution_enhance
-        assert_eq!(find("com.a.sgame"), Some((10, Some("SGAME"))));
+        // sgame: ovrride(组展开) + novatek + non_playing + gex + fisr + highfps + scale + migt + soc + cgame_df + resolution_enhance
+        assert_eq!(find("com.a.sgame"), Some((11, Some("SGAME"))));
         // sgamece: ovrride(同组展开)+novatek = 2 —— 组条目对组内每个成员都生效
         assert_eq!(find("com.a.sgamece"), Some((2, Some("SGAME"))));
         assert_eq!(find("com.miHoYo.Yuanshen"), Some((1, Some("YUANSHEN"))));

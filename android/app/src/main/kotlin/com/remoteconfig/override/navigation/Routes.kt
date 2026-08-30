@@ -22,4 +22,12 @@ sealed interface Route : NavKey, Parcelable {
     /** HyperOS 通用配置（P2.0b 目标屏，暂未接入 entryProvider，后续阶段实现）。 */
     @Parcelize
     data object HyperOsCommonConfig : Route
+
+    /** HyperOS 高级 JSON 编辑：直接编辑指定配置（cloud_config 名）的 params 文档。 */
+    @Parcelize
+    data class HyperOsJsonEditor(val configName: String) : Route
+
+    /** HyperOS 作用域编辑：仅编辑指定 App 名下的云控片段（编辑器打开快、作用域隔离）。 */
+    @Parcelize
+    data class HyperOsScopedEditor(val packageName: String) : Route
 }
