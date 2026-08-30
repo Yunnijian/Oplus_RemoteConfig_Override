@@ -341,7 +341,16 @@ private fun ConfigEditorContent(
                         enter = fadeIn(animationSpec = tween(160)),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        Column(Modifier.fillMaxSize()) {
+                        // 根因修复（对齐测试项目窗口几何）：本应用是 edge-to-edge
+                        // （enableEdgeToEdge），windowSoftInputMode=adjustResize 不会物理
+                        // 缩放窗口，键盘以 insets 分发——编辑器视口延伸到键盘下面，而原生
+                        // scrollTo 钳制在文档底部，末行光标因此被键盘遮住。测试项目无此
+                        // 问题是因为它非 edge-to-edge，adjustResize 真缩放窗口、视口不含
+                        // 键盘区域。此处用 imePadding 复现同款几何：键盘弹出时容器物理
+                        // 缩短到键盘上沿，编辑器内建的 resizedForIme 分支（专为窗口缩放
+                        // 环境设计）自动接管光标定位；收起时容器还原、滚动位 clamp，无
+                        // 残留空白条。不可再用视图内加 padding 的方式（会双重补偿）。
+                        Column(Modifier.fillMaxSize().imePadding()) {
                             Row(
                                 Modifier.fillMaxWidth().background(statusBg).padding(horizontal = 12.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
