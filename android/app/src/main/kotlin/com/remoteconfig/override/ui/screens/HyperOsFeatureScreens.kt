@@ -52,7 +52,7 @@ private val THERMAL_TGAME = listOf(
     ThermalParam("dynamic_fps", "温控限帧曲线", CurveCodec.TEMP_FPS),
     ThermalParam("dynamicfps_by_battery_T", "低电量限帧（电量:限帧）", CurveCodec.FPS_SOC_FPS),
     ThermalParam("dynamic_targetfps", "目标帧率专属曲线", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_fan_targetfps", "散热背夹目标帧率", CurveCodec.FPS_TEMP_PARAM),
+    ThermalParam("dynamic_fan_targetfps", "散热风扇目标帧率", CurveCodec.FPS_TEMP_PARAM),
     ThermalParam("dynamic_targetfps_cpufreq", "温控 CPU 限频", CurveCodec.TEMP_FPS_FREQ),
     ThermalParam("PID_T", "温控限帧 PID 参数", CurveCodec.FPS_TEMP_PARAM),
 )
@@ -61,7 +61,7 @@ private val THERMAL_MGAME = listOf(
     ThermalParam("dynamic_fps_M", "温控限帧曲线（MGAME）", CurveCodec.TEMP_FPS),
     ThermalParam("dynamicfps_by_battery_M", "低电量限帧（MGAME）", CurveCodec.FPS_SOC_FPS),
     ThermalParam("dynamic_targetfps_M", "目标帧率专属曲线（MGAME）", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_fan_targetfps_M", "散热背夹目标帧率（MGAME）", CurveCodec.FPS_TEMP_PARAM),
+    ThermalParam("dynamic_fan_targetfps_M", "散热风扇目标帧率（MGAME）", CurveCodec.FPS_TEMP_PARAM),
     ThermalParam("dynamic_targetfps_cpufreq_M", "温控 CPU 限频（MGAME）", CurveCodec.TEMP_FPS_FREQ),
     ThermalParam("PID_M", "温控限帧 PID 参数（MGAME）", CurveCodec.FPS_TEMP_PARAM),
 )
