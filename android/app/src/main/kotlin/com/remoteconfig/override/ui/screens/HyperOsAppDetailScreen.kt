@@ -3,6 +3,7 @@ package com.remoteconfig.override.ui.screens
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.remoteconfig.override.data.JoyoseManager
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 /**
  * HyperOS 应用功能页 — 分发器（P2.1）。
@@ -32,14 +34,38 @@ fun HyperOsAppDetailScreen(packageName: String) {
     val navigator = LocalNavigator.current
     val viewModel: HyperOsViewModel = viewModel()
     val state by viewModel.detailState.collectAsStateWithLifecycle()
+    val edit by viewModel.scopedEditorState.collectAsStateWithLifecycle()
 
     LaunchedEffect(packageName) { viewModel.loadDetail(packageName) }
+
+    // 功能页参数编辑（P2.4）：与作用域编辑器共享同一份 ScopedEditorState ——
+    // 这里只把"当前片段文档 + 写状态 + 修改回调"打包下传，保存走 saveScopedEditor
+    // 的 CLI 补丁链路（joyose-scoped-write：双库镜像 + 回读校验）。
+    // 片段文档解析按 edited 文本缓存：避免每次重组重复解析整份片段文档。
+    val document = remember(edit.edited) {
+        edit.edited?.let { text ->
+            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
+        }
+    }
+    val editBundle = HyperOsDetailEdit(
+        document = document,
+        writing = edit.writing,
+        dirty = edit.base != null && edit.edited != edit.base,
+        error = edit.error,
+        parseScenes = viewModel::parseSceneInfo,
+        onSave = viewModel::saveScopedEditor,
+        onRevert = viewModel::revertScopedEditor,
+        onScalar = viewModel::updateParamScalar,
+        onSceneCmd = viewModel::updateSceneCmd,
+        onSceneFlag = viewModel::updateSceneFlag,
+    )
 
     when (LocalUiMode.current) {
         UiMode.Miuix -> HyperOsAppDetailMiuix(
             view = state.view,
             loading = state.loading,
             error = state.error,
+            edit = editBundle,
             onRetry = { viewModel.loadDetail(packageName) },
             onBack = navigator::pop,
         )
@@ -47,11 +73,34 @@ fun HyperOsAppDetailScreen(packageName: String) {
             view = state.view,
             loading = state.loading,
             error = state.error,
+            editError = edit.error,
             onRetry = { viewModel.loadDetail(packageName) },
             onBack = navigator::pop,
         )
     }
 }
+
+/**
+ * 功能页参数编辑包：片段文档（指针→片段）+ 写状态 + 修改回调。
+ *
+ * P2.4 范围：参数编辑 UI 仅 Miuix 皮肤实装；Material 皮肤只读展示，
+ * 仅消费 [error]（错误条，与 Miuix 皮肤失败表现一致）。[onRevert] 供
+ * 「放弃修改」确认后重置脏草稿（功能页与作用域编辑器两处入口共用）。
+ */
+data class HyperOsDetailEdit(
+    /** 编辑中的片段文档：键 = JSON Pointer，值 = 片段 JSON；null = 未就绪（只读）。 */
+    val document: JsonObject?,
+    val writing: Boolean,
+    /** edited 与 base 不一致 = 有未保存修改。 */
+    val dirty: Boolean,
+    val error: String?,
+    val parseScenes: (JsonObject) -> List<HyperOsViewModel.SceneInfo>,
+    val onSave: () -> Unit,
+    val onRevert: () -> Unit,
+    val onScalar: (pointer: String, name: String, value: JsonPrimitive) -> Unit,
+    val onSceneCmd: (pointer: String, sceneIndex: Int, containerKey: String, boosterIndex: Int, cmd: String) -> Unit,
+    val onSceneFlag: (pointer: String, sceneIndex: Int, flag: String, value: Boolean) -> Unit,
+)
 
 // ── 双皮肤共享的展示辅助（JsonElement 渲染 / 徽标文案）────────────────
 

@@ -116,6 +116,7 @@ fun HyperOsJsonEditorScreen(configName: String) {
         onTextChange = viewModel::updateEdited,
         onSave = viewModel::saveEditor,
         onRetry = { viewModel.loadEditor(configName) },
+        onRevert = { state.json?.let(viewModel::updateEdited) },
     )
 }
 
@@ -144,6 +145,7 @@ fun HyperOsScopedEditorScreen(packageName: String) {
         onTextChange = viewModel::updateScopedEdited,
         onSave = viewModel::saveScopedEditor,
         onRetry = { viewModel.loadScopedEditor(packageName) },
+        onRevert = viewModel::revertScopedEditor,
     )
 }
 
@@ -178,6 +180,7 @@ private fun HyperOsEditorScreen(
     onTextChange: (String) -> Unit,
     onSave: () -> Unit,
     onRetry: () -> Unit,
+    onRevert: () -> Unit,
 ) {
     val navigator = LocalNavigator.current
     val isMiuix = LocalUiMode.current == UiMode.Miuix
@@ -485,6 +488,8 @@ private fun HyperOsEditorScreen(
         DiscardChangesDialog(
             onConfirm = {
                 showDiscardDialog = false
+                // 丢弃脏草稿：edited 重置回 base，否则幂等守卫会让残留修改在下次进入时复活
+                onRevert()
                 navigator.pop()
             },
             onDismiss = { showDiscardDialog = false },

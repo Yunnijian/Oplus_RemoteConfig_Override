@@ -1,6 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,19 +47,29 @@ import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.window.WindowDialog
+import com.remoteconfig.override.ui.component.DiscardChangesDialog
+import com.remoteconfig.override.viewmodel.HyperOsViewModel
 
 /**
  * HyperOS 应用功能页 — Miuix 实现。
@@ -73,20 +84,39 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * MiuixIcons.Back（对齐 ConfigListMiuix / ConfigEditor 惯例）；
  * 自定义内容（非 BasicComponent）在 Card 内自带 padding（对齐 HomeMiuix RootStatusCard）。
  *
- * 「高级编辑」入口暂以 Toast 提示（P2 后续接编辑器）。
+ * 顶栏「高级编辑」跳转作用域编辑器（Route.HyperOsScopedEditor，仅本 App 片段）。
  */
 @Composable
 fun HyperOsAppDetailMiuix(
     view: JoyoseManager.AppView?,
     loading: Boolean,
     error: String?,
+    edit: HyperOsDetailEdit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     // 上滑大标题自动缩放（对齐 HyperOsAppListMiuix / KernelSU AppProfileMiuix）：
     // TopAppBar 拿 scrollBehavior，列表挂 nestedScrollConnection。
     val scrollBehavior = MiuixScrollBehavior()
+    // 未保存修改时返回（TopBar 返回键 + 系统返回手势同路）→ 确认弹窗
+    //（对齐编辑器页 DiscardChangesDialog + BackHandler 交互）
+    var showDiscard by remember { mutableStateOf(false) }
+    // 参数编辑弹窗目标（null = 关闭）
+    var editTarget by remember { mutableStateOf<EditTarget?>(null) }
+    BackHandler(enabled = edit.dirty) { showDiscard = true }
+    if (showDiscard) {
+        // 确认丢弃：先重置脏草稿再退栈（否则 loadScopedEditor 幂等守卫命中，残留修改复活）
+        DiscardChangesDialog(onConfirm = { showDiscard = false; edit.onRevert(); onBack() }, onDismiss = { showDiscard = false })
+    }
+    editTarget?.let { target ->
+        EditValueDialogMiuix(
+            title = target.title,
+            initial = target.initial,
+            isNumber = target.isNumber,
+            onCommit = { value -> editTarget = null; target.onCommit(value) },
+            onDismiss = { editTarget = null },
+        )
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
@@ -95,7 +125,9 @@ fun HyperOsAppDetailMiuix(
                 title = "应用功能",
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        if (edit.dirty) showDiscard = true else onBack()
+                    }) {
                         Icon(
                             imageVector = MiuixIcons.Back,
                             contentDescription = "返回",
@@ -105,6 +137,13 @@ fun HyperOsAppDetailMiuix(
                 },
                 actions = {
                     val navigator = LocalNavigator.current
+                    // 保存：片段文档有未保存修改时可用（走 joyose-scoped-write CLI 链路）
+                    TextButton(
+                        text = if (edit.writing) "保存中…" else "保存",
+                        onClick = edit.onSave,
+                        enabled = edit.dirty && !edit.writing,
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
                     IconButton(onClick = {
                         // 作用域编辑：仅编辑当前 App 名下的云控片段（秒开 + 作用域隔离）
                         view?.packageName?.let { pkg -> navigator.push(Route.HyperOsScopedEditor(pkg)) }
@@ -153,6 +192,11 @@ fun HyperOsAppDetailMiuix(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // 编辑链路错误条（保存失败/片段读取失败）：内容仍渲染（未就绪=只读），
+                    // 保存按钮保留可重试 —— 不做整页劫持
+                    edit.error?.let { errorText ->
+                        item(key = "edit_error") { EditErrorBannerMiuix(errorText) }
+                    }
                     item(key = "header") { HeaderCardMiuix(view) }
                     if (view.features.isEmpty()) {
                         item(key = "empty") {
@@ -167,7 +211,11 @@ fun HyperOsAppDetailMiuix(
                     } else {
                         // key 带 index 前缀：防个别数据下 path 重复导致 LazyColumn 崩溃
                         itemsIndexed(view.features, key = { index, feature -> "$index:${feature.path}" }) { _, feature ->
-                            FeatureCardMiuix(feature)
+                            // 片段 = 编辑文档里该功能对应的 JSON（编辑真值来源；未就绪为 null → 只读）
+                            val fragment = edit.document?.get(feature.path) as? JsonObject
+                            // 解析结果按片段实例缓存：避免每次重组重跑 parseSceneInfo
+                            val scenes = remember(fragment) { fragment?.let(edit.parseScenes) ?: emptyList() }
+                            FeatureCardMiuix(feature, fragment, scenes, edit) { editTarget = it }
                         }
                     }
                 }
@@ -250,7 +298,13 @@ private fun HeaderCardMiuix(view: JoyoseManager.AppView) {
  * gate.enabled == false 时整卡降透明度（内容仍可读，仅提示主开关未生效）。
  */
 @Composable
-private fun FeatureCardMiuix(feature: JoyoseManager.FeatureHit) {
+private fun FeatureCardMiuix(
+    feature: JoyoseManager.FeatureHit,
+    fragment: JsonObject?,
+    scenes: List<HyperOsViewModel.SceneInfo>,
+    edit: HyperOsDetailEdit,
+    onEditRequest: (EditTarget) -> Unit,
+) {
     val dimmed = feature.gate?.enabled == false
     Card(
         modifier = Modifier.fillMaxWidth().alpha(if (dimmed) 0.45f else 1f),
@@ -296,9 +350,41 @@ private fun FeatureCardMiuix(feature: JoyoseManager.FeatureHit) {
                     }
                 }
             }
-            // params 列表：name(mono) + value（原始量直接显示，对象/数组可折叠 mono JSON）
+            // params 列表：可编辑（片段就绪时）——bool 行内开关；数字/字符串点行弹窗；
+            // 片段未就绪或对象/数组保持只读渲染（对象/数组走 scene 卡或高级编辑）。
             feature.params.forEach { param ->
-                ParamRowMiuix(param.name, param.value)
+                // scene_ovrride[N].* 是 appview 展平的虚拟参数：片段就绪时已由下方
+                // 场景卡结构化呈现，跳过原始行避免双份渲染；片段未就绪时保留兜底展示
+                if (fragment != null && param.name.startsWith("scene_ovrride[")) return@forEach
+                val live = fragment?.get(param.name)
+                val livePrim = live as? JsonPrimitive
+                when {
+                    livePrim != null && livePrim.booleanOrNull != null ->
+                        ParamSwitchRowMiuix(param.name, livePrim.boolean) { v ->
+                            edit.onScalar(feature.path, param.name, JsonPrimitive(v))
+                        }
+                    livePrim != null && edit.document != null -> {
+                        val isNumber = livePrim.isString.not()
+                        ParamEditableRowMiuix(
+                            name = param.name,
+                            value = livePrim.content,
+                            isNumber = isNumber,
+                            onEditRequest = onEditRequest,
+                        ) { text ->
+                            val prim = when {
+                                isNumber && text.toLongOrNull() != null -> JsonPrimitive(text.toLong())
+                                isNumber && text.toDoubleOrNull() != null -> JsonPrimitive(text.toDouble())
+                                else -> JsonPrimitive(text)
+                            }
+                            edit.onScalar(feature.path, param.name, prim)
+                        }
+                    }
+                    else -> ParamRowMiuix(param.name, live ?: param.value)
+                }
+            }
+            // 场景卡：scene_ovrride 结构化呈现（场景 → booster 容器 → cmd）
+            scenes.forEach { scene ->
+                SceneCardMiuix(feature.path, scene, edit, onEditRequest = onEditRequest)
             }
             // overrides 尾注：每条一行小字
             if (feature.overrides.isNotEmpty()) {
@@ -395,5 +481,259 @@ private fun BadgeMiuix(text: String, container: Color, content: Color) {
             maxLines = 1,
             color = content,
         )
+    }
+}
+
+// ── 功能页参数编辑（P2.4）────────────────────────────────
+
+/**
+ * 编辑链路错误条（对齐 CommonConfigMiuix 的失败提示条）：仅失败呈现
+ * （保存失败 / 片段读取失败），页面内容与保存按钮保持可用，不做整页劫持。
+ */
+@Composable
+private fun EditErrorBannerMiuix(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.defaultColors(color = colorScheme.errorContainer),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ErrorOutline,
+                contentDescription = "错误",
+                tint = colorScheme.onErrorContainer,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = text,
+                fontSize = 14.sp,
+                color = colorScheme.onErrorContainer,
+            )
+        }
+    }
+}
+
+/** 一次编辑弹窗的目标：标题 / 初始文本 / 是否数字 / 确认回调。 */
+internal data class EditTarget(
+    val title: String,
+    val initial: String,
+    val isNumber: Boolean,
+    val onCommit: (String) -> Unit,
+)
+
+/** bool 参数行：行内即时开关（编辑写进共享片段文档，保存统一落库）。 */
+@Composable
+private fun ParamSwitchRowMiuix(name: String, value: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = name,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+            Text(
+                text = if (value) "true" else "false",
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colorScheme.onSurface,
+            )
+        }
+        Switch(checked = value, onCheckedChange = onChange)
+    }
+}
+
+/** 数字/字符串参数行：点击弹编辑框，确认后写回（保持原 JSON 类型）。 */
+@Composable
+private fun ParamEditableRowMiuix(
+    name: String,
+    value: String,
+    isNumber: Boolean,
+    onEditRequest: (EditTarget) -> Unit,
+    onCommit: (String) -> Unit,
+) {
+    val expanded = value.length > 40
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onEditRequest(EditTarget(name, value, isNumber, onCommit)) }
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = name,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.weight(1f),
+            )
+            Text(text = "编辑", fontSize = 11.sp, color = colorScheme.primary)
+        }
+        Text(
+            text = value,
+            fontSize = 13.sp,
+            fontFamily = FontFamily.Monospace,
+            color = colorScheme.onSurface,
+            maxLines = if (expanded) 2 else Int.MAX_VALUE,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 场景卡：场景名（中文+原名+id）→ 标志开关 → booster 容器（cmd 可编辑）→ 复用映射。 */
+@Composable
+private fun SceneCardMiuix(
+    pointer: String,
+    scene: HyperOsViewModel.SceneInfo,
+    edit: HyperOsDetailEdit,
+    onEditRequest: (EditTarget) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = scene.sceneNameLabel,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                BadgeMiuix(
+                    text = "scene_id ${scene.sceneId}",
+                    container = colorScheme.surfaceVariant,
+                    content = colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            scene.flags.forEach { (flag, value) ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = flag,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = value, onCheckedChange = { v ->
+                        edit.onSceneFlag(pointer, scene.index, flag, v)
+                    })
+                }
+            }
+            scene.containers.forEach { container ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "${container.key} · ${container.label}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorScheme.primary,
+                    )
+                    container.entries.forEach { entry ->
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colorScheme.surfaceVariant)
+                                .clickable {
+                                    onEditRequest(
+                                        EditTarget(
+                                            title = "${scene.sceneNameLabel} · ${container.key} [${entry.index}] cmd",
+                                            initial = entry.cmd,
+                                            isNumber = false,
+                                        ) { text ->
+                                            edit.onSceneCmd(pointer, scene.index, container.key, entry.index, text)
+                                        },
+                                    )
+                                }
+                                .padding(8.dp),
+                        ) {
+                            if (entry.permission.isNotBlank()) {
+                                Text(
+                                    text = "permission: ${entry.permission}",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            Text(
+                                text = entry.cmd,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = colorScheme.onSurface,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+            if (scene.reuseCmdConfig.isNotEmpty()) {
+                Text(
+                    text = "复用映射: ${scene.reuseCmdConfig.joinToString(", ")}",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+}
+
+/** 参数/命令编辑弹窗（Miuix WindowDialog + TextField；数字校验后按原类型写回）。 */
+@Composable
+private fun EditValueDialogMiuix(
+    title: String,
+    initial: String,
+    isNumber: Boolean,
+    onCommit: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(title) { mutableStateOf(initial) }
+    WindowDialog(
+        show = true,
+        title = title,
+        onDismissRequest = onDismiss,
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+            )
+            if (isNumber && text.toLongOrNull() == null && text.toDoubleOrNull() == null) {
+                Text(
+                    text = "请输入有效数字",
+                    fontSize = 11.sp,
+                    color = colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Row(
+                Modifier.align(Alignment.End).padding(top = 16.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(text = "取消", onClick = onDismiss)
+                Spacer(Modifier.width(12.dp))
+                TextButton(
+                    text = "确定",
+                    onClick = { onCommit(text) },
+                    enabled = !isNumber || text.toLongOrNull() != null || text.toDoubleOrNull() != null,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+        }
     }
 }

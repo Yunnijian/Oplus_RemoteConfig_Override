@@ -1,6 +1,5 @@
 package com.remoteconfig.override.ui.screens
 
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -71,7 +70,9 @@ import kotlinx.serialization.json.JsonElement
  * 卡片用 M3 填充 Card（TonalCard 语义：tonal 容器色 + 无阴影）；
  * 徽标用 Surface + labelSmall（对齐项目「TonalCard 等价 Surface」的既有约定）。
  *
- * 「高级编辑」入口暂以 Toast 提示（P2 后续接编辑器）。
+ * 顶栏「高级编辑」跳转作用域编辑器（Route.HyperOsScopedEditor，仅本 App 片段）。
+ * 本皮肤只读展示（参数编辑 UI 为 P2.4 Miuix 范围），编辑链路失败经
+ * [editError] 以错误条呈现（与 Miuix 皮肤失败表现一致）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,10 +80,10 @@ fun HyperOsAppDetailMaterial(
     view: JoyoseManager.AppView?,
     loading: Boolean,
     error: String?,
+    editError: String?,
     onRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     // 上滑大标题自动缩放（对齐 HyperOsAppListMaterial）：LargeTopAppBar +
     // exitUntilCollapsedScrollBehavior，列表挂 nestedScrollConnection。
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -145,6 +146,10 @@ fun HyperOsAppDetailMaterial(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    // 编辑链路错误条（片段读取/保存失败）：内容仍只读渲染，不整页劫持
+                    editError?.let { errorText ->
+                        item(key = "edit_error") { EditErrorBannerMaterial(errorText) }
+                    }
                     item(key = "header") { HeaderCardMaterial(view) }
                     if (view.features.isEmpty()) {
                         item(key = "empty") {
@@ -164,6 +169,37 @@ fun HyperOsAppDetailMaterial(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 编辑链路错误条：仅失败呈现（片段读取/保存失败），内容保持只读渲染
+ * （对齐 Miuix 侧 EditErrorBannerMiuix 的失败表现）。
+ */
+@Composable
+private fun EditErrorBannerMaterial(text: String) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = "错误",
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
         }
     }
 }

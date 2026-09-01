@@ -3,6 +3,7 @@ package com.remoteconfig.override.viewmodel
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.JoyoseManager
@@ -15,7 +16,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
 
 /**
  * HyperOS 云控 ViewModel —— 应用列表 / 应用功能页 / 通用配置（布尔开关）三块状态。
@@ -247,6 +254,8 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
     val detailState = _detailState.asStateFlow()
 
     fun loadDetail(packageName: String) {
+        // 片段文档与作用域编辑器共享（幂等）：参数编辑与 JSON 直编读写同一份状态
+        loadScopedEditor(packageName)
         viewModelScope.launch {
             _detailState.value = DetailState(loading = true)
             val state = withContext(Dispatchers.IO) {
@@ -258,6 +267,174 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             _detailState.value = state
+        }
+    }
+
+    // ── 功能页参数编辑（片段级）──────────────────────────────
+    // 编辑 = 修改共享 ScopedEditorState.edited 里对应片段的 JSON（kotlinx API，
+    // 只动片段内部，不手写全文档指针树）；保存复用 saveScopedEditor() 的 CLI
+    // 补丁链路（joyose-scoped-write：双库镜像 + 回读校验 + 增/删/改名键报错）。
+
+    /** 场景 booster 容器（booster / end / base_booster / booster#120 …）。 */
+    data class SceneContainer(val key: String, val label: String, val entries: List<BoosterEntry>)
+    data class BoosterEntry(val index: Int, val permission: String, val cmd: String)
+
+    /** scene_ovrride 单个场景对象的解析结果（渲染用；编辑直接写 JSON）。 */
+    data class SceneInfo(
+        val index: Int,
+        val sceneId: Long,
+        val sceneName: String,
+        val sceneNameLabel: String,
+        val flags: List<Pair<String, Boolean>>,
+        val containers: List<SceneContainer>,
+        val reuseCmdConfig: List<String>,
+    )
+
+    /** 对指定片段做一次内存修改；返回 false = 状态未就绪或片段缺失（记日志留痕，UI 无感跳过）。 */
+    private fun mutateScopedFragment(pointer: String, mutate: (JsonObject) -> JsonObject): Boolean {
+        val st = _scopedEditorState.value
+        val edited = st.edited
+        if (edited == null) {
+            Log.w(TAG, "scoped edit skipped: edited text not ready")
+            return false
+        }
+        val doc = runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
+        if (doc == null) {
+            Log.w(TAG, "scoped edit skipped: edited text is not a valid JSON object")
+            return false
+        }
+        val frag = doc[pointer] as? JsonObject
+        if (frag == null) {
+            // 指针对不上 = Rust 侧指针与文档形状脱节（契约漂移），必须留痕排查
+            Log.w(TAG, "scoped edit skipped: pointer $pointer missing or not an object")
+            return false
+        }
+        val newFrag = mutate(frag)
+        if (newFrag == frag) return false
+        val newDoc = JsonObject(doc + (pointer to newFrag))
+        _scopedEditorState.update {
+            it.copy(edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc), error = null)
+        }
+        return true
+    }
+
+    /** 片段级标量参数编辑（bool / 数字 / 字符串）。 */
+    fun updateParamScalar(pointer: String, paramName: String, value: JsonPrimitive) {
+        mutateScopedFragment(pointer) { frag ->
+            if (frag[paramName] is JsonPrimitive) JsonObject(frag + (paramName to value)) else frag
+        }
+    }
+
+    /** 场景布尔标志编辑（change_release_perflock_inner / scene_id_reuse / change_end）。 */
+    fun updateSceneFlag(pointer: String, sceneIndex: Int, flagName: String, value: Boolean) {
+        mutateScopedFragment(pointer) { frag ->
+            val scenes = frag["scene_ovrride"] as? JsonArray ?: return@mutateScopedFragment frag
+            val updated = scenes.mapIndexed { i, e ->
+                val scene = e as? JsonObject
+                if (i == sceneIndex && scene != null && scene[flagName] is JsonPrimitive) {
+                    JsonObject(scene + (flagName to JsonPrimitive(value)))
+                } else e
+            }
+            JsonObject(frag + ("scene_ovrride" to JsonArray(updated)))
+        }
+    }
+
+    /** 场景 booster 容器内单条 cmd 编辑。 */
+    fun updateSceneCmd(pointer: String, sceneIndex: Int, containerKey: String, boosterIndex: Int, cmd: String) {
+        mutateScopedFragment(pointer) { frag ->
+            val scenes = frag["scene_ovrride"] as? JsonArray ?: return@mutateScopedFragment frag
+            val updated = scenes.mapIndexed { i, e ->
+                val scene = e as? JsonObject ?: return@mapIndexed e
+                if (i != sceneIndex) return@mapIndexed e
+                val container = scene[containerKey] as? JsonArray ?: return@mapIndexed e
+                val newContainer = container.mapIndexed { bi, be ->
+                    val entry = be as? JsonObject ?: return@mapIndexed be
+                    if (bi == boosterIndex && entry["cmd"] is JsonPrimitive) {
+                        JsonObject(entry + ("cmd" to JsonPrimitive(cmd)))
+                    } else be
+                }
+                JsonObject(scene + (containerKey to JsonArray(newContainer)))
+            }
+            JsonObject(frag + ("scene_ovrride" to JsonArray(updated)))
+        }
+    }
+
+    /** scene_ovrride 数组解析为 UI 渲染模型（不认识的容器键一律跳过，宁缺勿错）。 */
+    fun parseSceneInfo(fragment: JsonObject): List<SceneInfo> {
+        val scenes = fragment["scene_ovrride"] as? JsonArray ?: return emptyList()
+        val metaKeys = setOf(
+            "scene_id", "scene_name", "scene_id_list", "scene_id_reuse",
+            "change_end", "change_release_perflock_inner", "reuse_cmd_config",
+        )
+        return scenes.mapIndexedNotNull { idx, e ->
+            val scene = e as? JsonObject ?: return@mapIndexedNotNull null
+            val containers = scene.mapNotNull { (key, v) ->
+                if (key in metaKeys) return@mapNotNull null
+                val list = v as? JsonArray ?: return@mapNotNull null
+                val entries = list.mapIndexedNotNull { bi, be ->
+                    val entry = be as? JsonObject ?: return@mapIndexedNotNull null
+                    val cmd = (entry["cmd"] as? JsonPrimitive)?.content ?: return@mapIndexedNotNull null
+                    val permission = (entry["permission"] as? JsonPrimitive)?.content ?: ""
+                    if (entry.keys.any { it != "cmd" && it != "permission" }) return@mapIndexedNotNull null
+                    BoosterEntry(bi, permission, cmd)
+                }
+                if (entries.size != list.size || entries.isEmpty()) return@mapNotNull null
+                SceneContainer(key, sceneContainerLabel(key), entries)
+            }
+            val id = (scene["scene_id"] as? JsonPrimitive)?.content?.toLongOrNull() ?: -1L
+            val name = (scene["scene_name"] as? JsonPrimitive)?.content ?: ""
+            SceneInfo(
+                index = idx,
+                sceneId = id,
+                sceneName = name,
+                sceneNameLabel = sceneNameLabel(id, name),
+                flags = listOf("change_release_perflock_inner", "scene_id_reuse", "change_end")
+                    .mapNotNull { k -> (scene[k] as? JsonPrimitive)?.takeIf { it.booleanOrNull != null }?.boolean?.let { k to it } },
+                containers = containers,
+                reuseCmdConfig = (scene["reuse_cmd_config"] as? JsonArray)
+                    ?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList(),
+            )
+        }
+    }
+
+    companion object {
+        private const val TAG = "HyperOsViewModel"
+        private const val BOOSTER = JoyoseManager.CONFIG_BOOSTER
+
+        /** 图标缓存容量上限（超过整体清空，下一轮 refresh 只重建当前列表） */
+        private const val MAX_CACHED_ICONS = 500
+
+        /** kotlinx 默认实例即严格模式；作用域/整文档写回前都用它把关。 */
+        val strictJson = Json
+
+        /** 编辑器展示与载入统一 2 空格缩进（对齐应用功能页的 PrettyJson）。 */
+        val prettyJson = Json { prettyPrint = true }
+
+        /** 已观测的 scene_id 语义（booster_config 云控实测）；未知 id 回退原名。 */
+        private val SCENE_NAMES = mapOf(
+            10004L to "冷启动", 10001L to "前台", 1004L to "帧率切换",
+            3L to "登录", 5L to "加载", 4L to "大厅", 10000L to "默认",
+        )
+
+        private fun sceneNameLabel(id: Long, name: String): String =
+            SCENE_NAMES[id]?.let { "$it $name" } ?: name
+
+        /** 容器键中文说明：booster=场景提频, end=结束恢复, base_booster=复用基准, booster#N=帧率档位。 */
+        private fun sceneContainerLabel(key: String): String = when {
+            key == "booster" -> "场景提频"
+            key == "end" -> "场景结束恢复"
+            key == "base_booster" -> "复用基准"
+            key == "booster_config" -> "提频命令"
+            key.startsWith("booster#") -> {
+                val parts = key.removePrefix("booster#").split('#')
+                val fps = parts.firstOrNull()?.toIntOrNull()
+                val mods = parts.drop(1).joinToString("+")
+                buildString {
+                    if (fps != null) append("${fps}帧档位")
+                    if (mods.isNotEmpty()) append(if (fps != null) " · $mods" else parts.joinToString("+"))
+                }
+            }
+            else -> key
         }
     }
 
@@ -364,6 +541,15 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateScopedEdited(text: String) {
         _scopedEditorState.update { it.copy(edited = text, error = null) }
+    }
+
+    /** 放弃修改：edited 重置回 base（功能页与作用域编辑器的丢弃确认共用）。
+     *  不重置的话 loadScopedEditor 的幂等守卫会直接命中，脏草稿在下次进入时复活。
+     *  写入进行中不动 —— 写完成后 base/edited 自然对齐，避免与在途保存竞争。 */
+    fun revertScopedEditor() {
+        val st = _scopedEditorState.value
+        if (st.writing || st.base == null || st.edited == st.base) return
+        _scopedEditorState.update { it.copy(edited = st.base, error = null) }
     }
 
     /** 保存作用域编辑：CLI 按指针把片段补丁进当前库里的整份文档后双库镜像写。 */
@@ -514,19 +700,6 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
             value = (value as? kotlinx.serialization.json.JsonPrimitive)?.content == "true",
             path = path,
         )
-    }
-
-    companion object {
-        private const val BOOSTER = JoyoseManager.CONFIG_BOOSTER
-
-        /** 图标缓存容量上限（超过整体清空，下一轮 refresh 只重建当前列表） */
-        private const val MAX_CACHED_ICONS = 500
-
-        /** kotlinx 默认实例即严格模式；作用域/整文档写回前都用它把关。 */
-        val strictJson = Json
-
-        /** 编辑器展示与载入统一 2 空格缩进（对齐应用功能页的 PrettyJson）。 */
-        val prettyJson = Json { prettyPrint = true }
     }
 }
 
