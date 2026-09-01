@@ -131,8 +131,9 @@ fun HyperOsAppDetailMiuix(
                 else -> LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    contentPadding = PaddingValues(16.dp),
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .padding(horizontal = 12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // 编辑链路错误条（片段读取/保存失败）：入口仍可用，不整页劫持
@@ -141,15 +142,12 @@ fun HyperOsAppDetailMiuix(
                     }
                     item(key = "header") { HeaderCardMiuix(view, header) }
                     item(key = "entries") {
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                                entries.forEachIndexed { index, entry ->
+                        // 基线（ConfigListMiuix）：分组卡内 BasicComponent 原生 onClick 无缝堆叠，无手拼 divider
+                        HyperOsSectionCard(
+                            rows = entries.map { entry ->
+                                @Composable {
                                     BasicComponent(
-                                        modifier = Modifier.combinedClickable(
-                                            interactionSource = null,
-                                            indication = ripple(),
-                                            onClick = { onOpenFeature(entry) },
-                                        ),
+                                        onClick = { onOpenFeature(entry) },
                                         title = entry.title,
                                         summary = entry.summary,
                                         startAction = {
@@ -168,12 +166,9 @@ fun HyperOsAppDetailMiuix(
                                             )
                                         },
                                     )
-                                    if (index != entries.size - 1) {
-                                        HorizontalDivider(modifier = Modifier.padding(start = 64.dp, end = 16.dp))
-                                    }
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
                 }
             }

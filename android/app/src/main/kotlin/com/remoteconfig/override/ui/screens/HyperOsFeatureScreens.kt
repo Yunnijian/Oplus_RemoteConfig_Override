@@ -127,50 +127,52 @@ fun HyperOsThermalFpsScreen(pkg: String) {
             item(key = "empty") { HyperOsEmptyHint("该应用无 ovrride 温控条目") }
             return@HyperOsFeatureScaffold
         }
-        // 温控限帧总开关：关闭 = 曲线从配置删除（编辑灰置），开启 = 恢复
-        item(key = "thermal_switch") {
-            HyperOsSwitchRow(
-                title = "温控限帧",
-                checked = thermal.enabled,
-                enabled = !scoped.writing,
-            ) { v -> viewModel.setThermalEnabled(pkg, v) }
-        }
 
-        fun LazyListScope.renderParams(params: List<ThermalParam>) {
-            params.forEach { p ->
-                val current = fragment[p.key] ?: return@forEach
-                val text = (current as? JsonPrimitive)?.content ?: return@forEach
+        // 参数行收集器：把一组 ThermalParam 转成分组卡的行列表（无值则跳过）
+        fun paramRows(params: List<ThermalParam>): List<@Composable () -> Unit> =
+            params.mapNotNull { p ->
+                val current = fragment[p.key] ?: return@mapNotNull null
+                val text = (current as? JsonPrimitive)?.content ?: return@mapNotNull null
                 // 温控曲线（dynamic_*）受总开关控制：关闭时灰置不可编辑（PID/阈值等监控项不受控）
                 val editable = !p.key.startsWith("dynamic") || thermal.enabled
-                item(key = p.key) {
+                val fmt = p.format
+                val isNum = !((current as? JsonPrimitive)?.isString ?: false)
+                @Composable {
                     HyperOsValueRow(title = p.label, value = text, enabled = editable) {
-                        val fmt = p.format
                         if (fmt != null) {
                             curveTarget = CurveTarget(p.key, p.label, fmt)
                         } else {
-                            scalarTarget = EditTarget(
-                                title = p.label,
-                                initial = text,
-                                isNumber = !((current as? JsonPrimitive)?.isString ?: false),
-                            ) { v ->
+                            scalarTarget = EditTarget(p.label, text, isNumber = isNum) { v ->
                                 viewModel.updateFragmentValue(pointer, p.key, current.sameTypePrimitive(v))
                             }
                         }
                     }
                 }
             }
+
+        // 温控限帧总开关：关闭 = 曲线从配置删除（编辑灰置），开启 = 恢复
+        item(key = "thermal_switch") {
+            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                HyperOsSwitchRow(
+                    title = "温控限帧",
+                    checked = thermal.enabled,
+                    enabled = !scoped.writing,
+                ) { v -> viewModel.setThermalEnabled(pkg, v) }
+            })
         }
 
         // v2.2：charge_optimize_enable 是全局开关，只在全局通用配置页展示/编辑
-        renderParams(THERMAL_COMMON)
-
-        if (THERMAL_TGAME.any { fragment.containsKey(it.key) }) {
-            item(key = "sec_t") { HyperOsSectionLabel("TGAME") }
-            renderParams(THERMAL_TGAME)
+        val commonRows = paramRows(THERMAL_COMMON)
+        if (commonRows.isNotEmpty()) {
+            item(key = "common") { HyperOsSectionCard(rows = commonRows) }
         }
-        if (THERMAL_MGAME.any { fragment.containsKey(it.key) }) {
-            item(key = "sec_m") { HyperOsSectionLabel("MGAME") }
-            renderParams(THERMAL_MGAME)
+        val tgameRows = paramRows(THERMAL_TGAME)
+        if (tgameRows.isNotEmpty()) {
+            item(key = "tgame") { HyperOsSectionCard(title = "TGAME", rows = tgameRows) }
+        }
+        val mgameRows = paramRows(THERMAL_MGAME)
+        if (mgameRows.isNotEmpty()) {
+            item(key = "mgame") { HyperOsSectionCard(title = "MGAME", rows = mgameRows) }
         }
         // 说明：_M 档与基础档分节（方案「温控与帧率」）；songyuan 云控无
         // ovrride_config#90/#120 档（appview 亦不索引），故无档位切换 UI。
@@ -232,152 +234,148 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
             return@HyperOsFeatureScaffold
         }
 
-        // ── 本应用参数（ovrride 片段内，per-app）：分节标题仅当确有参数时显示 ──
-        val hasPerAppParams = PERF_PER_APP_KEYS.any { fragment.containsKey(it) }
-        if (hasPerAppParams) {
-            item(key = "sec_scalar") { HyperOsSectionLabel("本应用参数") }
-        }
-        (fragment["dcs_enable"] as? JsonPrimitive)?.let { sw ->
-            if (sw.booleanOrNull != null) {
-                item(key = "dcs_enable") {
-                    HyperOsSwitchRow(
-                        title = "DCS 动态 CPU 分级",
-                        summary = "dcs_enable（本应用条目内）",
-                        checked = sw.boolean,
-                        enabled = !scoped.writing,
-                    ) { v -> viewModel.updateFragmentValue(pointer, "dcs_enable", JsonPrimitive(v)) }
-                }
-            }
-        }
-        (fragment["group_fight_thresh"] as? JsonPrimitive)?.let { thresh ->
-            item(key = "group_fight_thresh") {
-                HyperOsValueRow(title = "团战场景识别阈值（ms）", value = thresh.content) {
-                    intTarget = EditTarget(
-                        title = "团战场景识别阈值（ms）",
-                        initial = thresh.content,
-                        isNumber = !thresh.isString,
-                    ) { v -> viewModel.updateFragmentValue(pointer, "group_fight_thresh", thresh.sameTypePrimitive(v)) }
-                }
-            }
-        }
-        // 场景生效范围
-        (fragment["disable_scenes"] as? JsonPrimitive)?.let { v ->
-            item(key = "disable_scenes") {
-                HyperOsValueRow(title = "禁用场景（逗号 scene_id）", value = v.content) {
-                    textTarget = EditTarget("禁用场景", v.content, isNumber = false) { nv ->
-                        viewModel.updateFragmentValue(pointer, "disable_scenes", v.sameTypePrimitive(nv))
+        // ── 本应用参数（ovrride 片段内，per-app）：合并进一张分组卡 ──
+        val perAppRows = buildList<@Composable () -> Unit> {
+            (fragment["dcs_enable"] as? JsonPrimitive)?.let { sw ->
+                if (sw.booleanOrNull != null) {
+                    add {
+                        HyperOsSwitchRow(
+                            title = "DCS 动态 CPU 分级",
+                            summary = "dcs_enable（本应用条目内）",
+                            checked = sw.boolean,
+                            enabled = !scoped.writing,
+                        ) { v -> viewModel.updateFragmentValue(pointer, "dcs_enable", JsonPrimitive(v)) }
                     }
                 }
             }
-        }
-        (fragment["need_game_sdk"] as? JsonPrimitive)?.let { v ->
-            item(key = "need_game_sdk") {
-                if (v.booleanOrNull != null) {
-                    HyperOsSwitchRow(
-                        title = "需要游戏 SDK（need_game_sdk）",
-                        summary = "影响 booster 应用判定",
-                        checked = v.boolean,
-                        enabled = !scoped.writing,
-                    ) { b -> viewModel.updateFragmentValue(pointer, "need_game_sdk", JsonPrimitive(b)) }
-                } else {
-                    HyperOsValueRow(title = "need_game_sdk", value = v.content) {}
+            (fragment["group_fight_thresh"] as? JsonPrimitive)?.let { thresh ->
+                add {
+                    HyperOsValueRow(title = "团战场景识别阈值（ms）", value = thresh.content) {
+                        intTarget = EditTarget(
+                            title = "团战场景识别阈值（ms）",
+                            initial = thresh.content,
+                            isNumber = !thresh.isString,
+                        ) { v -> viewModel.updateFragmentValue(pointer, "group_fight_thresh", thresh.sameTypePrimitive(v)) }
+                    }
+                }
+            }
+            (fragment["disable_scenes"] as? JsonPrimitive)?.let { v ->
+                add {
+                    HyperOsValueRow(title = "禁用场景（逗号 scene_id）", value = v.content) {
+                        textTarget = EditTarget("禁用场景", v.content, isNumber = false) { nv ->
+                            viewModel.updateFragmentValue(pointer, "disable_scenes", v.sameTypePrimitive(nv))
+                        }
+                    }
+                }
+            }
+            (fragment["need_game_sdk"] as? JsonPrimitive)?.let { v ->
+                add {
+                    if (v.booleanOrNull != null) {
+                        HyperOsSwitchRow(
+                            title = "需要游戏 SDK（need_game_sdk）",
+                            summary = "影响 booster 应用判定",
+                            checked = v.boolean,
+                            enabled = !scoped.writing,
+                        ) { b -> viewModel.updateFragmentValue(pointer, "need_game_sdk", JsonPrimitive(b)) }
+                    } else {
+                        HyperOsValueRow(title = "need_game_sdk", value = v.content) {}
+                    }
+                }
+            }
+            fragment["fstb_cmds"]?.let { fstb ->
+                add {
+                    HyperOsActionRow(
+                        title = "首启加速命令（fstb_cmds）",
+                        summary = "共 ${((fstb as? JsonArray)?.size ?: 0)} 条 · 只读",
+                    )
+                }
+            }
+            if (fragment.containsKey("dcs_config")) {
+                add {
+                    HyperOsActionRow(
+                        title = "DCS 命令表（dcs_config）",
+                        summary = "结构复杂，请经高级编辑（JSON）修改",
+                    )
                 }
             }
         }
-        fragment["fstb_cmds"]?.let { fstb ->
-            item(key = "fstb") {
-                HyperOsActionRow(
-                    title = "首启加速命令（fstb_cmds）",
-                    summary = "共 ${((fstb as? JsonArray)?.size ?: 0)} 条 · 只读",
-                )
-            }
-        }
-        if (fragment.containsKey("dcs_config")) {
-            item(key = "dcs_hint") {
-                HyperOsActionRow(
-                    title = "DCS 命令表（dcs_config）",
-                    summary = "结构复杂，请经高级编辑（JSON）修改",
-                )
-            }
+        if (perAppRows.isNotEmpty()) {
+            item(key = "per_app") { HyperOsSectionCard(title = "本应用参数", rows = perAppRows) }
         }
 
-        // ── 场景管理（scene_ovrride；v2.2 由独立场景命令页并入）：仅当有场景时显示 ──
-        if (scenes.isNotEmpty()) {
-            item(key = "sec_scene") { HyperOsSectionLabel("场景管理（scene_ovrride）") }
-            scenes.forEach { scene ->
+        // ── 场景管理（scene_ovrride；v2.2 由独立场景命令页并入）──
+        scenes.forEach { scene ->
             item(key = "scene_${scene.index}") {
-                HyperOsSectionCard(title = scene.sceneNameLabel) {
-                    // 结构布尔（已有键编辑）
+                val sceneRows = buildList<@Composable () -> Unit> {
                     scene.flags.forEach { (flag, value) ->
-                        HyperOsSwitchRow(
-                            title = flag,
-                            summary = "场景结构布尔",
-                            checked = value,
-                            enabled = !scoped.writing,
-                        ) { v -> viewModel.updateSceneValue(pointer, scene.index, flag, JsonPrimitive(v)) }
+                        add {
+                            HyperOsSwitchRow(
+                                title = flag,
+                                summary = "场景结构布尔",
+                                checked = value,
+                                enabled = !scoped.writing,
+                            ) { v -> viewModel.updateSceneValue(pointer, scene.index, flag, JsonPrimitive(v)) }
+                        }
                     }
-                    // 未进 SceneInfo.flags 的结构字段（timeout / default_need 等）
                     val rawScene = sceneArray.getOrNull(scene.index) as? JsonObject
                     rawScene?.forEach { (k, v) ->
                         if (k == "timeout" && v is JsonPrimitive) {
-                            HyperOsValueRow(title = "timeout（定时释放秒数）", value = v.content) {
-                                intTarget = EditTarget("timeout", v.content, isNumber = true) { nv ->
-                                    nv.toLongOrNull()?.let { n ->
-                                        viewModel.updateSceneValue(pointer, scene.index, k, JsonPrimitive(n))
+                            add {
+                                HyperOsValueRow(title = "timeout（定时释放秒数）", value = v.content) {
+                                    intTarget = EditTarget("timeout", v.content, isNumber = true) { nv ->
+                                        nv.toLongOrNull()?.let { n ->
+                                            viewModel.updateSceneValue(pointer, scene.index, k, JsonPrimitive(n))
+                                        }
                                     }
                                 }
                             }
                         } else if (k == "default_need" && v is JsonPrimitive && v.booleanOrNull != null) {
-                            HyperOsSwitchRow(
-                                title = "default_need",
-                                summary = "场景结构布尔",
-                                checked = v.boolean,
-                                enabled = !scoped.writing,
-                            ) { b -> viewModel.updateSceneValue(pointer, scene.index, k, JsonPrimitive(b)) }
+                            add {
+                                HyperOsSwitchRow(
+                                    title = "default_need",
+                                    summary = "场景结构布尔",
+                                    checked = v.boolean,
+                                    enabled = !scoped.writing,
+                                ) { b -> viewModel.updateSceneValue(pointer, scene.index, k, JsonPrimitive(b)) }
+                            }
                         }
                     }
-                    // 命令组：end 组不展示（恢复默认态，无修改价值）；perflock 命令
-                    // 同样不进功能页（原样透传，不展示不计数）；其余经 CmdEditor 编辑
-                    val editable = scene.containers.filter { !it.key.startsWith("end") }
-                    editable.forEach { container ->
+                    // 命令组：end 组不展示（恢复默认态）；perflock 不进功能页（原样透传）
+                    scene.containers.filter { !it.key.startsWith("end") }.forEach { container ->
                         container.entries.filter { !it.cmd.startsWith("perflock#") }.forEach { entry ->
-                            HyperOsActionRow(
-                                title = "${container.key}[${entry.index}] ${entry.permission}",
-                                summary = entry.cmd,
-                                onClick = {
-                                    cmdTarget = SceneCmdTarget(
-                                        title = "${scene.sceneNameLabel} · ${container.key}[${entry.index}]",
-                                        initial = entry.cmd,
-                                    ) { nv ->
-                                        viewModel.updateSceneCmd(pointer, scene.index, container.key, entry.index, nv)
-                                    }
-                                },
-                            )
+                            add {
+                                HyperOsActionRow(
+                                    title = "${container.key}[${entry.index}] ${entry.permission}",
+                                    summary = entry.cmd,
+                                    onClick = {
+                                        cmdTarget = SceneCmdTarget(
+                                            title = "${scene.sceneNameLabel} · ${container.key}[${entry.index}]",
+                                            initial = entry.cmd,
+                                        ) { nv ->
+                                            viewModel.updateSceneCmd(pointer, scene.index, container.key, entry.index, nv)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
+                HyperOsSectionCard(title = scene.sceneNameLabel, rows = sceneRows)
             }
         }
 
         // 复用映射 + JSON 编辑器入口（结构性增删在作用域编辑器完成）
         item(key = "to_editor") {
-            HyperOsSectionCard {
+            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
                 HyperOsActionRow(
                     title = "在 JSON 编辑器中打开",
                     summary = "新增/删除场景与命令组条目请走作用域编辑（形状守卫在 CLI）",
                     onClick = { navigator.push(Route.HyperOsScopedEditor(pkg)) },
                 )
-            }
+            })
         }
     }
 }
-
-/** 性能调度页的本应用参数键（存在任一才显示「本应用参数」分节）。 */
-private val PERF_PER_APP_KEYS = listOf(
-    "dcs_enable", "group_fight_thresh", "disable_scenes",
-    "need_game_sdk", "fstb_cmds", "dcs_config",
-)
 
 /** 场景命令编辑目标（容器内定位 + 原始 cmd）。 */
 private data class SceneCmdTarget(val title: String, val initial: String, val onCommit: (String) -> Unit)
@@ -466,87 +464,112 @@ fun HyperOsFisrScreen(pkg: String) {
 
         // 运行态只读（Joyose SP：fisr_switch / fisr_enhance_status）
         item(key = "runtime") {
-            HyperOsSectionCard(title = "运行态（只读）") {
-                HyperOsActionRow(
-                    title = "插帧开关（fisr_switch）",
-                    summary = spEcho["fisr_switch_$pkg"]?.let { "已写入：$it" } ?: "未写入（默认关闭）",
-                )
-                HyperOsActionRow(
-                    title = "增强状态（fisr_enhance_status）",
-                    summary = spEcho["fisr_enhance_status_$pkg"]?.let { "已写入：$it" } ?: "未写入",
-                )
-            }
+            HyperOsSectionCard(
+                title = "运行态（只读）",
+                rows = listOf<@Composable () -> Unit>(
+                    {
+                        HyperOsActionRow(
+                            title = "插帧开关（fisr_switch）",
+                            summary = spEcho["fisr_switch_$pkg"]?.let { "已写入：$it" } ?: "未写入（默认关闭）",
+                        )
+                    },
+                    {
+                        HyperOsActionRow(
+                            title = "增强状态（fisr_enhance_status）",
+                            summary = spEcho["fisr_enhance_status_$pkg"]?.let { "已写入：$it" } ?: "未写入",
+                        )
+                    },
+                ),
+            )
         }
 
         item(key = "game_list") {
             val games = (fragment["game_list"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
-            HyperOsSectionCard(title = "覆盖范围") {
-                HyperOsActionRow(title = "game_list", summary = games?.joinToString(", ").orEmpty())
-            }
+            HyperOsSectionCard(
+                title = "覆盖范围",
+                rows = listOf<@Composable () -> Unit> {
+                    HyperOsActionRow(title = "game_list", summary = games?.joinToString(", ").orEmpty())
+                },
+            )
         }
 
         // enhance_policy_config 逐条表单（数组内增删 = 片段内部结构调整，作用域写回支持）
         policies.forEachIndexed { i, entry ->
             val obj = entry as? JsonObject ?: return@forEachIndexed
             item(key = "policy_$i") {
-                HyperOsSectionCard(title = "策略 ${i + 1}") {
-                    val feature = (obj["feature"] as? JsonPrimitive)?.content.orEmpty()
-                    HyperOsValueRow(title = "feature（增强类型）", value = feature) {
-                        textTarget = EditTarget("feature", feature, isNumber = false) { v ->
-                            viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "feature"), JsonPrimitive(v))
-                        }
-                    }
-                    val strategy = (obj["strategy"] as? JsonPrimitive)?.content.orEmpty()
-                    HyperOsValueRow(title = "strategy（实现策略）", value = strategy) {
-                        textTarget = EditTarget("strategy", strategy, isNumber = false) { v ->
-                            viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "strategy"), JsonPrimitive(v))
-                        }
-                    }
-                    val refresh = (obj["support_max_refresh"] as? JsonPrimitive)
-                    if (refresh != null) {
-                        HyperOsValueRow(title = "support_max_refresh（上限刷新率）", value = refresh.content) {
-                            intTarget = EditTarget("support_max_refresh", refresh.content, isNumber = true) { v ->
-                                v.toLongOrNull()?.let { n ->
-                                    viewModel.updateFragmentNested(
-                                        pointer, listOf("enhance_policy_config", "$i", "support_max_refresh"), JsonPrimitive(n),
-                                    )
+                val feature = (obj["feature"] as? JsonPrimitive)?.content.orEmpty()
+                val strategy = (obj["strategy"] as? JsonPrimitive)?.content.orEmpty()
+                val refresh = (obj["support_max_refresh"] as? JsonPrimitive)
+                val scenes = (obj["disable_scene_list"] as? JsonArray)
+                val status = (obj["switch_default_status"] as? JsonPrimitive)
+                HyperOsSectionCard(
+                    title = "策略 ${i + 1}",
+                    rows = buildList<@Composable () -> Unit> {
+                        add {
+                            HyperOsValueRow(title = "feature（增强类型）", value = feature) {
+                                textTarget = EditTarget("feature", feature, isNumber = false) { v ->
+                                    viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "feature"), JsonPrimitive(v))
                                 }
                             }
                         }
-                    }
-                    val scenes = (obj["disable_scene_list"] as? JsonArray)
-                    if (scenes != null) {
-                        HyperOsActionRow(
-                            title = "disable_scene_list（命中即停增强）",
-                            summary = scenes.joinToString(", ") { (it as? JsonPrimitive)?.content.orEmpty() },
-                        )
-                    }
-                    val status = (obj["switch_default_status"] as? JsonPrimitive)
-                    if (status != null) {
-                        HyperOsValueRow(title = "switch_default_status", value = status.content) {
-                            textTarget = EditTarget("switch_default_status", status.content, isNumber = false) { v ->
-                                viewModel.updateFragmentNested(
-                                    pointer, listOf("enhance_policy_config", "$i", "switch_default_status"), JsonPrimitive(v),
+                        add {
+                            HyperOsValueRow(title = "strategy（实现策略）", value = strategy) {
+                                textTarget = EditTarget("strategy", strategy, isNumber = false) { v ->
+                                    viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "strategy"), JsonPrimitive(v))
+                                }
+                            }
+                        }
+                        if (refresh != null) {
+                            add {
+                                HyperOsValueRow(title = "support_max_refresh（上限刷新率）", value = refresh.content) {
+                                    intTarget = EditTarget("support_max_refresh", refresh.content, isNumber = true) { v ->
+                                        v.toLongOrNull()?.let { n ->
+                                            viewModel.updateFragmentNested(
+                                                pointer, listOf("enhance_policy_config", "$i", "support_max_refresh"), JsonPrimitive(n),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (scenes != null) {
+                            add {
+                                HyperOsActionRow(
+                                    title = "disable_scene_list（命中即停增强）",
+                                    summary = scenes.joinToString(", ") { (it as? JsonPrimitive)?.content.orEmpty() },
                                 )
                             }
                         }
-                    }
-                    HyperOsActionRow(
-                        title = "删除此策略",
-                        summary = "从 enhance_policy_config 移除",
-                        onClick = {
-                            viewModel.updateFragmentValue(
-                                pointer, "enhance_policy_config",
-                                JsonArray(policies.filterIndexed { idx, _ -> idx != i }),
+                        if (status != null) {
+                            add {
+                                HyperOsValueRow(title = "switch_default_status", value = status.content) {
+                                    textTarget = EditTarget("switch_default_status", status.content, isNumber = false) { v ->
+                                        viewModel.updateFragmentNested(
+                                            pointer, listOf("enhance_policy_config", "$i", "switch_default_status"), JsonPrimitive(v),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        add {
+                            HyperOsActionRow(
+                                title = "删除此策略",
+                                summary = "从 enhance_policy_config 移除",
+                                onClick = {
+                                    viewModel.updateFragmentValue(
+                                        pointer, "enhance_policy_config",
+                                        JsonArray(policies.filterIndexed { idx, _ -> idx != i }),
+                                    )
+                                },
                             )
-                        },
-                    )
-                }
+                        }
+                    },
+                )
             }
         }
 
         item(key = "add_policy") {
-            HyperOsSectionCard {
+            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
                 HyperOsActionRow(
                     title = "+ 添加策略",
                     summary = "追加一条 {feature, strategy}",
@@ -555,18 +578,23 @@ fun HyperOsFisrScreen(pkg: String) {
                         viewModel.updateFragmentValue(pointer, "enhance_policy_config", JsonArray(policies + newEntry))
                     },
                 )
-            }
+            })
         }
 
         item(key = "enum_hint") {
-            HyperOsSectionCard(title = "取值参考") {
-                HyperOsActionRow(title = "feature", summary = FISR_FEATURES.joinToString(" / "))
-                HyperOsActionRow(title = "strategy", summary = FISR_STRATEGIES.joinToString(" / ") + "（可 - 组合）")
-                HyperOsActionRow(
-                    title = "support_max_refresh 档位",
-                    summary = "本机刷新率：" + (caps?.refreshRates?.joinToString("/ ") ?: "未知"),
-                )
-            }
+            HyperOsSectionCard(
+                title = "取值参考",
+                rows = listOf<@Composable () -> Unit>(
+                    { HyperOsActionRow(title = "feature", summary = FISR_FEATURES.joinToString(" / ")) },
+                    { HyperOsActionRow(title = "strategy", summary = FISR_STRATEGIES.joinToString(" / ") + "（可 - 组合）") },
+                    {
+                        HyperOsActionRow(
+                            title = "support_max_refresh 档位",
+                            summary = "本机刷新率：" + (caps?.refreshRates?.joinToString("/ ") ?: "未知"),
+                        )
+                    },
+                ),
+            )
         }
 
         // ── Novatek 独显配置（songyuan 实际路径，方案 1.6）──
@@ -574,9 +602,12 @@ fun HyperOsFisrScreen(pkg: String) {
             item(key = "sec_nt") { HyperOsSectionLabel("Novatek 独显（novatek_game_params）") }
             if (novatekEntry == null) {
                 item(key = "nt_raw") {
-                    HyperOsSectionCard(title = "当前条目（格式不识别，只读）") {
-                        HyperOsMonoBlockRow(title = "raw", body = novatekRaw.orEmpty())
-                    }
+                    HyperOsSectionCard(
+                        title = "当前条目（格式不识别，只读）",
+                        rows = listOf<@Composable () -> Unit> {
+                            HyperOsMonoBlockRow(title = "raw", body = novatekRaw.orEmpty())
+                        },
+                    )
                 }
             }
             novatekEntry?.let { entry ->
@@ -586,30 +617,37 @@ fun HyperOsFisrScreen(pkg: String) {
                     "SR（超分）" to entry.sr,
                     "FISR（插帧+超分）" to entry.fisr,
                 )
+                // 每段（FI/SR/FISR）合并为一张卡，段内等级为行
                 segments.forEach { (label, seg) ->
                     if (seg == null) return@forEach
-                    seg.levels.forEachIndexed { li, lvl ->
-                        item(key = "nt_${label}_$li") {
-                            HyperOsValueRow(
-                                title = "$label 等级 $li（${lvl.dynamicFps} → ${lvl.targetFps}fps）",
-                                value = lvl.params.joinToString(","),
-                            ) {
-                                ntLevelTarget = NtLevelTarget(label, li, lvl) { newLevel ->
-                                    val newSeg = NovatekCodec.Segment(
-                                        seg.levels.toMutableList().also { it[li] = newLevel },
-                                    )
-                                    val newEntry = when (label) {
-                                        "FI（插帧）" -> entry.copy(fi = newSeg)
-                                        "SR（超分）" -> entry.copy(sr = newSeg)
-                                        else -> entry.copy(fisr = newSeg)
+                    item(key = "nt_$label") {
+                        HyperOsSectionCard(
+                            title = label,
+                            rows = seg.levels.mapIndexed { li, lvl ->
+                                val levels = seg.levels
+                                @Composable {
+                                    HyperOsValueRow(
+                                        title = "等级 $li（${lvl.dynamicFps} → ${lvl.targetFps}fps）",
+                                        value = lvl.params.joinToString(","),
+                                    ) {
+                                        ntLevelTarget = NtLevelTarget(label, li, lvl) { newLevel ->
+                                            val newSeg = NovatekCodec.Segment(
+                                                levels.toMutableList().also { it[li] = newLevel },
+                                            )
+                                            val newEntry = when (label) {
+                                                "FI（插帧）" -> entry.copy(fi = newSeg)
+                                                "SR（超分）" -> entry.copy(sr = newSeg)
+                                                else -> entry.copy(fisr = newSeg)
+                                            }
+                                            viewModel.updateFragmentSelf(
+                                                ntTarget,
+                                                JsonPrimitive(NovatekCodec.serialize(newEntry)),
+                                            )
+                                        }
                                     }
-                                    viewModel.updateFragmentSelf(
-                                        ntTarget,
-                                        JsonPrimitive(NovatekCodec.serialize(newEntry)),
-                                    )
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
                 }
             }
@@ -617,49 +655,58 @@ fun HyperOsFisrScreen(pkg: String) {
             // GEX 帧率上限（pkg:fps）
             (gexFound?.second as? JsonPrimitive)?.let { gex ->
                 item(key = "nt_gex") {
-                    HyperOsValueRow(title = "Novatek GEX 帧率上限", value = gex.content) {
-                        val fps = gex.content.substringAfterLast(':')
-                        textTarget = EditTarget("GEX 帧率上限", fps, isNumber = true) { nv ->
-                            nv.toLongOrNull()?.let { n ->
-                                viewModel.updateFragmentSelf(
-                                    gexFound.first,
-                                    JsonPrimitive(gex.content.substringBeforeLast(':') + ":" + n),
-                                )
+                    HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                        HyperOsValueRow(title = "Novatek GEX 帧率上限", value = gex.content) {
+                            val fps = gex.content.substringAfterLast(':')
+                            textTarget = EditTarget("GEX 帧率上限", fps, isNumber = true) { nv ->
+                                nv.toLongOrNull()?.let { n ->
+                                    viewModel.updateFragmentSelf(
+                                        gexFound.first,
+                                        JsonPrimitive(gex.content.substringBeforeLast(':') + ":" + n),
+                                    )
+                                }
                             }
                         }
-                    }
+                    })
                 }
             }
             // 非游玩档（只读 + 跳 JSON）
             (nonPlaying?.second as? JsonPrimitive)?.let { np ->
                 item(key = "nt_non_playing") {
-                    HyperOsSectionCard(title = "非游玩降级档（novatek_non_playing_config）") {
-                        HyperOsMonoBlockRow(title = "raw", body = np.content)
-                        HyperOsActionRow(
-                            title = "在 JSON 编辑器中修改",
-                            summary = "格式与 game_params 相同",
-                            onClick = { navigator.push(Route.HyperOsScopedEditor(pkg)) },
-                        )
-                    }
+                    HyperOsSectionCard(
+                        title = "非游玩降级档（novatek_non_playing_config）",
+                        rows = listOf<@Composable () -> Unit>(
+                            { HyperOsMonoBlockRow(title = "raw", body = np.content) },
+                            {
+                                HyperOsActionRow(
+                                    title = "在 JSON 编辑器中修改",
+                                    summary = "格式与 game_params 相同",
+                                    onClick = { navigator.push(Route.HyperOsScopedEditor(pkg)) },
+                                )
+                            },
+                        ),
+                    )
                 }
             }
             // 黑名单（仅在名单内时出现片段 → 可移除；加入走 JSON 编辑，不在名单不提示）
             if (blacklistFound != null) {
                 val arr = blacklistFound.second as? JsonArray
                 item(key = "nt_blacklist") {
-                    HyperOsSwitchRow(
-                        title = "独显黑名单（novatek_black_app）",
-                        summary = "云游戏/串流等已是插帧后内容的应用；关闭 = 从名单移除",
-                        checked = true,
-                        enabled = !scoped.writing,
-                    ) { on ->
-                        if (!on) {
-                            val kept = (arr ?: JsonArray(emptyList())).filterNot {
-                                (it as? JsonPrimitive)?.content == pkg
+                    HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                        HyperOsSwitchRow(
+                            title = "独显黑名单（novatek_black_app）",
+                            summary = "云游戏/串流等已是插帧后内容的应用；关闭 = 从名单移除",
+                            checked = true,
+                            enabled = !scoped.writing,
+                        ) { on ->
+                            if (!on) {
+                                val kept = (arr ?: JsonArray(emptyList())).filterNot {
+                                    (it as? JsonPrimitive)?.content == pkg
+                                }
+                                viewModel.updateFragmentSelf(blacklistFound.first, JsonArray(kept))
                             }
-                            viewModel.updateFragmentSelf(blacklistFound.first, JsonArray(kept))
                         }
-                    }
+                    })
                 }
             }
         }
@@ -736,80 +783,92 @@ fun HyperOsMigtScreen(pkg: String) {
         onBack = navigator::pop,
     ) {
         item(key = "membership") {
-            HyperOsSectionCard(title = "名单成员") {
-                HyperOsSwitchRow(
-                    title = "启用 migt 帧感知加速",
-                    summary = "进出 game_booster.migt 名单（游戏进前台生效）",
-                    checked = migt.inList,
-                    enabled = !migt.writing,
-                ) { v -> viewModel.toggleMigtMembership(v) }
-            }
+            HyperOsSectionCard(
+                title = "名单成员",
+                rows = listOf<@Composable () -> Unit> {
+                    HyperOsSwitchRow(
+                        title = "启用 migt 帧感知加速",
+                        summary = "进出 game_booster.migt 名单（游戏进前台生效）",
+                        checked = migt.inList,
+                        enabled = !migt.writing,
+                    ) { v -> viewModel.toggleMigtMembership(v) }
+                },
+            )
         }
 
         if (migt.raw != null && migt.form == null) {
             // 条目存在但格式不识别：只读原始串，避免丢数据
             item(key = "raw") {
-                HyperOsSectionCard(title = "当前条目（格式不识别，只读）") {
-                    HyperOsMonoBlockRow(title = "raw", body = migt.raw.orEmpty())
-                }
+                HyperOsSectionCard(
+                    title = "当前条目（格式不识别，只读）",
+                    rows = listOf<@Composable () -> Unit> {
+                        HyperOsMonoBlockRow(title = "raw", body = migt.raw.orEmpty())
+                    },
+                )
             }
         }
 
         if (form != null) {
             val f = form!!
-            item(key = "sec_form") { HyperOsSectionLabel("参数包（保存后整条写入）") }
-            item(key = "migt_freq") {
-                HyperOsValueRow(title = "migt_freq（每核频率表）", value = f.migtFreq) {
-                    curveTarget = CurveTarget("migt_freq", "migt_freq 每核频率", CurveCodec.CPU_FREQ)
-                }
-            }
-            item(key = "migt_ms") {
-                HyperOsValueRow(title = "migt_ms（毫秒）", value = f.migtMs?.toString().orEmpty()) {
-                    intTarget = EditTarget("migt_ms", f.migtMs?.toString().orEmpty(), isNumber = true) { v ->
-                        v.toLongOrNull()?.let { n -> form = f.copy(migtMs = n) }
-                    }
-                }
-            }
-            item(key = "fps_thresh") {
-                HyperOsValueRow(title = "fps:thresh（帧率阈值表）", value = f.fpsThresh.orEmpty()) {
-                    curveTarget = CurveTarget("fps:thresh", "fps:thresh 帧率阈值", CurveCodec.FPS_THRESH)
-                }
-            }
-            item(key = "boost_policy") {
-                HyperOsValueRow(title = "boost_policy", value = f.boostPolicy?.toString().orEmpty()) {
-                    intTarget = EditTarget("boost_policy", f.boostPolicy?.toString().orEmpty(), isNumber = true) { v ->
-                        v.toLongOrNull()?.let { n -> form = f.copy(boostPolicy = n) }
-                    }
-                }
-            }
-            item(key = "fps_variance_ratio") {
-                HyperOsValueRow(title = "fps_variance_ratio", value = f.fpsVarianceRatio?.toString().orEmpty()) {
-                    intTarget = EditTarget("fps_variance_ratio", f.fpsVarianceRatio?.toString().orEmpty(), isNumber = true) { v ->
-                        v.toLongOrNull()?.let { n -> form = f.copy(fpsVarianceRatio = n) }
-                    }
-                }
-            }
-            // 字段级显隐：本机内核无该参数则隐藏（songyuan 无 super_task_max_num）
-            if (caps?.hasMigtParam("super_task_max_num") == true) {
-                item(key = "super_task_max_num") {
-                    HyperOsValueRow(title = "super_task_max_num", value = f.superTaskMaxNum?.toString().orEmpty()) {
-                        intTarget = EditTarget("super_task_max_num", f.superTaskMaxNum?.toString().orEmpty(), isNumber = true) { v ->
-                            v.toLongOrNull()?.let { n -> form = f.copy(superTaskMaxNum = n) }
+            item(key = "sec_form") {
+                HyperOsSectionCard(
+                    title = "参数包（保存后整条写入）",
+                    rows = buildList<@Composable () -> Unit> {
+                        add {
+                            HyperOsValueRow(title = "migt_freq（每核频率表）", value = f.migtFreq) {
+                                curveTarget = CurveTarget("migt_freq", "migt_freq 每核频率", CurveCodec.CPU_FREQ)
+                            }
                         }
-                    }
-                }
-            } else {
-                item(key = "super_task_hint") {
-                    HyperOsActionRow(title = "super_task_max_num", summary = "本机内核无此参数，不展示编辑")
-                }
-            }
-            item(key = "migt_ceiling") {
-                HyperOsValueRow(
-                    title = "migt_ceiling_freq（频率上限表）",
-                    value = f.migtCeilingFreq ?: "未设置",
-                ) {
-                    curveTarget = CurveTarget("migt_ceiling_freq", "migt_ceiling_freq 频率上限", CurveCodec.CPU_FREQ)
-                }
+                        add {
+                            HyperOsValueRow(title = "migt_ms（毫秒）", value = f.migtMs?.toString().orEmpty()) {
+                                intTarget = EditTarget("migt_ms", f.migtMs?.toString().orEmpty(), isNumber = true) { v ->
+                                    v.toLongOrNull()?.let { n -> form = f.copy(migtMs = n) }
+                                }
+                            }
+                        }
+                        add {
+                            HyperOsValueRow(title = "fps:thresh（帧率阈值表）", value = f.fpsThresh.orEmpty()) {
+                                curveTarget = CurveTarget("fps:thresh", "fps:thresh 帧率阈值", CurveCodec.FPS_THRESH)
+                            }
+                        }
+                        add {
+                            HyperOsValueRow(title = "boost_policy", value = f.boostPolicy?.toString().orEmpty()) {
+                                intTarget = EditTarget("boost_policy", f.boostPolicy?.toString().orEmpty(), isNumber = true) { v ->
+                                    v.toLongOrNull()?.let { n -> form = f.copy(boostPolicy = n) }
+                                }
+                            }
+                        }
+                        add {
+                            HyperOsValueRow(title = "fps_variance_ratio", value = f.fpsVarianceRatio?.toString().orEmpty()) {
+                                intTarget = EditTarget("fps_variance_ratio", f.fpsVarianceRatio?.toString().orEmpty(), isNumber = true) { v ->
+                                    v.toLongOrNull()?.let { n -> form = f.copy(fpsVarianceRatio = n) }
+                                }
+                            }
+                        }
+                        // 字段级显隐：本机内核无该参数则隐藏（songyuan 无 super_task_max_num）
+                        if (caps?.hasMigtParam("super_task_max_num") == true) {
+                            add {
+                                HyperOsValueRow(title = "super_task_max_num", value = f.superTaskMaxNum?.toString().orEmpty()) {
+                                    intTarget = EditTarget("super_task_max_num", f.superTaskMaxNum?.toString().orEmpty(), isNumber = true) { v ->
+                                        v.toLongOrNull()?.let { n -> form = f.copy(superTaskMaxNum = n) }
+                                    }
+                                }
+                            }
+                        } else {
+                            add {
+                                HyperOsActionRow(title = "super_task_max_num", summary = "本机内核无此参数，不展示编辑")
+                            }
+                        }
+                        add {
+                            HyperOsValueRow(
+                                title = "migt_ceiling_freq（频率上限表）",
+                                value = f.migtCeilingFreq ?: "未设置",
+                            ) {
+                                curveTarget = CurveTarget("migt_ceiling_freq", "migt_ceiling_freq 频率上限", CurveCodec.CPU_FREQ)
+                            }
+                        }
+                    },
+                )
             }
         }
 
@@ -853,34 +912,42 @@ fun HyperOsGpuTunerScreen(pkg: String) {
 
         // v2.2：self_gpu_tuner_enable 是全局开关，只在全局通用配置页展示/编辑
         item(key = "gate_hint") {
-            HyperOsActionRow(
-                title = "解析门（self_gpu_tuner_enable）",
-                summary = "全局开关，请在「通用配置」页修改；关闭时本配置不解析",
-            )
+            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                HyperOsActionRow(
+                    title = "解析门（self_gpu_tuner_enable）",
+                    summary = "全局开关，请在「通用配置」页修改；关闭时本配置不解析",
+                )
+            })
         }
 
         // profile 逐档键值（值全字符串；生效需下次 profile 保存/游戏重启）
         fragment.keys.forEach { profile ->
             val props = fragment[profile] as? JsonObject ?: return@forEach
             item(key = "profile_$profile") {
-                HyperOsSectionCard(title = profile) {
-                    props.forEach { (k, v) ->
+                HyperOsSectionCard(
+                    title = profile,
+                    rows = props.map { (k, v) ->
                         val text = (v as? JsonPrimitive)?.content ?: v.toString()
-                        HyperOsValueRow(title = k, value = text) {
-                            textTarget = EditTarget(k, text, isNumber = false) { nv ->
-                                viewModel.updateFragmentNested(pointer, listOf(profile, k), JsonPrimitive(nv))
+                        val row: @Composable () -> Unit = {
+                            HyperOsValueRow(title = k, value = text) {
+                                textTarget = EditTarget(k, text, isNumber = false) { nv ->
+                                    viewModel.updateFragmentNested(pointer, listOf(profile, k), JsonPrimitive(nv))
+                                }
                             }
                         }
-                    }
-                }
+                        row
+                    },
+                )
             }
         }
 
         item(key = "mode_hint") {
-            HyperOsActionRow(
-                title = "TunerMode 档位说明",
-                summary = "STANDARD / HIGH_QUALITY / CUSTOMIZE 等档位在游戏侧 GPU 面板运行时选择；此处编辑各档 profile 键值",
-            )
+            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                HyperOsActionRow(
+                    title = "TunerMode 档位说明",
+                    summary = "STANDARD / HIGH_QUALITY / CUSTOMIZE 等档位在游戏侧 GPU 面板运行时选择；此处编辑各档 profile 键值",
+                )
+            })
         }
     }
 }
@@ -948,13 +1015,13 @@ fun HyperOsDynResScreen(pkg: String) {
     ) {
         val (ovPointer, ovFragment) = ovrrideFound ?: (null to null)
 
-        // ovrride 内曲线/映射键
-        DYNRES_CURVES.forEach { p ->
-            val current = ovFragment?.get(p.key) ?: return@forEach
-            val text = (current as? JsonPrimitive)?.content ?: return@forEach
-            item(key = p.key) {
+        // ovrride 内曲线/映射键：合并进一张分组卡
+        val curveRows = DYNRES_CURVES.mapNotNull { p ->
+            val current = ovFragment?.get(p.key) ?: return@mapNotNull null
+            val text = (current as? JsonPrimitive)?.content ?: return@mapNotNull null
+            val fmt = p.format
+            @Composable {
                 HyperOsValueRow(title = p.label, value = text) {
-                    val fmt = p.format
                     if (fmt != null) {
                         curveTarget = CurveTarget(p.key, p.label, fmt)
                     } else {
@@ -965,6 +1032,9 @@ fun HyperOsDynResScreen(pkg: String) {
                 }
             }
         }
+        if (curveRows.isNotEmpty()) {
+            item(key = "curves") { HyperOsSectionCard(rows = curveRows) }
+        }
 
         // MIGL 条目（drr / xrender_config / drr_static）
         val (miglPointer, migl) = miglFound ?: (null to null)
@@ -973,31 +1043,39 @@ fun HyperOsDynResScreen(pkg: String) {
             val drr = migl["drr"] as? JsonObject
             if (drr != null && drr.isNotEmpty()) {
                 item(key = "drr_obj") {
-                    HyperOsSectionCard(title = "drr（刷新率→缩放）") {
-                        drr.forEach { (k, v) ->
+                    HyperOsSectionCard(
+                        title = "drr（刷新率→缩放）",
+                        rows = drr.map { (k, v) ->
                             val text = (v as? JsonPrimitive)?.content ?: v.toString()
-                            HyperOsValueRow(title = k, value = text) {
-                                textTarget = EditTarget(k, text, isNumber = false) { nv ->
-                                    viewModel.updateFragmentNested(miglPointer, listOf("drr", k), v.sameTypePrimitive(nv))
+                            val row: @Composable () -> Unit = {
+                                HyperOsValueRow(title = k, value = text) {
+                                    textTarget = EditTarget(k, text, isNumber = false) { nv ->
+                                        viewModel.updateFragmentNested(miglPointer, listOf("drr", k), v.sameTypePrimitive(nv))
+                                    }
                                 }
                             }
-                        }
-                    }
+                            row
+                        },
+                    )
                 }
             }
             val xrender = migl["xrender_config"] as? JsonObject
             if (xrender != null && xrender.isNotEmpty()) {
                 item(key = "xrender") {
-                    HyperOsSectionCard(title = "xrender_config") {
-                        xrender.forEach { (k, v) ->
+                    HyperOsSectionCard(
+                        title = "xrender_config",
+                        rows = xrender.map { (k, v) ->
                             val text = (v as? JsonPrimitive)?.content ?: v.toString()
-                            HyperOsValueRow(title = k, value = text) {
-                                textTarget = EditTarget(k, text, isNumber = false) { nv ->
-                                    viewModel.updateFragmentNested(miglPointer, listOf("xrender_config", k), v.sameTypePrimitive(nv))
+                            val row: @Composable () -> Unit = {
+                                HyperOsValueRow(title = k, value = text) {
+                                    textTarget = EditTarget(k, text, isNumber = false) { nv ->
+                                        viewModel.updateFragmentNested(miglPointer, listOf("xrender_config", k), v.sameTypePrimitive(nv))
+                                    }
                                 }
                             }
-                        }
-                    }
+                            row
+                        },
+                    )
                 }
             }
         }

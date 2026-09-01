@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ripple
 import androidx.compose.material3.AlertDialog
@@ -67,6 +68,9 @@ import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.data.NovatekCodec
 import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.component.material.ExpressiveSwitch
+import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
+import com.remoteconfig.override.ui.component.material.expressiveTopAppBarColors
+import com.remoteconfig.override.ui.component.material.SegmentedColumn
 import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import kotlinx.serialization.json.Json
@@ -162,8 +166,11 @@ private fun FeatureScaffoldMiuix(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { MiuixSpinner() }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                    contentPadding = PaddingValues(16.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .padding(horizontal = 12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     error?.let { item(key = "error") { ErrorBannerMiuix(it) } }
@@ -184,12 +191,11 @@ private fun FeatureScaffoldMaterial(
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ExpressiveScaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
         topBar = {
-            LargeTopAppBar(
-                title = { Text(title, style = MaterialTheme.typography.headlineLarge) },
+            LargeFlexibleTopAppBar(
+                title = { Text(title) },
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     androidx.compose.material3.IconButton(onClick = onBack) {
@@ -199,10 +205,7 @@ private fun FeatureScaffoldMaterial(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
+                colors = expressiveTopAppBarColors(),
             )
         },
     ) { innerPadding ->
@@ -215,7 +218,7 @@ private fun FeatureScaffoldMaterial(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     error?.let { item(key = "error") { ErrorBannerMaterial(it) } }
                     content()
@@ -227,43 +230,50 @@ private fun FeatureScaffoldMaterial(
 
 // ── 行组件（双皮肤分发）────────────────────────────────────────────────────
 
-/** 分组卡：Miuix = Card 容器；Material = 裸列（行自带分段样式）。 */
+/**
+ * 分组卡（对齐通用配置页基线）：一组行合并进**一张卡**，标题在卡外。
+ * - Miuix：卡外标题（[HyperOsSectionLabel] 同款排版）+ `Card` 内行无缝堆叠（无行间距、无内边距）；
+ * - Material：[SegmentedColumn]（自带卡外标题 + 逐行分段 shape，行合并成一体的圆角卡）。
+ *
+ * 行以 `List<@Composable () -> Unit>` 传入（非 ColumnScope lambda）：Material 侧需要
+ * 已知行数才能给每段算首/末大圆角，这是分段卡合并的前提。
+ */
 @Composable
-fun HyperOsSectionCard(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+fun HyperOsSectionCard(
+    title: String? = null,
+    rows: List<@Composable () -> Unit>,
+) {
+    if (rows.isEmpty()) return
     when (LocalUiMode.current) {
-        UiMode.Miuix -> Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (title != null) {
-                    MiuixText(
-                        text = title,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = miuixColorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    )
-                }
-                content()
-            }
-        }
-        UiMode.Material -> Column {
+        UiMode.Miuix -> Column(Modifier.fillMaxWidth()) {
             if (title != null) {
-                Text(
+                // 卡内标题：组间间距由 scaffold spacedBy 提供，这里只留标题与卡的 6dp
+                MiuixText(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
+                    color = miuixColorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
                 )
             }
-            Column(content = content)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth()) {
+                    rows.forEach { it() }
+                }
+            }
         }
+        UiMode.Material -> SegmentedColumn(
+            modifier = Modifier.fillMaxWidth(),
+            title = title.orEmpty(),
+            content = rows,
+        )
     }
 }
 
-/** 分组标题（无卡片的裸小节标题，双皮肤）。 */
+/**
+ * 独立分组标题（不带卡片；后紧跟 [HyperOsSectionCard] 无标题变体或裸行时用）。
+ * 与通用配置页 header 逐字对齐（Miuix start=4/top=12/bottom=6）。
+ */
 @Composable
 fun HyperOsSectionLabel(text: String) {
     when (LocalUiMode.current) {
@@ -277,9 +287,8 @@ fun HyperOsSectionLabel(text: String) {
         UiMode.Material -> Text(
             text = text,
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
         )
     }
 }
@@ -287,8 +296,7 @@ fun HyperOsSectionLabel(text: String) {
 /**
  * 等宽文本块行（超长原文展示专用，如 novatek token 串）。
  *
- * 刻意不用 BasicComponent/SegmentedListItem 的 summary 槽：超长摘要会触发行高
- * 测量振荡（每帧重组 → 列表闪烁 + 滚动锁死），这里固定 maxLines 截断。
+ * 不用 summary 槽：超长摘要会撑破行高（固定 maxLines 截断更安全）。
  */
 @Composable
 internal fun HyperOsMonoBlockRow(title: String, body: String, maxLines: Int = 6) {

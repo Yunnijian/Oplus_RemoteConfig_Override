@@ -134,30 +134,35 @@ fun HyperOsAppDetailMaterial(
                         .fillMaxSize()
                         .nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     // 编辑链路错误条（片段读取/保存失败）：入口仍可用，不整页劫持
                     editError?.let { errorText ->
                         item(key = "edit_error") { ErrorBannerMaterial(errorText) }
                     }
                     item(key = "header") { HeaderCardMaterial(view, header) }
-                    entries.forEach { entry ->
-                        item(key = entry.name) {
-                            SegmentedListItem(
-                                onClick = { onOpenFeature(entry) },
-                                leadingContent = {
-                                    Icon(
-                                        imageVector = entry.icon(),
-                                        contentDescription = entry.title,
-                                        tint = MaterialTheme.colorScheme.primary,
+                    item(key = "entries") {
+                        // 分段卡：入口行合并进一张 SegmentedColumn（行自带分段 shape）
+                        HyperOsSectionCard(
+                            rows = entries.map { entry ->
+                                @Composable {
+                                    SegmentedListItem(
+                                        onClick = { onOpenFeature(entry) },
+                                        leadingContent = {
+                                            Icon(
+                                                imageVector = entry.icon(),
+                                                contentDescription = entry.title,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        headlineContent = {
+                                            Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                        },
+                                        supportingContent = { Text(entry.summary, style = MaterialTheme.typography.bodySmall) },
                                     )
-                                },
-                                headlineContent = {
-                                    Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                },
-                                supportingContent = { Text(entry.summary, style = MaterialTheme.typography.bodySmall) },
-                            )
-                        }
+                                }
+                            },
+                        )
                     }
                 }
             }
