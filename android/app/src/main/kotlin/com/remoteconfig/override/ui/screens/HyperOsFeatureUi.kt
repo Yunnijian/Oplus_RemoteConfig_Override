@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -50,7 +51,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,7 +66,7 @@ import com.remoteconfig.override.data.CurveCodec
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.data.NovatekCodec
 import com.remoteconfig.override.settings.UiMode
-import com.remoteconfig.override.ui.component.DiscardChangesDialog
+import com.remoteconfig.override.ui.component.material.ExpressiveSwitch
 import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import kotlinx.serialization.json.Json
@@ -112,63 +116,30 @@ internal fun JsonObject.keysMatching(vararg prefixes: String): List<String> =
 /**
  * 功能子屏统一外壳：独立路由页（Scaffold + safeDrawing Top+Horizontal insets）。
  *
- * - dirty 且提供 [onSave] 时：顶栏保存按钮 + 系统返回守卫（DiscardChangesDialog，
- *   确认丢弃先 [onRevert] 再退栈 —— 不重置的话幂等守卫会让脏草稿复活）；
- * - [error] 以列表首条横幅呈现（内容仍渲染，保存可重试，不整页劫持）；
- * - [loading] 占满居中 spinner。
+ * 功能屏「默认即生效」：所有编辑在 ViewModel 内即改即存（写入中自动排队），
+ * 顶栏不设保存按钮、返回不做未保存守卫 —— 状态本身就是反馈。
+ * [error] 以列表首条横幅呈现（内容仍渲染，不整页劫持）；[loading] 占满居中 spinner。
  */
 @Composable
 fun HyperOsFeatureScaffold(
     title: String,
-    dirty: Boolean,
-    saving: Boolean,
     error: String?,
     loading: Boolean = false,
-    diffBase: String? = null,
-    diffEdited: String? = null,
     onBack: () -> Unit,
-    onSave: (() -> Unit)? = null,
-    onRevert: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
-    var showDiscard by remember { mutableStateOf(false) }
-    val guarded = dirty && onSave != null
-    BackHandler(enabled = guarded) { showDiscard = true }
-    if (showDiscard) {
-        DiscardChangesDialog(
-            onConfirm = { showDiscard = false; onRevert?.invoke(); onBack() },
-            onDismiss = { showDiscard = false },
-        )
-    }
-    val requestBack = { if (guarded) showDiscard = true else onBack() }
-    // 保存前 diff 预览（C3）：提供 base/edited 且确有变更时先展示变更清单
-    val diffItems = remember(diffBase, diffEdited) { scopedDiffList(diffBase, diffEdited) }
-    var showDiff by remember { mutableStateOf(false) }
-    val requestSave: () -> Unit = {
-        if (diffItems.isEmpty()) onSave?.invoke() else showDiff = true
-    }
-    if (showDiff) {
-        ScopedDiffDialog(
-            items = diffItems,
-            onConfirm = { showDiff = false; onSave?.invoke() },
-            onDismiss = { showDiff = false },
-        )
-    }
     when (LocalUiMode.current) {
-        UiMode.Miuix -> FeatureScaffoldMiuix(title, dirty, saving, error, loading, requestBack, requestSave, content)
-        UiMode.Material -> FeatureScaffoldMaterial(title, dirty, saving, error, loading, requestBack, requestSave, content)
+        UiMode.Miuix -> FeatureScaffoldMiuix(title, error, loading, onBack, content)
+        UiMode.Material -> FeatureScaffoldMaterial(title, error, loading, onBack, content)
     }
 }
 
 @Composable
 private fun FeatureScaffoldMiuix(
     title: String,
-    dirty: Boolean,
-    saving: Boolean,
     error: String?,
     loading: Boolean,
     onBack: () -> Unit,
-    onSave: (() -> Unit)?,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
@@ -181,16 +152,6 @@ private fun FeatureScaffoldMiuix(
                 navigationIcon = {
                     MiuixIconButton(onClick = onBack) {
                         MiuixIcon(imageVector = MiuixIcons.Back, contentDescription = "返回", tint = miuixColorScheme.onSurface)
-                    }
-                },
-                actions = {
-                    if (onSave != null) {
-                        MiuixTextButton(
-                            text = if (saving) "保存中…" else "保存",
-                            onClick = onSave,
-                            enabled = dirty && !saving,
-                            colors = MiuixButtonDefaults.textButtonColorsPrimary(),
-                        )
                     }
                 },
             )
@@ -217,12 +178,9 @@ private fun FeatureScaffoldMiuix(
 @Composable
 private fun FeatureScaffoldMaterial(
     title: String,
-    dirty: Boolean,
-    saving: Boolean,
     error: String?,
     loading: Boolean,
     onBack: () -> Unit,
-    onSave: (() -> Unit)?,
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -239,13 +197,6 @@ private fun FeatureScaffoldMaterial(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
                         )
-                    }
-                },
-                actions = {
-                    if (onSave != null) {
-                        TextButton(onClick = onSave, enabled = dirty && !saving) {
-                            Text(if (saving) "保存中…" else "保存")
-                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -406,17 +357,34 @@ fun HyperOsSwitchRow(
             enabled = enabled,
             onCheckedChange = onChange,
         )
-        UiMode.Material -> SegmentedListItem(
-            checked = checked,
-            onCheckedChange = onChange,
-            enabled = enabled,
-            headlineContent = {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            },
-            supportingContent = summary?.let {
-                { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
-            },
-        )
+        // Material：整行点击切换（haptic）+ trailing 可见开关（ExpressiveSwitch 共享
+        // interactionSource）—— 对齐 CommonConfig 的 SwitchItemMaterial 既有样式。
+        UiMode.Material -> {
+            val haptic = LocalHapticFeedback.current
+            val interactionSource = remember { MutableInteractionSource() }
+            SegmentedListItem(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                    onChange(!checked)
+                },
+                enabled = enabled,
+                interactionSource = interactionSource,
+                headlineContent = {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                },
+                supportingContent = summary?.let {
+                    { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
+                },
+                trailingContent = {
+                    ExpressiveSwitch(
+                        checked = checked,
+                        onCheckedChange = null,
+                        enabled = enabled,
+                        interactionSource = interactionSource,
+                    )
+                },
+            )
+        }
     }
 }
 
@@ -454,55 +422,64 @@ fun HyperOsActionRow(
     }
 }
 
-/** 值编辑行：title + 当前值（mono，右对齐）+ 箭头，点击弹编辑框。 */
+/** 值编辑行：title + 当前值（mono，右对齐）+ 箭头，点击弹编辑框。[enabled]=false 灰置且不可点。 */
 @Composable
 fun HyperOsValueRow(
     title: String,
     value: String,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> BasicComponent(
-            onClick = onClick,
-            title = title,
-            endActions = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    MiuixText(
-                        text = value,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = miuixColorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 160.dp),
-                    )
-                    MiuixIcon(
-                        imageVector = Icons.Filled.KeyboardArrowRight,
-                        contentDescription = "编辑",
-                        tint = miuixColorScheme.onSurfaceVariantActions,
-                    )
-                }
-            },
-        )
-        UiMode.Material -> SegmentedListItem(
-            onClick = onClick,
-            headlineContent = {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            },
-            trailingContent = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = value,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 160.dp),
-                    )
-                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "编辑")
-                }
-            },
-        )
+    val effClick: () -> Unit = if (enabled) onClick else ({})
+    val row: @Composable () -> Unit = {
+        when (LocalUiMode.current) {
+            UiMode.Miuix -> BasicComponent(
+                onClick = effClick,
+                title = title,
+                endActions = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        MiuixText(
+                            text = value,
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = miuixColorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 160.dp),
+                        )
+                        MiuixIcon(
+                            imageVector = Icons.Filled.KeyboardArrowRight,
+                            contentDescription = "编辑",
+                            tint = miuixColorScheme.onSurfaceVariantActions,
+                        )
+                    }
+                },
+            )
+            UiMode.Material -> SegmentedListItem(
+                onClick = effClick,
+                headlineContent = {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                },
+                trailingContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 160.dp),
+                        )
+                        Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "编辑")
+                    }
+                },
+            )
+        }
+    }
+    if (enabled) {
+        row()
+    } else {
+        Box(Modifier.alpha(0.4f)) { row() }
     }
 }
 
@@ -682,12 +659,12 @@ private fun CurveEditorBody(
                 CurveFieldMiuixCompat(state.rawText, { state.rawText = it }, singleLine = false)
             } else {
                 state.rows.forEachIndexed { i, row ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (format.hasKey) {
-                            CurveFieldMiuixCompat(row.key, { row.key = it }, weight = 1f, label = format.keyLabel ?: "")
+                            CurveFieldMiuixCompat(row.key, { row.key = it }, weight = 0.8f, label = format.keyLabel ?: "")
                         }
                         CurveFieldMiuixCompat(row.x, { row.x = it }, weight = 1f, label = format.xLabel)
-                        CurveFieldMiuixCompat(row.y, { row.y = it }, weight = 1f, label = format.yLabel)
+                        CurveFieldMiuixCompat(row.y, { row.y = it }, weight = 1.4f, label = format.yLabel)
                         IconButtonCompat(onClick = { state.removeAt(i) }) {
                             when (LocalUiMode.current) {
                                 UiMode.Miuix -> MiuixIcon(
@@ -1034,86 +1011,6 @@ private fun CmdEditorBody(
                 }
             }
         }
-    }
-}
-
-// ── 保存前 diff 预览（C3）──────────────────────────────────────────────────
-
-/** 一条变更：指针 | 旧值 | 新值。 */
-internal data class ScopedDiffItem(val pointer: String, val oldText: String, val newText: String)
-
-private val DiffPrettyJson = Json { prettyPrint = true }
-
-/** base/edited 两份作用域文档逐指针比对（片段级 diff；perflock 命令未变更时自然不出现在清单）。 */
-internal fun scopedDiffList(base: String?, edited: String?): List<ScopedDiffItem> {
-    if (base == null || edited == null || base == edited) return emptyList()
-    val b = runCatching { Json.parseToJsonElement(base).jsonObject }.getOrNull() ?: return emptyList()
-    val e = runCatching { Json.parseToJsonElement(edited).jsonObject }.getOrNull() ?: return emptyList()
-    fun text(x: kotlinx.serialization.json.JsonElement?): String = when (x) {
-        null -> "（缺失）"
-        is kotlinx.serialization.json.JsonPrimitive -> x.content
-        else -> DiffPrettyJson.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), x)
-    }
-    return (b.keys + e.keys).distinct().mapNotNull { key ->
-        val ov = b[key]; val nv = e[key]
-        if (ov == nv) return@mapNotNull null
-        ScopedDiffItem(key, text(ov), text(nv))
-    }
-}
-
-@Composable
-internal fun ScopedDiffDialog(
-    items: List<ScopedDiffItem>,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val mono = FontFamily.Monospace
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> WindowDialog(show = true, title = "保存前确认（${items.size} 处变更）", onDismissRequest = onDismiss) {
-            Column(Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items.forEach { d ->
-                        Column {
-                            MiuixText(text = d.pointer, fontSize = 11.sp, color = miuixColorScheme.onSurfaceVariantSummary, fontFamily = mono)
-                            MiuixText(text = "旧：${d.oldText.take(160)}", fontSize = 11.sp, color = miuixColorScheme.onSurface, fontFamily = mono)
-                            MiuixText(text = "新：${d.newText.take(160)}", fontSize = 11.sp, color = miuixColorScheme.primary, fontFamily = mono)
-                        }
-                    }
-                }
-                Row(Modifier.align(Alignment.End).padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                    MiuixTextButton(text = "取消", onClick = onDismiss)
-                    Spacer(Modifier.width(12.dp))
-                    MiuixTextButton(
-                        text = "确认保存",
-                        onClick = onConfirm,
-                        colors = MiuixButtonDefaults.textButtonColorsPrimary(),
-                    )
-                }
-            }
-        }
-        UiMode.Material -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("保存前确认（${items.size} 处变更）", fontWeight = FontWeight.SemiBold) },
-            text = {
-                Column(
-                    Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items.forEach { d ->
-                        Column {
-                            Text(d.pointer, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = mono)
-                            Text("旧：${d.oldText.take(160)}", style = MaterialTheme.typography.bodySmall, fontFamily = mono)
-                            Text("新：${d.newText.take(160)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontFamily = mono)
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = onConfirm) { Text("确认保存") } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-        )
     }
 }
 

@@ -1,6 +1,7 @@
 package com.remoteconfig.override.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.Log
@@ -353,11 +354,13 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         mutateScopedFragment(pointer) { frag ->
             if (frag.containsKey(key)) JsonObject(frag + (key to value)) else frag
         }
+        requestScopedSave()
     }
 
     /** 片段内嵌套路径替换（如 profile/键、数组下标；路径各段必须已存在）。 */
     fun updateFragmentNested(pointer: String, path: List<String>, value: JsonElement) {
         mutateScopedFragment(pointer) { frag -> setNested(frag, path, value) as JsonObject }
+        requestScopedSave()
     }
 
     /** 片段本体替换（片段即标量/数组时使用，如 novatek token 串、gex 上限、黑名单数组）。 */
@@ -377,6 +380,7 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         _scopedEditorState.update {
             it.copy(edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc), error = null)
         }
+        requestScopedSave()
     }
 
     private fun setNested(element: JsonElement, path: List<String>, value: JsonElement): JsonElement {
@@ -419,6 +423,103 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
             }
             JsonObject(frag + ("scene_ovrride" to JsonArray(updated)))
         }
+        requestScopedSave()
+    }
+
+    // ── 温控限帧总开关（功能页 v2：关 = 从配置删除曲线并备份；开 = 恢复）──
+
+    /** 温控开关状态：enabled + 关闭时备份的曲线键值。 */
+    data class ThermalState(
+        val enabled: Boolean = true,
+        /** 关闭温控时暂存的曲线键值（开启后写回恢复）。 */
+        val backup: Map<String, JsonElement> = emptyMap(),
+    )
+
+    private val _thermalState = MutableStateFlow(ThermalState())
+    val thermalState = _thermalState.asStateFlow()
+
+    /** 温控限帧相关的曲线键（开关关闭时删除/开启时恢复的范围）。 */
+    private val THERMAL_CURVE_KEYS = listOf(
+        "dynamic_fps", "dynamic_fps_M", "dynamic_fps_multiWin",
+        "dynamic_targetfps", "dynamic_targetfps_M",
+        "dynamic_fan_targetfps", "dynamic_fan_targetfps_M",
+        "dynamicfps_by_battery_T", "dynamicfps_by_battery_M",
+        "dynamic_targetfps_cpufreq", "dynamic_targetfps_cpufreq_M",
+        "dynamic_targetfps_cpufreq_speedmode", "dynamic_yuanshen_high_quality_targetfps",
+    )
+
+    private fun thermalPrefs() =
+        getApplication<Application>().getSharedPreferences("thermal", Context.MODE_PRIVATE)
+
+    /** 载入温控开关状态（SP 持久化：per-app）。 */
+    fun loadThermal(pkg: String) {
+        val prefs = thermalPrefs()
+        val enabled = prefs.getBoolean("enabled_$pkg", true)
+        val backupJson = prefs.getString("backup_$pkg", null)
+        val backup = backupJson
+            ?.let { runCatching { strictJson.parseToJsonElement(it).jsonObject }.getOrNull() }
+            ?.mapValues { (_, v) -> v }
+            .orEmpty()
+        _thermalState.value = ThermalState(enabled, backup)
+    }
+
+    /** 温控开关切换：关 = 备份现有曲线并删除；开 = 从备份恢复并清空备份。 */
+    fun setThermalEnabled(pkg: String, on: Boolean) {
+        val st = _thermalState.value
+        if (st.enabled == on) return
+        val prefs = thermalPrefs()
+        if (on) {
+            val backup = st.backup
+            if (backup.isNotEmpty()) {
+                ovrrideFragment()?.let { (pointer, _) ->
+                    updateFragmentInsert(pointer, backup)
+                }
+            }
+            prefs.edit().remove("backup_$pkg").putBoolean("enabled_$pkg", true).apply()
+            _thermalState.update { it.copy(enabled = true, backup = emptyMap()) }
+        } else {
+            val existing = ovrrideFragment()?.second
+                ?.filterKeys { it in THERMAL_CURVE_KEYS }
+                .orEmpty()
+            if (existing.isNotEmpty()) {
+                prefs.edit()
+                    .putString("backup_$pkg", strictJson.encodeToString(JsonObject.serializer(), JsonObject(existing)))
+                    .putBoolean("enabled_$pkg", false)
+                    .apply()
+                ovrrideFragment()?.let { (pointer, _) ->
+                    updateFragmentRemoveKeys(pointer, existing.keys.toList())
+                }
+            } else {
+                prefs.edit().putBoolean("enabled_$pkg", false).apply()
+            }
+            _thermalState.update { it.copy(enabled = false, backup = existing) }
+        }
+    }
+
+    /** 从片段删除一批键（温控开关关闭时）。 */
+    fun updateFragmentRemoveKeys(pointer: String, keys: List<String>) {
+        mutateScopedFragment(pointer) { frag ->
+            val obj = frag.toMutableMap()
+            keys.forEach { obj.remove(it) }
+            JsonObject(obj)
+        }
+        requestScopedSave()
+    }
+
+    /** 向片段插入/覆盖一批键（温控开关开启时恢复曲线；允许新增键）。 */
+    fun updateFragmentInsert(pointer: String, entries: Map<String, JsonElement>) {
+        mutateScopedFragment(pointer) { frag ->
+            JsonObject(frag.toMutableMap().apply { putAll(entries) })
+        }
+        requestScopedSave()
+    }
+
+    /** 当前作用域草稿中该 App 的 ovrride 片段（指针 to 片段）。 */
+    private fun ovrrideFragment(): Pair<String, JsonObject>? {
+        val doc = scopedDocument() ?: return null
+        val pointer = doc.keys.firstOrNull { it.startsWith("/game_booster/booster_config/ovrride_config/") } ?: return null
+        val frag = doc[pointer] as? JsonObject ?: return null
+        return pointer to frag
     }
 
     // ── 全局开关（详情页/功能页共用；与 CommonConfig 同一写路径）──
@@ -475,6 +576,8 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     private val _migtState = MutableStateFlow(MigtState())
     val migtState = _migtState.asStateFlow()
+    /** migt 写排队：写入中又提交新包时暂存，完成后补存最新。 */
+    private var _migtSaveQueued: MigtCodec.Pack? = null
 
     /** migt 编辑器关注的 sysfs 参数（按 DeviceCaps 存在性回显）。 */
     private val MIGT_RUNTIME_PARAMS = listOf(
@@ -502,10 +605,15 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 保存参数包（joyose-migt-write：整条替换，一次落库）。 */
+    /** 保存参数包（joyose-migt-write：整条替换，一次落库）。写入中时排队保存最新包。 */
     fun saveMigtPack(pack: MigtCodec.Pack) {
         val st = _migtState.value
-        if (st.writing || st.pkg.isEmpty()) return
+        if (st.pkg.isEmpty()) return
+        if (st.writing) {
+            _migtSaveQueued = pack
+            return
+        }
+        _migtSaveQueued = null
         _migtState.update { it.copy(writing = true, error = null) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { joyose.migtWrite(MigtCodec.serialize(pack)) }
@@ -516,6 +624,11 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                 reloadAfterMigtWrite(st.pkg)
             } else {
                 _migtState.update { it.copy(writing = false, error = result.message) }
+            }
+            // 写期间又提交了新包 → 再存一次最新
+            _migtSaveQueued?.let { next ->
+                _migtSaveQueued = null
+                saveMigtPack(next)
             }
         }
     }
@@ -601,6 +714,7 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
             }
             JsonObject(frag + ("scene_ovrride" to JsonArray(updated)))
         }
+        requestScopedSave()
     }
 
     /** scene_ovrride 数组解析为 UI 渲染模型（不认识的容器键一律跳过，宁缺勿错）。 */
@@ -756,6 +870,8 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     private val _scopedEditorState = MutableStateFlow(ScopedEditorState())
     val scopedEditorState = _scopedEditorState.asStateFlow()
+    /** 作用域写排队标记：写入中又发生编辑时置位，完成后补存最新（即改即存不丢）。 */
+    private var _scopedSaveQueued = false
 
     fun loadScopedEditor(packageName: String) {
         if (_scopedEditorState.value.packageName == packageName && _scopedEditorState.value.base != null) return
@@ -796,11 +912,21 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         _scopedEditorState.update { it.copy(edited = st.base, error = null) }
     }
 
-    /** 保存作用域编辑：CLI 按指针把片段补丁进当前库里的整份文档后双库镜像写。 */
+    /**
+     * 保存作用域编辑：CLI 按指针把片段补丁进当前库里的整份文档后双库镜像写。
+     *
+     * 功能屏「默认即生效」：任何片段编辑都会触发本保存；写入中再编辑则排队，
+     * 完成后再保存最新 edited，不丢连点。
+     */
     fun saveScopedEditor() {
         val st = _scopedEditorState.value
         val pkg = st.packageName ?: return
-        if (st.writing || st.edited == null || st.edited == st.base) return
+        if (st.writing) {
+            _scopedSaveQueued = true
+            return
+        }
+        _scopedSaveQueued = false
+        if (st.edited == null || st.edited == st.base) return
         val edited = st.edited
         _scopedEditorState.update { it.copy(writing = true, error = null) }
         viewModelScope.launch {
@@ -809,8 +935,16 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                 if (error == null) it.copy(writing = false, base = edited)
                 else it.copy(writing = false, error = error)
             }
+            // 写期间又发生编辑 → 再存一次最新 edited
+            if (_scopedSaveQueued) {
+                _scopedSaveQueued = false
+                saveScopedEditor()
+            }
         }
     }
+
+    /** 片段编辑的即改即存入口（写入中自动排队，无脑可重入）。 */
+    private fun requestScopedSave() = saveScopedEditor()
 
     /**
      * 严格 JSON 语法校验（不放过单引号/无引号键——写进云控库的必须是标准 JSON，

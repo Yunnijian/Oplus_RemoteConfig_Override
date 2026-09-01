@@ -69,7 +69,6 @@ fun HyperOsAppDetailScreen(packageName: String) {
             runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
         }
     }
-    val dirty = scopedIsDirty(scoped.base, scoped.edited)
 
     when (LocalUiMode.current) {
         UiMode.Miuix -> HyperOsAppDetailMiuix(
@@ -79,12 +78,8 @@ fun HyperOsAppDetailScreen(packageName: String) {
             error = state.error,
             editError = scoped.error,
             document = document,
-            dirty = dirty,
-            saving = scoped.writing,
             caps = caps,
             onRetry = { viewModel.loadDetail(packageName) },
-            onSave = viewModel::saveScopedEditor,
-            onRevert = viewModel::revertScopedEditor,
             onBack = navigator::pop,
             onOpenEditor = { navigator.push(Route.HyperOsScopedEditor(packageName)) },
             onOpenFeature = { entry -> navigator.push(entry.route(packageName)) },
@@ -96,12 +91,8 @@ fun HyperOsAppDetailScreen(packageName: String) {
             error = state.error,
             editError = scoped.error,
             document = document,
-            dirty = dirty,
-            saving = scoped.writing,
             caps = caps,
             onRetry = { viewModel.loadDetail(packageName) },
-            onSave = viewModel::saveScopedEditor,
-            onRevert = viewModel::revertScopedEditor,
             onBack = navigator::pop,
             onOpenEditor = { navigator.push(Route.HyperOsScopedEditor(packageName)) },
             onOpenFeature = { entry -> navigator.push(entry.route(packageName)) },

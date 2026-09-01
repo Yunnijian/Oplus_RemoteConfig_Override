@@ -50,20 +50,20 @@ private val THERMAL_COMMON = listOf(
 
 private val THERMAL_TGAME = listOf(
     ThermalParam("dynamic_fps", "温控限帧曲线", CurveCodec.TEMP_FPS),
-    ThermalParam("dynamicfps_by_battery_T", "低电量限帧（电量:限帧）", CurveCodec.FPS_SOC_FPS),
-    ThermalParam("dynamic_targetfps", "目标帧率专属曲线", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_fan_targetfps", "散热风扇目标帧率", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_targetfps_cpufreq", "温控 CPU 限频", CurveCodec.TEMP_FPS_FREQ),
-    ThermalParam("PID_T", "温控限帧 PID 参数", CurveCodec.FPS_TEMP_PARAM),
+    ThermalParam("dynamicfps_by_battery_T", "低电量限帧", CurveCodec.FPS_SOC_FPS),
+    ThermalParam("dynamic_targetfps", "帧率曲线", CurveCodec.FPS_TARGET_BAND),
+    ThermalParam("dynamic_fan_targetfps", "风扇帧率曲线", CurveCodec.FPS_TARGET_BAND),
+    ThermalParam("dynamic_targetfps_cpufreq", "CPU 限频曲线", CurveCodec.TEMP_FPS_FREQ),
+    ThermalParam("PID_T", "PID 参数", CurveCodec.FPS_TEMP_PARAM),
 )
 
 private val THERMAL_MGAME = listOf(
-    ThermalParam("dynamic_fps_M", "温控限帧曲线（MGAME）", CurveCodec.TEMP_FPS),
-    ThermalParam("dynamicfps_by_battery_M", "低电量限帧（MGAME）", CurveCodec.FPS_SOC_FPS),
-    ThermalParam("dynamic_targetfps_M", "目标帧率专属曲线（MGAME）", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_fan_targetfps_M", "散热风扇目标帧率（MGAME）", CurveCodec.FPS_TEMP_PARAM),
-    ThermalParam("dynamic_targetfps_cpufreq_M", "温控 CPU 限频（MGAME）", CurveCodec.TEMP_FPS_FREQ),
-    ThermalParam("PID_M", "温控限帧 PID 参数（MGAME）", CurveCodec.FPS_TEMP_PARAM),
+    ThermalParam("dynamic_fps_M", "温控限帧曲线", CurveCodec.TEMP_FPS),
+    ThermalParam("dynamicfps_by_battery_M", "低电量限帧", CurveCodec.FPS_SOC_FPS),
+    ThermalParam("dynamic_targetfps_M", "帧率曲线", CurveCodec.FPS_TARGET_BAND),
+    ThermalParam("dynamic_fan_targetfps_M", "风扇帧率曲线", CurveCodec.FPS_TARGET_BAND),
+    ThermalParam("dynamic_targetfps_cpufreq_M", "CPU 限频曲线", CurveCodec.TEMP_FPS_FREQ),
+    ThermalParam("PID_M", "PID 参数", CurveCodec.FPS_TEMP_PARAM),
 )
 
 /** 一次曲线编辑的目标。 */
@@ -76,7 +76,11 @@ fun HyperOsThermalFpsScreen(pkg: String) {
     val detail by viewModel.detailState.collectAsStateWithLifecycle()
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
     val caps by viewModel.deviceCapsState.collectAsStateWithLifecycle()
-    LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
+    val thermal by viewModel.thermalState.collectAsStateWithLifecycle()
+    LaunchedEffect(pkg) {
+        viewModel.loadDetail(pkg)
+        viewModel.loadThermal(pkg)
+    }
 
     val document = remember(scoped.edited) {
         scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
@@ -115,26 +119,31 @@ fun HyperOsThermalFpsScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "温控与帧率",
-        dirty = scopedIsDirty(scoped.base, scoped.edited),
-        saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
-        diffBase = scoped.base,
-        diffEdited = scoped.edited,
         onBack = navigator::pop,
-        onSave = viewModel::saveScopedEditor,
-        onRevert = viewModel::revertScopedEditor,
     ) {
         if (fragment == null || pointer == null) {
             item(key = "empty") { HyperOsEmptyHint("该应用无 ovrride 温控条目") }
             return@HyperOsFeatureScaffold
         }
+        // 温控限帧总开关：关闭 = 曲线从配置删除（编辑灰置），开启 = 恢复
+        item(key = "thermal_switch") {
+            HyperOsSwitchRow(
+                title = "温控限帧",
+                checked = thermal.enabled,
+                enabled = !scoped.writing,
+            ) { v -> viewModel.setThermalEnabled(pkg, v) }
+        }
+
         fun LazyListScope.renderParams(params: List<ThermalParam>) {
             params.forEach { p ->
                 val current = fragment[p.key] ?: return@forEach
                 val text = (current as? JsonPrimitive)?.content ?: return@forEach
+                // 温控曲线（dynamic_*）受总开关控制：关闭时灰置不可编辑（PID/阈值等监控项不受控）
+                val editable = !p.key.startsWith("dynamic") || thermal.enabled
                 item(key = p.key) {
-                    HyperOsValueRow(title = p.label, value = text) {
+                    HyperOsValueRow(title = p.label, value = text, enabled = editable) {
                         val fmt = p.format
                         if (fmt != null) {
                             curveTarget = CurveTarget(p.key, p.label, fmt)
@@ -156,11 +165,11 @@ fun HyperOsThermalFpsScreen(pkg: String) {
         renderParams(THERMAL_COMMON)
 
         if (THERMAL_TGAME.any { fragment.containsKey(it.key) }) {
-            item(key = "sec_t") { HyperOsSectionLabel("TGAME 档（大型游戏）") }
+            item(key = "sec_t") { HyperOsSectionLabel("TGAME") }
             renderParams(THERMAL_TGAME)
         }
         if (THERMAL_MGAME.any { fragment.containsKey(it.key) }) {
-            item(key = "sec_m") { HyperOsSectionLabel("MGAME 档（小游戏）") }
+            item(key = "sec_m") { HyperOsSectionLabel("MGAME") }
             renderParams(THERMAL_MGAME)
         }
         // 说明：_M 档与基础档分节（方案「温控与帧率」）；songyuan 云控无
@@ -214,23 +223,20 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "性能调度",
-        dirty = scopedIsDirty(scoped.base, scoped.edited),
-        saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
-        diffBase = scoped.base,
-        diffEdited = scoped.edited,
         onBack = navigator::pop,
-        onSave = viewModel::saveScopedEditor,
-        onRevert = viewModel::revertScopedEditor,
     ) {
         if (pointer == null || fragment == null) {
             item(key = "empty") { HyperOsEmptyHint("该应用无调度/场景配置") }
             return@HyperOsFeatureScaffold
         }
 
-        // ── 本应用参数（ovrride 片段内，per-app）──
-        item(key = "sec_scalar") { HyperOsSectionLabel("本应用参数") }
+        // ── 本应用参数（ovrride 片段内，per-app）：分节标题仅当确有参数时显示 ──
+        val hasPerAppParams = PERF_PER_APP_KEYS.any { fragment.containsKey(it) }
+        if (hasPerAppParams) {
+            item(key = "sec_scalar") { HyperOsSectionLabel("本应用参数") }
+        }
         (fragment["dcs_enable"] as? JsonPrimitive)?.let { sw ->
             if (sw.booleanOrNull != null) {
                 item(key = "dcs_enable") {
@@ -295,12 +301,10 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
             }
         }
 
-        // ── 场景管理（scene_ovrride；v2.2 由独立场景命令页并入）──
-        item(key = "sec_scene") { HyperOsSectionLabel("场景管理（scene_ovrride）") }
-        if (scenes.isEmpty()) {
-            item(key = "scene_empty") { HyperOsEmptyHint("无场景条目") }
-        }
-        scenes.forEach { scene ->
+        // ── 场景管理（scene_ovrride；v2.2 由独立场景命令页并入）：仅当有场景时显示 ──
+        if (scenes.isNotEmpty()) {
+            item(key = "sec_scene") { HyperOsSectionLabel("场景管理（scene_ovrride）") }
+            scenes.forEach { scene ->
             item(key = "scene_${scene.index}") {
                 HyperOsSectionCard(title = scene.sceneNameLabel) {
                     // 结构布尔（已有键编辑）
@@ -353,6 +357,7 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
                     }
                 }
             }
+            }
         }
 
         // 复用映射 + JSON 编辑器入口（结构性增删在作用域编辑器完成）
@@ -367,6 +372,12 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
         }
     }
 }
+
+/** 性能调度页的本应用参数键（存在任一才显示「本应用参数」分节）。 */
+private val PERF_PER_APP_KEYS = listOf(
+    "dcs_enable", "group_fight_thresh", "disable_scenes",
+    "need_game_sdk", "fstb_cmds", "dcs_config",
+)
 
 /** 场景命令编辑目标（容器内定位 + 原始 cmd）。 */
 private data class SceneCmdTarget(val title: String, val initial: String, val onCommit: (String) -> Unit)
@@ -444,15 +455,9 @@ fun HyperOsFisrScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "插帧超分",
-        dirty = scopedIsDirty(scoped.base, scoped.edited),
-        saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
-        diffBase = scoped.base,
-        diffEdited = scoped.edited,
         onBack = navigator::pop,
-        onSave = viewModel::saveScopedEditor,
-        onRevert = viewModel::revertScopedEditor,
     ) {
         if (fragment == null || pointer == null) {
             item(key = "empty") { HyperOsEmptyHint("该应用无 FISR 策略片段") }
@@ -677,15 +682,13 @@ fun HyperOsMigtScreen(pkg: String) {
         if (scoped.base != null && !migt.writing) viewModel.loadMigt(pkg)
     }
 
-    // 本地表单（编辑中副本；保存 = 整条 joyose-migt-write 一次落库）
+    // 本地表单（编辑中副本）；「默认即生效」：每次确认修改立即整条 joyose-migt-write 落库
     var form by remember { mutableStateOf<MigtCodec.Pack?>(null) }
-    val formDirty = form != null && form != migt.form
-    // 仅在无未保存修改时同步后台重载；写入完成后（writing true→false）强制同步——写入即提交
-    LaunchedEffect(migt.form) { if (!formDirty) form = migt.form }
-    var wasWriting by remember { mutableStateOf(false) }
-    LaunchedEffect(migt.writing) {
-        if (wasWriting && !migt.writing) form = migt.form
-        wasWriting = migt.writing
+    LaunchedEffect(migt.form) { form = migt.form }
+    // form 被确认修改后自动保存（写入中由 ViewModel 排队，不丢连改）
+    LaunchedEffect(form) {
+        val f = form
+        if (f != null && f != migt.form) viewModel.saveMigtPack(f)
     }
 
     var curveTarget by remember { mutableStateOf<CurveTarget?>(null) }
@@ -727,16 +730,10 @@ fun HyperOsMigtScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "migt 帧感知加速",
-        dirty = formDirty,
-        saving = migt.writing,
         error = migt.error ?: scoped.error,
         // scoped 片段加载失败（base==null）时不再等 migt.loaded，避免永久转圈
         loading = detail.loading || scoped.loading || (!migt.loaded && scoped.base != null),
-        diffBase = migt.raw,
-        diffEdited = form?.let { MigtCodec.serialize(it) },
         onBack = navigator::pop,
-        onSave = { form?.let(viewModel::saveMigtPack) },
-        onRevert = { form = migt.form },
     ) {
         item(key = "membership") {
             HyperOsSectionCard(title = "名单成员") {
@@ -845,15 +842,9 @@ fun HyperOsGpuTunerScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "GPU 自研调参",
-        dirty = scopedIsDirty(scoped.base, scoped.edited),
-        saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
-        diffBase = scoped.base,
-        diffEdited = scoped.edited,
         onBack = navigator::pop,
-        onSave = viewModel::saveScopedEditor,
-        onRevert = viewModel::revertScopedEditor,
     ) {
         if (fragment == null) {
             item(key = "empty") { HyperOsEmptyHint("该应用无 self_gpu_tuner_config 配置") }
@@ -951,15 +942,9 @@ fun HyperOsDynResScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "动态分辨率",
-        dirty = scopedIsDirty(scoped.base, scoped.edited),
-        saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
-        diffBase = scoped.base,
-        diffEdited = scoped.edited,
         onBack = navigator::pop,
-        onSave = viewModel::saveScopedEditor,
-        onRevert = viewModel::revertScopedEditor,
     ) {
         val (ovPointer, ovFragment) = ovrrideFound ?: (null to null)
 

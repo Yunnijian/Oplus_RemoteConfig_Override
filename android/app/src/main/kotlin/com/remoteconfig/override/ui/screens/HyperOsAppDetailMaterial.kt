@@ -60,8 +60,8 @@ import com.remoteconfig.override.ui.component.material.SegmentedListItem
 /**
  * HyperOS 应用功能页 v2 — Material 3 实现：顶部应用卡 + 功能入口列表。
  *
- * 入口显隐与 Miuix 皮肤同源（[visibleFeatureEntries]）；未保存修改时返回
- * （顶栏返回键 + 系统返回）→ 确认弹窗（丢弃先重置草稿再退栈）。
+ * 入口显隐与 Miuix 皮肤同源（[visibleFeatureEntries]）；编辑即改即存，顶栏
+ * 只保留高级编辑入口，无保存按钮、返回不做未保存守卫。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,26 +72,14 @@ fun HyperOsAppDetailMaterial(
     error: String?,
     editError: String?,
     document: kotlinx.serialization.json.JsonObject?,
-    dirty: Boolean,
-    saving: Boolean,
     caps: JoyoseManager.DeviceCaps?,
     onRetry: () -> Unit,
-    onSave: () -> Unit,
-    onRevert: () -> Unit,
     onBack: () -> Unit,
     onOpenEditor: () -> Unit,
     onOpenFeature: (HyperOsFeatureEntry) -> Unit,
 ) {
     // 上滑大标题自动缩放（对齐 HyperOsAppListMaterial）。
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    var showDiscard by remember { mutableStateOf(false) }
-    BackHandler(enabled = dirty) { showDiscard = true }
-    if (showDiscard) {
-        DiscardChangesDialog(
-            onConfirm = { showDiscard = false; onRevert(); onBack() },
-            onDismiss = { showDiscard = false },
-        )
-    }
     val entries = remember(document, caps) { visibleFeatureEntries(document, caps) }
 
     Scaffold(
@@ -102,14 +90,11 @@ fun HyperOsAppDetailMaterial(
                 title = { Text("应用功能", style = MaterialTheme.typography.headlineLarge) },
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = { if (dirty) showDiscard = true else onBack() }) {
+                    IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    TextButton(onClick = onSave, enabled = dirty && !saving) {
-                        Text(if (saving) "保存中…" else "保存")
-                    }
                     IconButton(onClick = onOpenEditor) {
                         Icon(Icons.Filled.Edit, contentDescription = "高级编辑")
                     }

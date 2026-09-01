@@ -169,6 +169,21 @@ class CurveCodecTest {
             ),
         )
     }
+
+    @Test
+    fun `real dynamic_targetfps multi-band value round-trips`() {
+        // 真实云控值：`;` 分档，每档 `targetFps#温度:档位fps,...`
+        val raw = "185#10:0,44.5:120,46:90,47.5:60;165#10:0,43:120,46:90,48:60"
+        val segs = CurveCodec.parse(raw, CurveCodec.FPS_TARGET_BAND)!!
+        assertEquals(8, segs.size)
+        assertEquals(CurveCodec.Segment("185", "10", "0"), segs[0])
+        assertEquals(CurveCodec.Segment(null, "44.5", "120"), segs[1])
+        assertEquals(CurveCodec.Segment(null, "47.5", "60"), segs[3])
+        // 第二档开始也要解析正确（不能把 `;` 粘进上一档的值）
+        assertEquals(CurveCodec.Segment("165", "10", "0"), segs[4])
+        assertEquals(CurveCodec.Segment(null, "48", "60"), segs[7])
+        assertEquals(raw, CurveCodec.format(segs, CurveCodec.FPS_TARGET_BAND))
+    }
 }
 
 class NovatekCodecTest {

@@ -73,8 +73,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * HyperOS 应用功能页 v2 — Miuix 实现：顶部应用卡 + 功能入口列表。
  *
  * 入口按片段实际键 + 设备能力动态显隐（[visibleFeatureEntries]）；点入进入
- * 该功能的专用子屏（子屏与作用域编辑器共享同一份草稿，本页顶栏保留保存与
- * 高级编辑入口）。未保存修改时返回（顶栏返回键 + 系统返回）→ 确认弹窗。
+ * 该功能的专用子屏（子屏与作用域编辑器共享同一份草稿，编辑即改即存，顶栏
+ * 只保留高级编辑入口，无保存按钮）。
  */
 @Composable
 fun HyperOsAppDetailMiuix(
@@ -84,24 +84,14 @@ fun HyperOsAppDetailMiuix(
     error: String?,
     editError: String?,
     document: kotlinx.serialization.json.JsonObject?,
-    dirty: Boolean,
-    saving: Boolean,
     caps: JoyoseManager.DeviceCaps?,
     onRetry: () -> Unit,
-    onSave: () -> Unit,
-    onRevert: () -> Unit,
     onBack: () -> Unit,
     onOpenEditor: () -> Unit,
     onOpenFeature: (HyperOsFeatureEntry) -> Unit,
 ) {
     // 上滑大标题自动缩放（对齐 HyperOsAppListMiuix）：TopAppBar 拿 scrollBehavior。
     val scrollBehavior = MiuixScrollBehavior()
-    var showDiscard by remember { mutableStateOf(false) }
-    BackHandler(enabled = dirty) { showDiscard = true }
-    if (showDiscard) {
-        // 确认丢弃：先重置脏草稿再退栈（否则幂等守卫命中，残留修改复活）
-        DiscardChangesDialog(onConfirm = { showDiscard = false; onRevert(); onBack() }, onDismiss = { showDiscard = false })
-    }
     val entries = remember(document, caps) { visibleFeatureEntries(document, caps) }
 
     Scaffold(
@@ -111,18 +101,11 @@ fun HyperOsAppDetailMiuix(
                 title = "应用功能",
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = { if (dirty) showDiscard = true else onBack() }) {
+                    IconButton(onClick = onBack) {
                         Icon(imageVector = MiuixIcons.Back, contentDescription = "返回", tint = colorScheme.onSurface)
                     }
                 },
                 actions = {
-                    // 保存：任一功能子屏产生的未保存草稿（joyose-scoped-write 链路）
-                    TextButton(
-                        text = if (saving) "保存中…" else "保存",
-                        onClick = onSave,
-                        enabled = dirty && !saving,
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                    )
                     IconButton(onClick = onOpenEditor) {
                         Icon(imageVector = Icons.Filled.Edit, contentDescription = "高级编辑", tint = colorScheme.onSurface)
                     }
