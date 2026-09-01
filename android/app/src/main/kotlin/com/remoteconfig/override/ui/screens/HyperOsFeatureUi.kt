@@ -435,8 +435,6 @@ fun HyperOsActionRow(
     onClick: (() -> Unit)? = null,
 ) {
     when (LocalUiMode.current) {
-        // 必须用 BasicComponent 原生 onClick：把点击挂到 modifier.combinedClickable
-        // 会让 Miuix 在每次重组时执行 onClick（自激循环 → 列表闪烁 + 滚动锁死）
         UiMode.Miuix -> BasicComponent(
             onClick = onClick ?: {},
             title = title,
@@ -464,7 +462,6 @@ fun HyperOsValueRow(
     onClick: () -> Unit,
 ) {
     when (LocalUiMode.current) {
-        // 同上：onClick 走 BasicComponent 原生参数，禁止 modifier.combinedClickable
         UiMode.Miuix -> BasicComponent(
             onClick = onClick,
             title = title,
@@ -477,7 +474,7 @@ fun HyperOsValueRow(
                         color = miuixColorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(120.dp),
+                        modifier = Modifier.widthIn(max = 160.dp),
                     )
                     MiuixIcon(
                         imageVector = Icons.Filled.KeyboardArrowRight,
@@ -500,7 +497,7 @@ fun HyperOsValueRow(
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(120.dp),
+                        modifier = Modifier.widthIn(max = 160.dp),
                     )
                     Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "编辑")
                 }
