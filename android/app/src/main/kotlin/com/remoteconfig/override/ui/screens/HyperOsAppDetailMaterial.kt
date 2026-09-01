@@ -1,6 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +16,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -45,48 +42,57 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remoteconfig.override.data.JoyoseManager
-import com.remoteconfig.override.navigation.LocalNavigator
-import com.remoteconfig.override.navigation.Route
-import kotlinx.serialization.json.JsonElement
+import com.remoteconfig.override.ui.component.DiscardChangesDialog
+import com.remoteconfig.override.ui.component.material.SegmentedListItem
 
 /**
- * HyperOS 应用功能页 — Material 3 实现。
+ * HyperOS 应用功能页 v2 — Material 3 实现：顶部应用卡 + 功能入口列表。
  *
- * 结构对齐 ConfigListMaterial：`Scaffold + TopAppBar(surfaceContainer) + LazyColumn + Card`。
- * 头部卡（包名粗体大字 / group 别名徽标 / common 成员状态徽标 / conflicts 警告条）
- * → 逐个 FeatureHit 功能卡：label 标题 + category（mono 小字）+ source 徽标 +
- * gate 主开关状态 pill（右侧）+ params 键值行 + overrides 尾注；
- * gate.enabled == false 时整卡降透明度。features 为空的包显示空态。
- *
- * 卡片用 M3 填充 Card（TonalCard 语义：tonal 容器色 + 无阴影）；
- * 徽标用 Surface + labelSmall（对齐项目「TonalCard 等价 Surface」的既有约定）。
- *
- * 顶栏「高级编辑」跳转作用域编辑器（Route.HyperOsScopedEditor，仅本 App 片段）。
- * 本皮肤只读展示（参数编辑 UI 为 P2.4 Miuix 范围），编辑链路失败经
- * [editError] 以错误条呈现（与 Miuix 皮肤失败表现一致）。
+ * 入口显隐与 Miuix 皮肤同源（[visibleFeatureEntries]）；未保存修改时返回
+ * （顶栏返回键 + 系统返回）→ 确认弹窗（丢弃先重置草稿再退栈）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HyperOsAppDetailMaterial(
     view: JoyoseManager.AppView?,
+    header: DetailHeaderInfo?,
     loading: Boolean,
     error: String?,
     editError: String?,
+    document: kotlinx.serialization.json.JsonObject?,
+    dirty: Boolean,
+    saving: Boolean,
+    caps: JoyoseManager.DeviceCaps?,
     onRetry: () -> Unit,
+    onSave: () -> Unit,
+    onRevert: () -> Unit,
     onBack: () -> Unit,
+    onOpenEditor: () -> Unit,
+    onOpenFeature: (HyperOsFeatureEntry) -> Unit,
 ) {
-    // 上滑大标题自动缩放（对齐 HyperOsAppListMaterial）：LargeTopAppBar +
-    // exitUntilCollapsedScrollBehavior，列表挂 nestedScrollConnection。
+    // 上滑大标题自动缩放（对齐 HyperOsAppListMaterial）。
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var showDiscard by remember { mutableStateOf(false) }
+    BackHandler(enabled = dirty) { showDiscard = true }
+    if (showDiscard) {
+        DiscardChangesDialog(
+            onConfirm = { showDiscard = false; onRevert(); onBack() },
+            onDismiss = { showDiscard = false },
+        )
+    }
+    val entries = remember(document, caps) { visibleFeatureEntries(document, caps) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -96,16 +102,15 @@ fun HyperOsAppDetailMaterial(
                 title = { Text("应用功能", style = MaterialTheme.typography.headlineLarge) },
                 scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (dirty) showDiscard = true else onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    val navigator = LocalNavigator.current
-                    IconButton(onClick = {
-                        // 作用域编辑：仅编辑当前 App 名下的云控片段（秒开 + 作用域隔离）
-                        view?.packageName?.let { pkg -> navigator.push(Route.HyperOsScopedEditor(pkg)) }
-                    }) {
+                    TextButton(onClick = onSave, enabled = dirty && !saving) {
+                        Text(if (saving) "保存中…" else "保存")
+                    }
+                    IconButton(onClick = onOpenEditor) {
                         Icon(Icons.Filled.Edit, contentDescription = "高级编辑")
                     }
                 },
@@ -144,27 +149,29 @@ fun HyperOsAppDetailMaterial(
                         .fillMaxSize()
                         .nestedScroll(scrollBehavior.nestedScrollConnection),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    // 编辑链路错误条（片段读取/保存失败）：内容仍只读渲染，不整页劫持
+                    // 编辑链路错误条（片段读取/保存失败）：入口仍可用，不整页劫持
                     editError?.let { errorText ->
-                        item(key = "edit_error") { EditErrorBannerMaterial(errorText) }
+                        item(key = "edit_error") { ErrorBannerMaterial(errorText) }
                     }
-                    item(key = "header") { HeaderCardMaterial(view) }
-                    if (view.features.isEmpty()) {
-                        item(key = "empty") {
-                            Text(
-                                text = "该应用无 per-app 云控配置",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    item(key = "header") { HeaderCardMaterial(view, header) }
+                    entries.forEach { entry ->
+                        item(key = entry.name) {
+                            SegmentedListItem(
+                                onClick = { onOpenFeature(entry) },
+                                leadingContent = {
+                                    Icon(
+                                        imageVector = entry.icon(),
+                                        contentDescription = entry.title,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                headlineContent = {
+                                    Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                },
+                                supportingContent = { Text(entry.summary, style = MaterialTheme.typography.bodySmall) },
                             )
-                        }
-                    } else {
-                        // key 带 index 前缀：防个别数据下 path 重复导致 LazyColumn 崩溃
-                        itemsIndexed(view.features, key = { index, feature -> "$index:${feature.path}" }) { _, feature ->
-                            FeatureCardMaterial(feature)
                         }
                     }
                 }
@@ -174,42 +181,11 @@ fun HyperOsAppDetailMaterial(
 }
 
 /**
- * 编辑链路错误条：仅失败呈现（片段读取/保存失败），内容保持只读渲染
- * （对齐 Miuix 侧 EditErrorBannerMiuix 的失败表现）。
- */
-@Composable
-private fun EditErrorBannerMaterial(text: String) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Warning,
-                contentDescription = "错误",
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
-    }
-}
-
-/**
  * 头部卡：包名（粗体大字）+ 徽标行（group 别名 / common 成员状态，未出现时省略）
  * + conflicts 警告条（列出冲突路径）。
  */
 @Composable
-private fun HeaderCardMaterial(view: JoyoseManager.AppView) {
+private fun HeaderCardMaterial(view: JoyoseManager.AppView, header: DetailHeaderInfo?) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -218,13 +194,30 @@ private fun HeaderCardMaterial(view: JoyoseManager.AppView) {
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = view.packageName,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            // 徽标行：group 别名（如 SGAME）+ common 成员状态（字段未出现/false 时省略）
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                header?.icon?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = header?.label ?: view.packageName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = view.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // 徽标行：group 别名（如 SGAME）+ common 成员状态 + 云控版本/冻结态
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 view.group?.takeIf { it.isNotBlank() }?.let {
                     BadgeMaterial(it, MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
@@ -234,6 +227,16 @@ private fun HeaderCardMaterial(view: JoyoseManager.AppView) {
                 }
                 if (view.common.inSupportApp == true) {
                     BadgeMaterial("在支持列表", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+                }
+                header?.cloudVersion?.takeIf { it.isNotBlank() }?.let {
+                    BadgeMaterial("云控版本 $it", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+                header?.let {
+                    if (it.frozen) {
+                        BadgeMaterial("云控已冻结", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+                    } else {
+                        BadgeMaterial("未冻结（会被云覆盖）", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    }
                 }
             }
             if (view.conflicts.isNotEmpty()) {
@@ -273,142 +276,6 @@ private fun HeaderCardMaterial(view: JoyoseManager.AppView) {
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-/**
- * 功能卡：标题行（label + category/source / gate pill）→ params 键值行 → overrides 尾注。
- * gate.enabled == false 时整卡降透明度（内容仍可读，仅提示主开关未生效）。
- */
-@Composable
-private fun FeatureCardMaterial(feature: JoyoseManager.FeatureHit) {
-    val dimmed = feature.gate?.enabled == false
-    Card(
-        modifier = Modifier.fillMaxWidth().alpha(if (dimmed) 0.45f else 1f),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            // 标题行：label + category/source（左）；gate 主开关状态 pill（右）
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = feature.label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = feature.category,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        BadgeMaterial(
-                            text = featureSourceBadge(feature),
-                            container = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            content = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                feature.gate?.let { gate ->
-                    if (gate.enabled) {
-                        BadgeMaterial("已启用", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-                    } else {
-                        BadgeMaterial("主开关已关 · ${gate.key}", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                }
-            }
-            // params 列表：name(mono) + value（原始量直接显示，对象/数组可折叠 mono JSON）
-            feature.params.forEach { param ->
-                ParamRowMaterial(param.name, param.value)
-            }
-            // overrides 尾注：每条一行小字
-            if (feature.overrides.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    feature.overrides.forEach { path ->
-                        Text(
-                            text = path,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * params 键值行：name（mono 小字）+ value 渲染。
- * 原始量（字符串/数字/布尔）直接显示，长字符串 maxLines 截断、点击展开；
- * 对象/数组显示为可折叠 mono JSON（折叠态显示摘要：键数/项数）。
- */
-@Composable
-private fun ParamRowMaterial(name: String, value: JsonElement) {
-    val summary = jsonCollapseSummary(value)
-    var expanded by remember(name) { mutableStateOf(false) }
-    if (summary == null) {
-        Column(
-            Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = jsonScalarText(value).orEmpty(),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    } else {
-        Column(
-            Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = if (expanded) "收起" else summary,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            if (expanded) {
-                Text(
-                    text = jsonPrettyText(value),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
             }
         }
     }

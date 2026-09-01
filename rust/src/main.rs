@@ -500,7 +500,7 @@ fn usage() -> &'static str {
      joyose: stat [备份根目录] | list | read <配置名> | write <配置名> <json文件> | freeze | unfreeze\n\
              backup <备份根目录> [标签] | backup-list <备份根目录> | revert <备份根目录> <名称>\n\
              apps | app <包名> [booster_params.json] [common_params.json]\n\
-             device-caps\n\
+             device-caps | migt-write <完整条目串> | migt-remove <包名>\n\
              scoped <包名> [booster_params.json] [common_params.json] | scoped-write <包名> <作用域json文件>"
 }
 
@@ -535,6 +535,8 @@ fn main() -> ExitCode {
             joyose::appview::cmd_app_view(args.get(2), args.get(3), args.get(4))
         }
         Some("joyose-device-caps") => joyose::caps::cmd_device_caps(),
+        Some("joyose-migt-write") => joyose::migt::cmd_migt_write(args.get(2)),
+        Some("joyose-migt-remove") => joyose::migt::cmd_migt_remove(args.get(2)),
         Some("joyose-scoped") => {
             joyose::scoped::cmd_scoped_read(args.get(2), args.get(3), args.get(4))
         }

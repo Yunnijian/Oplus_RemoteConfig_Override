@@ -286,6 +286,73 @@ class JoyoseManager(context: Context) {
             execOk("joyose-write", config, path, successMessage = "写入成功")
         }
 
+    // ── migt 名单与运行态（功能页 v2；数组增删超出作用域编辑能力，走专用命令）──
+
+    /** 替换/追加一个游戏的 migt 条目（CLI 带形状校验；同样双库镜像写）。 */
+    fun migtWrite(entry: String): WriteResult =
+        execOk("joyose-migt-write", entry, successMessage = "已写入 migt 配置")
+
+    /** 从 migt 名单移除一个游戏（不存在时为无害 no-op）。 */
+    fun migtRemove(packageName: String): WriteResult =
+        execOk("joyose-migt-remove", packageName, successMessage = "已移除 migt 配置")
+
+    /** 只读回显 /sys/module/migt/parameters/ 下的参数文件（缺失自动跳过）。 */
+    fun readMigtRuntimeParams(names: List<String>): Map<String, String> {
+        if (names.isEmpty()) return emptyMap()
+        // 名称来自常量表，但一律走 quote() 防御性转义（参数化拼接，禁裸插值）
+        val script = names.joinToString(" ; ") { n ->
+            val q = quote(n)
+            "echo $q=\$(cat /sys/module/migt/parameters/$q 2>/dev/null)"
+        }
+        val result = Shell.cmd(script).exec()
+        val map = mutableMapOf<String, String>()
+        for (line in result.out) {
+            val idx = line.indexOf('=')
+            if (idx > 0) {
+                val value = line.substring(idx + 1).trim()
+                if (value.isNotEmpty()) map[line.substring(0, idx).trim()] = value
+            }
+        }
+        return map
+    }
+
+    /**
+     * 在 Joyose 的 shared_prefs 里按键名取值（运行态只读，如 fisr_switch_<pkg>）。
+     * 支持 boolean/int 的 value="..." 形态与 <string name="k">v</string> 形态。
+     */
+    fun readJoyoseSpKeys(keys: List<String>): Map<String, String> {
+        if (keys.isEmpty()) return emptyMap()
+        // 键名可能携带云控侧包名（fisr_switch_<pkg> 等）——pattern 走 quote() 参数化，
+        // 消除单引号闭合注入面（Regex.escape 只处理正则元字符，不处理 shell 引号）。
+        val safeKeys = keys.map { it.replace("'", "") }.filter { it.isNotBlank() }
+        if (safeKeys.isEmpty()) return emptyMap()
+        val pattern = safeKeys.joinToString("|") { Regex.escape(it) }
+        val result = Shell.cmd(
+            "grep -h -s -E ${quote("name=\"($pattern)\"")} /data/user/0/$PKG/shared_prefs/*.xml",
+        ).exec()
+        val map = mutableMapOf<String, String>()
+        for (line in result.out) {
+            val nameIdx = line.indexOf("name=\"")
+            if (nameIdx < 0) continue
+            val nameStart = nameIdx + 6
+            val nameEnd = line.indexOf('"', nameStart)
+            if (nameEnd <= nameStart) continue
+            val name = line.substring(nameStart, nameEnd)
+            val vIdx = line.indexOf("value=\"")
+            val value = if (vIdx >= 0) {
+                val vStart = vIdx + 7
+                val vEnd = line.indexOf('"', vStart)
+                if (vEnd > vStart) line.substring(vStart, vEnd) else ""
+            } else {
+                val open = line.indexOf('>', nameEnd)
+                val close = line.indexOf("</string>", open)
+                if (open >= 0 && close > open) line.substring(open + 1, close) else ""
+            }
+            if (value.isNotEmpty()) map[name] = value
+        }
+        return map
+    }
+
     /**
      * 作用域写回：CLI 按指针把片段补丁进当前库里的整份文档，只改本 App 名下的
      * 片段；新增/改名/删除键由 CLI 直接报错（不静默丢弃），同样走双库镜像写。

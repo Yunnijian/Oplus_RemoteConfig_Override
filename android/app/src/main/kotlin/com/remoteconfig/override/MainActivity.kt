@@ -31,8 +31,14 @@ import com.remoteconfig.override.ui.screens.ColorPaletteScreen
 import com.remoteconfig.override.ui.screens.ConfigEditorScreen
 import com.remoteconfig.override.ui.screens.HyperOsAppDetailScreen
 import com.remoteconfig.override.ui.screens.HyperOsCommonConfigScreen
+import com.remoteconfig.override.ui.screens.HyperOsDynResScreen
+import com.remoteconfig.override.ui.screens.HyperOsFisrScreen
+import com.remoteconfig.override.ui.screens.HyperOsGpuTunerScreen
 import com.remoteconfig.override.ui.screens.HyperOsJsonEditorScreen
+import com.remoteconfig.override.ui.screens.HyperOsMigtScreen
+import com.remoteconfig.override.ui.screens.HyperOsPerfScheduleScreen
 import com.remoteconfig.override.ui.screens.HyperOsScopedEditorScreen
+import com.remoteconfig.override.ui.screens.HyperOsThermalFpsScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
@@ -168,6 +174,25 @@ class MainActivity : ComponentActivity() {
                             }
                             entry<Route.HyperOsScopedEditor> { key ->
                                 HyperOsScopedEditorScreen(key.packageName)
+                            }
+                            // 功能页 v2：按功能入口组织的子屏（与作用域编辑器共享草稿）
+                            entry<Route.HyperOsPerfSchedule> { key ->
+                                HyperOsPerfScheduleScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsThermalFps> { key ->
+                                HyperOsThermalFpsScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsFisr> { key ->
+                                HyperOsFisrScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsDynRes> { key ->
+                                HyperOsDynResScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsGpuTuner> { key ->
+                                HyperOsGpuTunerScreen(key.packageName)
+                            }
+                            entry<Route.HyperOsMigt> { key ->
+                                HyperOsMigtScreen(key.packageName)
                             }
                         },
                     )

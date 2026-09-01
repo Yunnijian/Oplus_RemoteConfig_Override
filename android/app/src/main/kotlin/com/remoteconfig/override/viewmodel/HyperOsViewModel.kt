@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.JoyoseManager
+import com.remoteconfig.override.data.MigtCodec
 import com.remoteconfig.override.settings.SettingsRepositoryImpl
 import com.remoteconfig.override.ui.util.PinyinUtil
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,14 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     /** Joyose 应用版本（PackageManager 查询，无 root 开销）。 */
     val joyoseVersion: String get() = joyose.joyoseVersion()
+
+    /** 单应用名查询（详情页应用卡；IO 线程调用，勿在组合期直接用）。 */
+    fun appLabel(pkg: String): String = try {
+        val pm = getApplication<Application>().packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    } catch (_: Exception) {
+        pkg
+    }
 
     // ── 应用图标与应用名预加载（对齐 MainViewModel 的 ColorOS 实测做法）──
     // 解码/绘制全部在 IO 线程完成，UI 只读缓存（组合期零 PackageManager 调用）；
@@ -264,6 +273,10 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         val loading: Boolean = false,
         val view: JoyoseManager.AppView? = null,
         val error: String? = null,
+        /** 全局开关写入中（详情页/功能页共用开关写路径的并发守护）。 */
+        val switchWriting: Boolean = false,
+        /** 全局开关写入失败文案（仅失败显示；成功以开关状态为反馈）。 */
+        val switchError: String? = null,
     )
 
     private val _detailState = MutableStateFlow(DetailState())
@@ -335,25 +348,239 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
 
-    /** 片段级标量参数编辑（bool / 数字 / 字符串）。 */
-    fun updateParamScalar(pointer: String, paramName: String, value: JsonPrimitive) {
+    /** 片段内任意键值替换（标量/对象/数组均可；键必须已存在，新增键走作用域 JSON 编辑器）。 */
+    fun updateFragmentValue(pointer: String, key: String, value: JsonElement) {
         mutateScopedFragment(pointer) { frag ->
-            if (frag[paramName] is JsonPrimitive) JsonObject(frag + (paramName to value)) else frag
+            if (frag.containsKey(key)) JsonObject(frag + (key to value)) else frag
         }
     }
 
-    /** 场景布尔标志编辑（change_release_perflock_inner / scene_id_reuse / change_end）。 */
-    fun updateSceneFlag(pointer: String, sceneIndex: Int, flagName: String, value: Boolean) {
+    /** 片段内嵌套路径替换（如 profile/键、数组下标；路径各段必须已存在）。 */
+    fun updateFragmentNested(pointer: String, path: List<String>, value: JsonElement) {
+        mutateScopedFragment(pointer) { frag -> setNested(frag, path, value) as JsonObject }
+    }
+
+    /** 片段本体替换（片段即标量/数组时使用，如 novatek token 串、gex 上限、黑名单数组）。 */
+    fun updateFragmentSelf(pointer: String, value: JsonElement) {
+        val st = _scopedEditorState.value
+        val edited = st.edited
+        if (edited == null) {
+            Log.w(TAG, "scoped edit skipped: edited text not ready")
+            return
+        }
+        val doc = runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
+        if (doc == null || !doc.containsKey(pointer)) {
+            Log.w(TAG, "scoped edit skipped: pointer $pointer missing")
+            return
+        }
+        val newDoc = JsonObject(doc + (pointer to value))
+        _scopedEditorState.update {
+            it.copy(edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc), error = null)
+        }
+    }
+
+    private fun setNested(element: JsonElement, path: List<String>, value: JsonElement): JsonElement {
+        if (path.isEmpty()) return value
+        val head = path.first()
+        return when (element) {
+            is JsonObject -> {
+                val child = element[head] ?: return element
+                JsonObject(element + (head to setNested(child, path.drop(1), value)))
+            }
+            is JsonArray -> {
+                val idx = head.toIntOrNull() ?: return element
+                if (idx !in element.indices) return element
+                JsonArray(element.toMutableList().also { it[idx] = setNested(element[idx], path.drop(1), value) })
+            }
+            else -> element
+        }
+    }
+
+    // ── 运行态 SP 回显（FisrScreen 等只读展示 Joyose 侧 SP 键值）──
+
+    private val _spEchoState = MutableStateFlow<Map<String, String>>(emptyMap())
+    val spEchoState = _spEchoState.asStateFlow()
+
+    fun loadSpEcho(keys: List<String>) {
+        viewModelScope.launch {
+            _spEchoState.value = withContext(Dispatchers.IO) { joyose.readJoyoseSpKeys(keys) }
+        }
+    }
+
+    /** 场景结构字段编辑（timeout/default_need/change_end/change_release_perflock_inner 等已有键）。 */
+    fun updateSceneValue(pointer: String, sceneIndex: Int, key: String, value: JsonElement) {
         mutateScopedFragment(pointer) { frag ->
             val scenes = frag["scene_ovrride"] as? JsonArray ?: return@mutateScopedFragment frag
             val updated = scenes.mapIndexed { i, e ->
                 val scene = e as? JsonObject
-                if (i == sceneIndex && scene != null && scene[flagName] is JsonPrimitive) {
-                    JsonObject(scene + (flagName to JsonPrimitive(value)))
+                if (i == sceneIndex && scene != null && scene.containsKey(key)) {
+                    JsonObject(scene + (key to value))
                 } else e
             }
             JsonObject(frag + ("scene_ovrride" to JsonArray(updated)))
         }
+    }
+
+    // ── 全局开关（详情页/功能页共用；与 CommonConfig 同一写路径）──
+
+    /**
+     * 翻转 game_booster 一级布尔开关（name 支持一层嵌套如 mivk_settings.enable）。
+     * 乐观更新 detailState.view.globalSwitches + 失败回滚；成功不做回读（CLI 已回读校验）。
+     */
+    fun toggleGlobalSwitch(name: String, newValue: Boolean) {
+        val st = _detailState.value
+        if (st.view == null || st.switchWriting) return
+        _detailState.update {
+            it.copy(switchWriting = true, switchError = null, view = it.view?.withGlobalSwitch(name, newValue))
+        }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                joyose.toggleBoolean(listOf("game_booster") + name.split('.'), newValue)
+            }
+            _detailState.update {
+                if (result.success) {
+                    it.copy(switchWriting = false)
+                } else {
+                    it.copy(
+                        switchWriting = false,
+                        switchError = result.message,
+                        view = it.view?.withGlobalSwitch(name, !newValue),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun JoyoseManager.AppView.withGlobalSwitch(name: String, value: Boolean) = copy(
+        globalSwitches = globalSwitches.map {
+            if (it.name == name) it.copy(value = JsonPrimitive(value)) else it
+        },
+    )
+
+    // ── migt 名单管理（专用命令路径：数组增删超出作用域编辑能力）──
+
+    /** migt 功能屏状态：名单成员 + 可编辑参数包表单 + sysfs 运行态回显。 */
+    data class MigtState(
+        val pkg: String = "",
+        val inList: Boolean = false,
+        /** 当前条目解析结果（null = 不在名单或条目格式不识别 → 只读原始串展示）。 */
+        val form: MigtCodec.Pack? = null,
+        /** 原始条目串（格式不识别时兜底展示）。 */
+        val raw: String? = null,
+        val runtime: Map<String, String> = emptyMap(),
+        val writing: Boolean = false,
+        val error: String? = null,
+        val loaded: Boolean = false,
+    )
+
+    private val _migtState = MutableStateFlow(MigtState())
+    val migtState = _migtState.asStateFlow()
+
+    /** migt 编辑器关注的 sysfs 参数（按 DeviceCaps 存在性回显）。 */
+    private val MIGT_RUNTIME_PARAMS = listOf(
+        "migt_freq", "migt_ms", "boost_policy", "fps_variance_ratio",
+        "migt_ceiling_freq", "super_task_max_num", "target_fps", "glk_ms",
+    )
+
+    fun loadMigt(pkg: String) {
+        if (_migtState.value.writing) return
+        viewModelScope.launch {
+            val doc = scopedDocument()
+            val pointer = doc?.keys?.firstOrNull { it.startsWith("/game_booster/migt/") }
+            val raw = pointer?.let { (doc?.get(it) as? JsonPrimitive)?.content }
+            val runtime = withContext(Dispatchers.IO) {
+                joyose.readMigtRuntimeParams(MIGT_RUNTIME_PARAMS)
+            }
+            _migtState.value = MigtState(
+                pkg = pkg,
+                inList = raw != null,
+                form = raw?.let(MigtCodec::parse),
+                raw = raw,
+                runtime = runtime,
+                loaded = true,
+            )
+        }
+    }
+
+    /** 保存参数包（joyose-migt-write：整条替换，一次落库）。 */
+    fun saveMigtPack(pack: MigtCodec.Pack) {
+        val st = _migtState.value
+        if (st.writing || st.pkg.isEmpty()) return
+        _migtState.update { it.copy(writing = true, error = null) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { joyose.migtWrite(MigtCodec.serialize(pack)) }
+            if (result.success) {
+                _migtState.update {
+                    it.copy(writing = false, inList = true, form = pack, raw = MigtCodec.serialize(pack))
+                }
+                reloadAfterMigtWrite(st.pkg)
+            } else {
+                _migtState.update { it.copy(writing = false, error = result.message) }
+            }
+        }
+    }
+
+    /** 名单进出：进 = 写入默认模板（DeviceCaps 推导）；出 = 移除条目。 */
+    fun toggleMigtMembership(inList: Boolean) {
+        val st = _migtState.value
+        if (st.writing || st.pkg.isEmpty()) return
+        _migtState.update { it.copy(writing = true, error = null) }
+        viewModelScope.launch {
+            val result = if (inList) {
+                val template = st.form ?: defaultMigtTemplate(st.pkg)
+                withContext(Dispatchers.IO) { joyose.migtWrite(MigtCodec.serialize(template)) }
+            } else {
+                withContext(Dispatchers.IO) { joyose.migtRemove(st.pkg) }
+            }
+            if (result.success) {
+                if (inList) {
+                    val template = st.form ?: defaultMigtTemplate(st.pkg)
+                    _migtState.update {
+                        it.copy(writing = false, inList = true, form = template, raw = MigtCodec.serialize(template))
+                    }
+                } else {
+                    _migtState.update { it.copy(writing = false, inList = false, form = null, raw = null) }
+                }
+                reloadAfterMigtWrite(st.pkg)
+            } else {
+                _migtState.update { it.copy(writing = false, error = result.message) }
+            }
+        }
+    }
+
+    /**
+     * migt 专用写后重载：数组重排/条目增删会使作用域草稿与详情视图过期，
+     * 强制重读（草稿丢弃 —— migt 屏不与草稿体系混用，避免旧片段回写覆盖新条目）。
+     */
+    private fun reloadAfterMigtWrite(pkg: String) {
+        _scopedEditorState.value = ScopedEditorState()
+        loadDetail(pkg)
+    }
+
+    /** 默认参数包模板：每核取所在簇最低频率（DeviceCaps 缺失时退回 8 核常用值）。 */
+    private fun defaultMigtTemplate(pkg: String): MigtCodec.Pack {
+        val caps = _deviceCapsState.value
+        val freqTable = caps?.cpuClusters
+            ?.takeIf { it.isNotEmpty() }
+            ?.flatMap { cluster -> cluster.cpus.map { cpu -> "$cpu:${cluster.frequencies.minOrNull() ?: 0}" } }
+            ?.joinToString(" ")
+            ?: "0:384000 1:384000 2:384000 3:384000 4:384000 5:384000 6:1017600 7:1017600"
+        return MigtCodec.Pack(
+            pkg = pkg,
+            migtFreq = freqTable,
+            migtMs = 30,
+            fpsThresh = "90:15 60:18 40:30 30:40",
+            boostPolicy = 2,
+            fpsVarianceRatio = 10,
+            superTaskMaxNum = 1,
+            migtCeilingFreq = null,
+        )
+    }
+
+    /** 当前作用域草稿的解析文档（未就绪/解析失败返回 null）。 */
+    private fun scopedDocument(): JsonObject? {
+        val edited = _scopedEditorState.value.edited ?: return null
+        return runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
     }
 
     /** 场景 booster 容器内单条 cmd 编辑。 */
