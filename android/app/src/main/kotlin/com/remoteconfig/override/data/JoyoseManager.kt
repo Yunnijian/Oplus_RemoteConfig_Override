@@ -184,6 +184,68 @@ class JoyoseManager(context: Context) {
     @Serializable
     data class AppViewResult(val ok: Boolean = false, val app: AppView)
 
+    // ── 设备能力（joyose-device-caps 输出；Rust 侧节点缺失 → null，消费端做显隐）──
+
+    /** CPU 单簇：成员核 + 频率表（Hz）+ 可用 governors。 */
+    @Serializable
+    data class CpuCluster(
+        val cpus: List<Long> = emptyList(),
+        val frequencies: List<Long> = emptyList(),
+        val governors: List<String> = emptyList(),
+    )
+
+    /** GPU：频率表（Hz，freq_table_mhz 变体已统一为 Hz）+ 当前/可用 governor。 */
+    @Serializable
+    data class GpuCaps(
+        val frequencies: List<Long>? = null,
+        val governor: String? = null,
+        val governors: List<String>? = null,
+    )
+
+    /** migt 内核模块参数清单；exists=false 时隐藏 migt 功能入口。 */
+    @Serializable
+    data class MigtCaps(
+        val exists: Boolean = false,
+        val parameters: List<String> = emptyList(),
+    )
+
+    /**
+     * 设备能力快照（joyose-device-caps）。全部字段可空 —— 任何节点缺失时
+     * Rust 输出 null，消费端按 null 隐藏/灰置对应编辑器字段。
+     */
+    @Serializable
+    data class DeviceCaps(
+        val ok: Boolean = false,
+        @SerialName("cpu_clusters") val cpuClusters: List<CpuCluster>? = null,
+        val gpu: GpuCaps? = null,
+        val migt: MigtCaps? = null,
+        val cpusets: Map<String, String>? = null,
+        @SerialName("thermal_zones") val thermalZones: List<String>? = null,
+        @SerialName("refresh_rates") val refreshRates: List<Int>? = null,
+    ) {
+        /** migt 是否有某参数（字段级显隐/灰置判断）。 */
+        fun hasMigtParam(name: String): Boolean =
+            migt?.exists == true && migt.parameters.any { it == name }
+
+        /** 全部 CPU 频率档（去重升序，供限频曲线编辑器下拉）。 */
+        val cpuFrequencies: List<Long>
+            get() = cpuClusters.orEmpty().flatMap { it.frequencies }.distinct().sorted()
+
+        /** 全部 CPU governor（去重，供调度器选择）。 */
+        val cpuGovernors: List<String>
+            get() = cpuClusters.orEmpty().flatMap { it.governors }.distinct()
+
+        /** GPU 频率档（Hz 升序；null = 无 kgsl）。 */
+        val gpuFrequencies: List<Long>
+            get() = gpu?.frequencies.orEmpty().distinct().sorted()
+    }
+
+    /** 设备能力采集（root 一次性；调用方须置于 IO 调度器并进程内缓存）。 */
+    fun deviceCaps(): DeviceCaps? =
+        runCatching { exec<DeviceCaps>("joyose-device-caps") }.onFailure {
+            android.util.Log.e(TAG, "deviceCaps() 失败", it)
+        }.getOrNull()
+
     /** 单个 App 的聚合功能视图；解析失败返回 null（失败原因进 logcat）。 */
     fun appView(packageName: String): AppView? =
         runCatching { exec<AppViewResult>("joyose-app", packageName).app }.onFailure {

@@ -4,6 +4,7 @@
 //! filesystem, no shell — unit-testable without a device.
 
 pub mod appview;
+pub mod caps;
 pub mod resolve;
 pub mod scoped;
 pub mod store;

@@ -48,6 +48,22 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ── 设备能力（功能页 v2：编辑器档位数据源，进程内采集一次）──
+
+    private val _deviceCapsState = MutableStateFlow<JoyoseManager.DeviceCaps?>(null)
+    val deviceCapsState = _deviceCapsState.asStateFlow()
+    private var deviceCapsLoading = false
+
+    /** 幂等采集：详情页进入时调用；null = 未采集或采集失败（编辑器档位退化为手输）。 */
+    fun ensureDeviceCaps() {
+        if (_deviceCapsState.value != null || deviceCapsLoading) return
+        deviceCapsLoading = true
+        viewModelScope.launch {
+            _deviceCapsState.value = withContext(Dispatchers.IO) { joyose.deviceCaps() }
+            deviceCapsLoading = false
+        }
+    }
+
     /** Joyose 应用版本（PackageManager 查询，无 root 开销）。 */
     val joyoseVersion: String get() = joyose.joyoseVersion()
 
@@ -256,6 +272,7 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
     fun loadDetail(packageName: String) {
         // 片段文档与作用域编辑器共享（幂等）：参数编辑与 JSON 直编读写同一份状态
         loadScopedEditor(packageName)
+        ensureDeviceCaps()
         viewModelScope.launch {
             _detailState.value = DetailState(loading = true)
             val state = withContext(Dispatchers.IO) {
