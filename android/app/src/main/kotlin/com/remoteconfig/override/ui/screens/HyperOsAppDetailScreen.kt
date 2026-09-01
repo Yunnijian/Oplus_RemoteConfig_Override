@@ -49,11 +49,15 @@ fun HyperOsAppDetailScreen(packageName: String) {
     LaunchedEffect(state.view, stat) {
         if (state.view != null) {
             headerInfo = withContext(Dispatchers.IO) {
+                val frozen = stat?.sp?.frozen == true
+                // 冻结哨兵（Long.MAX）/未拉取(0) 不作为版本号展示；冻结态由冻结徽标表达
+                val version = stat?.sp?.prefLocalMaxVersion
+                    ?.takeIf { !frozen && it != "0" && it != "9223372036854775807" }
                 DetailHeaderInfo(
                     icon = viewModel.getCachedIcon(packageName),
                     label = viewModel.appLabel(packageName),
-                    cloudVersion = stat?.sp?.prefLocalMaxVersion.orEmpty(),
-                    frozen = stat?.sp?.frozen == true,
+                    cloudVersion = version.orEmpty(),
+                    frozen = frozen,
                 )
             }
         }
@@ -65,7 +69,7 @@ fun HyperOsAppDetailScreen(packageName: String) {
             runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
         }
     }
-    val dirty = scoped.base != null && scoped.edited != scoped.base
+    val dirty = scopedIsDirty(scoped.base, scoped.edited)
 
     when (LocalUiMode.current) {
         UiMode.Miuix -> HyperOsAppDetailMiuix(

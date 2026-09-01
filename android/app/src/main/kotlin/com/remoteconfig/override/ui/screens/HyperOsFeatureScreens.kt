@@ -115,7 +115,7 @@ fun HyperOsThermalFpsScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "温控与帧率",
-        dirty = scoped.base != null && scoped.edited != scoped.base,
+        dirty = scopedIsDirty(scoped.base, scoped.edited),
         saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
@@ -214,7 +214,7 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "性能调度",
-        dirty = scoped.base != null && scoped.edited != scoped.base,
+        dirty = scopedIsDirty(scoped.base, scoped.edited),
         saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
@@ -254,18 +254,12 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
                 }
             }
         }
-        // 场景生效范围（逗号 scene_id）
-        listOf(
-            "disable_scenes" to "禁用场景（逗号 scene_id）",
-            "start_scene" to "生效起始场景",
-            "end_scene" to "生效结束场景",
-        ).forEach { (key, label) ->
-            (fragment[key] as? JsonPrimitive)?.let { v ->
-                item(key = key) {
-                    HyperOsValueRow(title = label, value = v.content) {
-                        textTarget = EditTarget(label, v.content, isNumber = false) { nv ->
-                            viewModel.updateFragmentValue(pointer, key, v.sameTypePrimitive(nv))
-                        }
+        // 场景生效范围
+        (fragment["disable_scenes"] as? JsonPrimitive)?.let { v ->
+            item(key = "disable_scenes") {
+                HyperOsValueRow(title = "禁用场景（逗号 scene_id）", value = v.content) {
+                    textTarget = EditTarget("禁用场景", v.content, isNumber = false) { nv ->
+                        viewModel.updateFragmentValue(pointer, "disable_scenes", v.sameTypePrimitive(nv))
                     }
                 }
             }
@@ -338,18 +332,11 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
                             ) { b -> viewModel.updateSceneValue(pointer, scene.index, k, JsonPrimitive(b)) }
                         }
                     }
-                    // 命令组：end 组不展示（恢复默认态，无修改价值）；
-                    // perflock 命令不进功能页（原样透传）；其余经 CmdEditor 结构化编辑
+                    // 命令组：end 组不展示（恢复默认态，无修改价值）；perflock 命令
+                    // 同样不进功能页（原样透传，不展示不计数）；其余经 CmdEditor 编辑
                     val editable = scene.containers.filter { !it.key.startsWith("end") }
                     editable.forEach { container ->
-                        val (shown, perflocks) = container.entries.partition { !it.cmd.startsWith("perflock#") }
-                        if (perflocks.isNotEmpty()) {
-                            HyperOsActionRow(
-                                title = "${container.key} · perflock ×${perflocks.size}",
-                                summary = "锁定命令不在此编辑（保存时原样保留）",
-                            )
-                        }
-                        shown.forEach { entry ->
+                        container.entries.filter { !it.cmd.startsWith("perflock#") }.forEach { entry ->
                             HyperOsActionRow(
                                 title = "${container.key}[${entry.index}] ${entry.permission}",
                                 summary = entry.cmd,
@@ -457,7 +444,7 @@ fun HyperOsFisrScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "插帧超分",
-        dirty = scoped.base != null && scoped.edited != scoped.base,
+        dirty = scopedIsDirty(scoped.base, scoped.edited),
         saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
@@ -539,22 +526,30 @@ fun HyperOsFisrScreen(pkg: String) {
                             }
                         }
                     }
-                    HyperOsActionRow(title = "删除此策略", summary = "从 enhance_policy_config 移除") {
-                        viewModel.updateFragmentValue(
-                            pointer, "enhance_policy_config",
-                            JsonArray(policies.filterIndexed { idx, _ -> idx != i }),
-                        )
-                    }
+                    HyperOsActionRow(
+                        title = "删除此策略",
+                        summary = "从 enhance_policy_config 移除",
+                        onClick = {
+                            viewModel.updateFragmentValue(
+                                pointer, "enhance_policy_config",
+                                JsonArray(policies.filterIndexed { idx, _ -> idx != i }),
+                            )
+                        },
+                    )
                 }
             }
         }
 
         item(key = "add_policy") {
             HyperOsSectionCard {
-                HyperOsActionRow(title = "+ 添加策略", summary = "追加一条 {feature, strategy}") {
-                    val newEntry = JsonObject(mapOf("feature" to JsonPrimitive("FI"), "strategy" to JsonPrimitive("FRC")))
-                    viewModel.updateFragmentValue(pointer, "enhance_policy_config", JsonArray(policies + newEntry))
-                }
+                HyperOsActionRow(
+                    title = "+ 添加策略",
+                    summary = "追加一条 {feature, strategy}",
+                    onClick = {
+                        val newEntry = JsonObject(mapOf("feature" to JsonPrimitive("FI"), "strategy" to JsonPrimitive("FRC")))
+                        viewModel.updateFragmentValue(pointer, "enhance_policy_config", JsonArray(policies + newEntry))
+                    },
+                )
             }
         }
 
@@ -575,7 +570,7 @@ fun HyperOsFisrScreen(pkg: String) {
             if (novatekEntry == null) {
                 item(key = "nt_raw") {
                     HyperOsSectionCard(title = "当前条目（格式不识别，只读）") {
-                        HyperOsActionRow(title = "raw", summary = novatekRaw)
+                        HyperOsMonoBlockRow(title = "raw", body = novatekRaw.orEmpty())
                     }
                 }
             }
@@ -634,7 +629,7 @@ fun HyperOsFisrScreen(pkg: String) {
             (nonPlaying?.second as? JsonPrimitive)?.let { np ->
                 item(key = "nt_non_playing") {
                     HyperOsSectionCard(title = "非游玩降级档（novatek_non_playing_config）") {
-                        HyperOsActionRow(title = "raw", summary = np.content.take(200))
+                        HyperOsMonoBlockRow(title = "raw", body = np.content)
                         HyperOsActionRow(
                             title = "在 JSON 编辑器中修改",
                             summary = "格式与 game_params 相同",
@@ -643,7 +638,7 @@ fun HyperOsFisrScreen(pkg: String) {
                     }
                 }
             }
-            // 黑名单（仅在名单内时出现片段 → 可移除；加入走 JSON 编辑）
+            // 黑名单（仅在名单内时出现片段 → 可移除；加入走 JSON 编辑，不在名单不提示）
             if (blacklistFound != null) {
                 val arr = blacklistFound.second as? JsonArray
                 item(key = "nt_blacklist") {
@@ -660,13 +655,6 @@ fun HyperOsFisrScreen(pkg: String) {
                             viewModel.updateFragmentSelf(blacklistFound.first, JsonArray(kept))
                         }
                     }
-                }
-            } else {
-                item(key = "nt_blacklist_off") {
-                    HyperOsActionRow(
-                        title = "独显黑名单",
-                        summary = "当前不在名单内（加入请走 JSON 编辑器编辑 novatek_black_app）",
-                    )
                 }
             }
         }
@@ -765,7 +753,7 @@ fun HyperOsMigtScreen(pkg: String) {
             // 条目存在但格式不识别：只读原始串，避免丢数据
             item(key = "raw") {
                 HyperOsSectionCard(title = "当前条目（格式不识别，只读）") {
-                    HyperOsActionRow(title = "raw", summary = migt.raw)
+                    HyperOsMonoBlockRow(title = "raw", body = migt.raw.orEmpty())
                 }
             }
         }
@@ -857,7 +845,7 @@ fun HyperOsGpuTunerScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "GPU 自研调参",
-        dirty = scoped.base != null && scoped.edited != scoped.base,
+        dirty = scopedIsDirty(scoped.base, scoped.edited),
         saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,
@@ -963,7 +951,7 @@ fun HyperOsDynResScreen(pkg: String) {
 
     HyperOsFeatureScaffold(
         title = "动态分辨率",
-        dirty = scoped.base != null && scoped.edited != scoped.base,
+        dirty = scopedIsDirty(scoped.base, scoped.edited),
         saving = scoped.writing,
         error = detail.switchError ?: scoped.error,
         loading = detail.loading || scoped.loading,

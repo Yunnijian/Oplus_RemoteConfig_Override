@@ -1,7 +1,6 @@
 package com.remoteconfig.override.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.widthIn
@@ -333,6 +333,62 @@ fun HyperOsSectionLabel(text: String) {
     }
 }
 
+/**
+ * 等宽文本块行（超长原文展示专用，如 novatek token 串）。
+ *
+ * 刻意不用 BasicComponent/SegmentedListItem 的 summary 槽：超长摘要会触发行高
+ * 测量振荡（每帧重组 → 列表闪烁 + 滚动锁死），这里固定 maxLines 截断。
+ */
+@Composable
+internal fun HyperOsMonoBlockRow(title: String, body: String, maxLines: Int = 6) {
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            MiuixText(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = miuixColorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            MiuixText(
+                text = body,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = miuixColorScheme.onSurfaceVariantSummary,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        UiMode.Material -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * 作用域草稿是否真的有修改：**结构化比较**（解析后按 JSON 值相等），
+ * 字符串层格式差异（重排序/空白）不误报“未保存的修改”。
+ */
+internal fun scopedIsDirty(base: String?, edited: String?): Boolean {
+    if (base == null || edited == null || base == edited) return false
+    val b = runCatching { Json.parseToJsonElement(base) }.getOrNull() ?: return true
+    val e = runCatching { Json.parseToJsonElement(edited) }.getOrNull() ?: return true
+    return b != e
+}
+
 /** 布尔开关行（Miuix 必须 SwitchPreference，禁 basic.Switch 手拼 —— 项目规范）。 */
 @Composable
 fun HyperOsSwitchRow(
@@ -364,21 +420,25 @@ fun HyperOsSwitchRow(
     }
 }
 
-/** 可点击动作行（title + summary + 右侧自定义槽，如值/箭头）。 */
+/**
+ * 可点击动作行（title + summary + 右侧自定义槽，如值/箭头）。
+ *
+ * 参数顺序是承重的：[onClick] 必须排在最后。尾随 lambda 绑定到最后一个参数，若
+ * [end]（`@Composable` 内容槽）在后，`HyperOsActionRow(...) { 改草稿 }` 会被当作
+ * 组合期内容执行 —— 组合期写 StateFlow → 自激重组 → 每帧改写 edited（列表持续闪烁）。
+ */
 @Composable
 fun HyperOsActionRow(
     title: String,
     summary: String? = null,
-    onClick: (() -> Unit)? = null,
     end: (@Composable RowScope.() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     when (LocalUiMode.current) {
+        // 必须用 BasicComponent 原生 onClick：把点击挂到 modifier.combinedClickable
+        // 会让 Miuix 在每次重组时执行 onClick（自激循环 → 列表闪烁 + 滚动锁死）
         UiMode.Miuix -> BasicComponent(
-            modifier = if (onClick != null) {
-                Modifier.combinedClickable(interactionSource = null, indication = ripple(), onClick = onClick)
-            } else {
-                Modifier
-            },
+            onClick = onClick ?: {},
             title = title,
             summary = summary,
             endActions = end,
@@ -404,8 +464,9 @@ fun HyperOsValueRow(
     onClick: () -> Unit,
 ) {
     when (LocalUiMode.current) {
+        // 同上：onClick 走 BasicComponent 原生参数，禁止 modifier.combinedClickable
         UiMode.Miuix -> BasicComponent(
-            modifier = Modifier.combinedClickable(interactionSource = null, indication = ripple(), onClick = onClick),
+            onClick = onClick,
             title = title,
             endActions = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -416,7 +477,7 @@ fun HyperOsValueRow(
                         color = miuixColorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 160.dp),
+                        modifier = Modifier.width(120.dp),
                     )
                     MiuixIcon(
                         imageVector = Icons.Filled.KeyboardArrowRight,
@@ -439,7 +500,7 @@ fun HyperOsValueRow(
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 160.dp),
+                        modifier = Modifier.width(120.dp),
                     )
                     Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "编辑")
                 }
