@@ -629,6 +629,19 @@ internal fun parseFpsBands(value: String): List<FpsBand> {
 internal fun formatFpsBands(bands: List<FpsBand>): String =
     bands.joinToString(";") { (key, pts) -> "$key#" + pts.joinToString(",") { p -> "${p.first}:${p.second}" } }
 
+/**
+ * 单层曲线（无档位，如温控限帧 dynamic_fps `43.5:60,45:40`）→ 触发点列表。
+ * 与 [parseFpsBands] 不同：不入档位结构，直接 `[x,y]` 对，x = 温度，y = 限帧。
+ */
+internal fun parseSimpleCurve(value: String, format: CurveCodec.Format): List<Pair<String, String>> {
+    val segs = CurveCodec.parse(value, format) ?: return emptyList()
+    return segs.map { it.x to it.y }
+}
+
+/** 触发点列表 → 单层曲线串（`x:y,...`）。 */
+internal fun formatSimpleCurve(points: List<Pair<String, String>>, format: CurveCodec.Format): String =
+    points.joinToString(format.separator) { p -> "${p.first}:${p.second}" }
+
 /** 限帧下拉选项：不限(0) + 设备刷新率档（升序），已有值不在表内时并入。 */
 internal fun fpsOptions(refreshRates: List<Int>, existing: List<String>): List<String> {
     val values = (listOf(0) + refreshRates + existing.mapNotNull { it.toIntOrNull() }).distinct().sorted()
@@ -719,6 +732,38 @@ internal fun BandFpsDropdownRow(fps: String, options: List<String>, enabled: Boo
         )
     }
 }
+
+/** 触发后限频下拉行（选项 = 设备 CPU 频率，MHz 显示 / Hz 存储）。 */
+@Composable
+internal fun BandFreqDropdownRow(freq: String, cpuFreqs: List<Long>, enabled: Boolean, onSelect: (String) -> Unit) {
+    val labels = cpuFreqs.map { "${it / 1000} MHz" }
+    val options = cpuFreqs.map { it.toString() }
+    // 已有值不在设备表内（云控配置可能含设备未枚举频率）→ 并入保持可显示
+    val labelOf: (String) -> String = { f -> f.toLongOrNull()?.let { "${it / 1000} MHz" } ?: f }
+    val merged = if (options.contains(freq)) options else options + freq
+    val mergedLabels = if (options.contains(freq)) labels else labels + labelOf(freq)
+    val idx = merged.indexOf(freq).takeIf { it >= 0 } ?: 0
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> OverlayDropdownPreference(
+            items = mergedLabels,
+            selectedIndex = idx,
+            title = "触发后限频",
+            enabled = enabled,
+            onSelectedIndexChange = { i -> onSelect(merged[i]) },
+        )
+        UiMode.Material -> SegmentedDropdownItem(
+            title = "触发后限频",
+            items = mergedLabels,
+            selectedIndex = idx,
+            enabled = enabled,
+            onItemSelected = { i -> onSelect(merged[i]) },
+        )
+    }
+}
+
+/** 频率串 → 显示 label：`1804800` → `1804 MHz`。 */
+internal fun freqLabel(freq: String): String =
+    freq.toLongOrNull()?.let { "${it / 1000} MHz" } ?: freq
 
 // ── 曲线编辑器（S4：`x:y[,…]` 串 ↔ 行表格双向绑定）────────────────────────
 

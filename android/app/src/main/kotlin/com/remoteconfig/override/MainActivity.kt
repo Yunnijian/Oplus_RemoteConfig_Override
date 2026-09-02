@@ -40,6 +40,7 @@ import com.remoteconfig.override.ui.screens.HyperOsPerfScheduleScreen
 import com.remoteconfig.override.ui.screens.HyperOsScopedEditorScreen
 import com.remoteconfig.override.ui.screens.HyperOsThermalFpsScreen
 import com.remoteconfig.override.ui.screens.HyperOsBandEditorScreen
+import com.remoteconfig.override.ui.screens.HyperOsSimpleCurveEditorScreen
 import com.remoteconfig.override.ui.screens.MainScreen
 import com.remoteconfig.override.ui.theme.LocalColorMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
@@ -186,6 +187,11 @@ class MainActivity : ComponentActivity() {
                             entry<Route.HyperOsBandEditor> { key ->
                                 HyperOsBandEditorScreen(
                                     key.packageName, key.curveKey, key.curveLabel, key.bandKey,
+                                )
+                            }
+                            entry<Route.HyperOsSimpleCurveEditor> { key ->
+                                HyperOsSimpleCurveEditorScreen(
+                                    key.packageName, key.curveKey, key.curveLabel,
                                 )
                             }
                             entry<Route.HyperOsFisr> { key ->

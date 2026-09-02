@@ -48,6 +48,14 @@ sealed interface Route : NavKey, Parcelable {
         val bandKey: String,
     ) : Route
 
+    /** 单层温控曲线编辑页（温控限帧曲线 dynamic_fps）：无档位，直接编辑触发点列表。 */
+    @Parcelize
+    data class HyperOsSimpleCurveEditor(
+        val packageName: String,
+        val curveKey: String,
+        val curveLabel: String,
+    ) : Route
+
     @Parcelize
     data class HyperOsFisr(val packageName: String) : Route
 
