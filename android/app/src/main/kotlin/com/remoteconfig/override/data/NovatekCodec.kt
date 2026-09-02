@@ -20,6 +20,27 @@ object NovatekCodec {
         "LDSRV2Mode", "GEX", "GEXMode", "EMV", "EMVMode",
     )
 
+    /** 插帧预制方案（2026-09-02 v2：只改前两组 4 数，全部取自 songyuan 现成样例）。 */
+    data class FpsPreset(
+        val label: String,
+        val dynamicFps: String,
+        val targetFps: String,
+        val inputFps: String,
+        val targetOut: String,
+    )
+
+    val FPS_PRESETS = listOf(
+        FpsPreset("30-60", "31", "60", "30", "60"),
+        FpsPreset("55-165", "55", "165", "55", "165"),
+        FpsPreset("83-165", "83", "165", "83", "165"),
+        FpsPreset("60-120", "61", "120", "60", "120"),
+        FpsPreset("93-185", "93", "185", "93", "185"),
+        FpsPreset("73-144", "73", "144", "72", "144"),
+    )
+
+    /** 温度档位偏移（℃）预制值。 */
+    val TEMP_OFFSETS = listOf(10, 20, 30, 40)
+
     /** 一个温度等级（7 字段；params 保持原 token 列表）。 */
     data class Level(
         val dynamicFps: String,
@@ -29,7 +50,32 @@ object NovatekCodec {
         val tgRec: String,
         val mgTh: String,
         val mgRec: String,
-    )
+    ) {
+        /** 插帧方案应用：只改前两组 4 数（dynamicFps#targetFps 与 params 头 InputFPS,TargetFPS），
+         *  其余 params（MEMC/MEMCMode/超分等）原样保留。 */
+        fun withFpsPreset(p: FpsPreset): Level {
+            val newParams = params.toMutableList().also { list ->
+                if (list.isNotEmpty()) list[0] = p.inputFps
+                if (list.size >= 2) list[1] = p.targetOut
+            }
+            return copy(dynamicFps = p.dynamicFps, targetFps = p.targetFps, params = newParams)
+        }
+
+        /** 温度偏移：4 个温度字段整体加 offset（容忍小数如 46.7；整数结果不带 .0）。 */
+        fun withTempOffset(offset: Int): Level = copy(
+            tgTh = offsetTemp(tgTh, offset),
+            tgRec = offsetTemp(tgRec, offset),
+            mgTh = offsetTemp(mgTh, offset),
+            mgRec = offsetTemp(mgRec, offset),
+        )
+
+        private companion object {
+            fun offsetTemp(v: String, offset: Int): String = v.trim().toDoubleOrNull()?.let {
+                val r = it + offset
+                if (r % 1.0 == 0.0) r.toLong().toString() else r.toString()
+            } ?: v
+        }
+    }
 
     /** 一段策略链（FI / SR / FISR）。 */
     data class Segment(val levels: List<Level>)

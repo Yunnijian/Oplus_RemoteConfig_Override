@@ -85,6 +85,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 fun HyperOsCommonConfigMiuix(
     state: HyperOsViewModel.CommonState,
     bottomInnerPadding: Dp = 0.dp,
+    embeddedInPager: Boolean = false,
     onToggle: (HyperOsViewModel.SwitchRow) -> Unit,
     onFreeze: () -> Unit,
     onUnfreeze: () -> Unit,
@@ -114,16 +115,19 @@ fun HyperOsCommonConfigMiuix(
                     color = barColor,
                     title = "HyperOS 通用配置",
                     navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            val layoutDirection = LocalLayoutDirection.current
-                            Icon(
-                                modifier = Modifier.graphicsLayer {
-                                    if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
-                                },
-                                imageVector = MiuixIcons.Back,
-                                contentDescription = "返回",
-                                tint = colorScheme.onBackground,
-                            )
+                        // Pager 内嵌页无导航栈，不展示返回按钮（push 路由进入时保留）
+                        if (!embeddedInPager) {
+                            IconButton(onClick = { navigator.pop() }) {
+                                val layoutDirection = LocalLayoutDirection.current
+                                Icon(
+                                    modifier = Modifier.graphicsLayer {
+                                        if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
+                                    },
+                                    imageVector = MiuixIcons.Back,
+                                    contentDescription = "返回",
+                                    tint = colorScheme.onBackground,
+                                )
+                            }
                         }
                     },
                     scrollBehavior = scrollBehavior,

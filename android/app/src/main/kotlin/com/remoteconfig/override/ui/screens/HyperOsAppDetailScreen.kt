@@ -114,7 +114,7 @@ data class DetailHeaderInfo(
 enum class HyperOsFeatureEntry(val title: String, val summary: String) {
     THERMAL_FPS("温控与帧率", "温控限帧曲线 / PID / 低电量限帧"),
     PERF_SCHEDULE("性能调度", "本应用参数 + 场景管理（scene_ovrride）"),
-    FISR("插帧超分", "fisr NT 策略表 + Novatek 独显配置"),
+    FISR("插帧超分", "Novatek 插帧 / 超分方案（FI / SR / FISR）"),
     DYN_RES("动态分辨率", "MIGL 动态分辨率曲线与映射"),
     GPU_TUNER("GPU 自研调参", "self_gpu_tuner profile 键值"),
     MIGT("migt 帧感知加速", "名单进出与帧感知参数包"),
@@ -155,8 +155,10 @@ internal fun visibleFeatureEntries(
     if (ovrride != null) entries += HyperOsFeatureEntry.THERMAL_FPS
     // 性能调度：per-app 参数或场景条目存在
     if (perfKeys || scenes) entries += HyperOsFeatureEntry.PERF_SCHEDULE
-    // 插帧超分：fisr 片段存在（direct 或 OTHER 兜底命中）
-    if (fisr != null) entries += HyperOsFeatureEntry.FISR
+    // 插帧超分：Novatek 段（songyuan 实际生效路径，值为 token 字符串 → findAnyFragment）
+    // 或 fisr 策略片段存在
+    val novatek = document.findAnyFragment("/game_booster/novatek_game_params/")
+    if (fisr != null || novatek != null) entries += HyperOsFeatureEntry.FISR
     // 动态分辨率：migl 片段或 ovrride 内 migl_dr_* / dsar / drr 键
     val dynResKeys = ovrride?.second?.keysMatching("migl_dr_", "dsar", "drr")?.isNotEmpty() == true
     if (migl != null || dynResKeys) entries += HyperOsFeatureEntry.DYN_RES

@@ -4,6 +4,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,8 +51,6 @@ private data class ThermalParam(val key: String, val label: String, val format: 
 
 private val THERMAL_COMMON = listOf(
     ThermalParam("dynamic_fps_hysteresis", "温度档回切滞回（秒）", null),
-    ThermalParam("badfps_thresh1", "低帧率统计阈值 1", null),
-    ThermalParam("badfps_thresh2", "低帧率统计阈值 2", null),
     ThermalParam("monitor_power", "功耗监控曲线", CurveCodec.TEMP_POWER),
 )
 
@@ -779,18 +778,10 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
 /** 场景命令编辑目标（容器内定位 + 原始 cmd）。 */
 private data class SceneCmdTarget(val title: String, val initial: String, val onCommit: (String) -> Unit)
 
-/** Novatek 等级编辑目标（段标识 + 等级下标 + 当前等级）。 */
-private data class NtLevelTarget(
-    val label: String,
-    val levelIndex: Int,
-    val level: NovatekCodec.Level,
-    val onCommit: (NovatekCodec.Level) -> Unit,
-)
-
-// ── S3-3 插帧超分（FISR）────────────────────────────────────────────────────
-
-private val FISR_FEATURES = listOf("FI", "SR", "FISR", "RE", "PQ_FIRST", "FPS_FIRST")
-private val FISR_STRATEGIES = listOf("FRC", "FSR", "FSR3", "XAISR", "XFI", "AFME", "NT#FI", "NT#SR", "NT#FISR")
+// ── S3-3 插帧超分（Novatek 独显，2026-09-02 v2）─────────────────────────────
+//
+// 只保留生效路径（novatek_game_params）：FI / SR / FISR 三段，每段用原生下拉
+// 直接选「插帧方案」「温度档位」，选中即写回。无自建弹窗、无只读展示行、无冗余小标题。
 
 @Composable
 fun HyperOsFisrScreen(pkg: String) {
@@ -798,21 +789,12 @@ fun HyperOsFisrScreen(pkg: String) {
     val viewModel: HyperOsViewModel = viewModel()
     val detail by viewModel.detailState.collectAsStateWithLifecycle()
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
-    val caps by viewModel.deviceCapsState.collectAsStateWithLifecycle()
-    val spEcho by viewModel.spEchoState.collectAsStateWithLifecycle()
-    LaunchedEffect(pkg) {
-        viewModel.loadDetail(pkg)
-        viewModel.loadSpEcho(listOf("fisr_switch_$pkg", "fisr_enhance_status_$pkg"))
-    }
+    LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
     val document = remember(scoped.edited) {
         scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
     }
-    val found = remember(document) { document.findFragment("/game_booster/fisr_config/enhance_config/") }
-    val (pointer, fragment) = found ?: (null to null)
-    val policies = remember(fragment) { (fragment?.get("enhance_policy_config") as? JsonArray).orEmpty() }
 
-    // Novatek 片段定位（remember 须在组合期，不能放 LazyListScope 内）
     val novatekFound = remember(document) { document.findAnyFragment("/game_booster/novatek_game_params/") }
     val novatekRaw = (novatekFound?.second as? JsonPrimitive)?.content
     val novatekEntry = remember(novatekRaw) { novatekRaw?.let { NovatekCodec.parse(it) } }
@@ -824,31 +806,17 @@ fun HyperOsFisrScreen(pkg: String) {
     }
     val blacklistFound = remember(document) { document.findAnyFragment("/game_booster/novatek_black_app") }
 
+    // 温度档位：记录每段已应用的偏移（相对基线），下拉切换按增量写回
+    val tempApplied = remember { mutableStateMapOf<String, Int>() }
+
     var textTarget by remember { mutableStateOf<EditTarget?>(null) }
-    var intTarget by remember { mutableStateOf<EditTarget?>(null) }
-    var ntLevelTarget by remember { mutableStateOf<NtLevelTarget?>(null) }
     textTarget?.let { t ->
         EditValueDialog(title = t.title, initial = t.initial, isNumber = false, onCommit = { v ->
             textTarget = null; t.onCommit(v)
         }, onDismiss = { textTarget = null })
     }
-    intTarget?.let { t ->
-        EditValueDialog(title = t.title, initial = t.initial, isNumber = true, onCommit = { v ->
-            intTarget = null; t.onCommit(v)
-        }, onDismiss = { intTarget = null })
-    }
-    ntLevelTarget?.let { t ->
-        NovatekLevelDialog(
-            title = "Novatek ${t.label} 等级 ${t.levelIndex}",
-            level = t.level,
-            refreshRates = caps?.refreshRates.orEmpty(),
-            onCommit = { lv ->
-                ntLevelTarget = null
-                t.onCommit(lv)
-            },
-            onDismiss = { ntLevelTarget = null },
-        )
-    }
+
+    val editable = !scoped.writing
 
     HyperOsFeatureScaffold(
         title = "插帧超分",
@@ -856,257 +824,117 @@ fun HyperOsFisrScreen(pkg: String) {
         loading = detail.loading || scoped.loading,
         onBack = navigator::pop,
     ) {
-        if (fragment == null || pointer == null) {
-            item(key = "empty") { HyperOsEmptyHint("该应用无 FISR 策略片段") }
+        if (novatekFound == null) {
+            item(key = "empty") { HyperOsEmptyHint("该应用无 Novatek 插帧/超分条目") }
             return@HyperOsFeatureScaffold
         }
 
-        // 运行态只读（Joyose SP：fisr_switch / fisr_enhance_status）
-        item(key = "runtime") {
-            HyperOsSectionCard(
-                title = "运行态（只读）",
-                rows = listOf<@Composable () -> Unit>(
-                    {
-                        HyperOsActionRow(
-                            title = "插帧开关（fisr_switch）",
-                            summary = spEcho["fisr_switch_$pkg"]?.let { "已写入：$it" } ?: "未写入（默认关闭）",
-                        )
-                    },
-                    {
-                        HyperOsActionRow(
-                            title = "增强状态（fisr_enhance_status）",
-                            summary = spEcho["fisr_enhance_status_$pkg"]?.let { "已写入：$it" } ?: "未写入",
-                        )
-                    },
-                ),
-            )
-        }
-
-        item(key = "game_list") {
-            val games = (fragment["game_list"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }
-            HyperOsSectionCard(
-                title = "覆盖范围",
-                rows = listOf<@Composable () -> Unit> {
-                    HyperOsActionRow(title = "game_list", summary = games?.joinToString(", ").orEmpty())
-                },
-            )
-        }
-
-        // enhance_policy_config 逐条表单（数组内增删 = 片段内部结构调整，作用域写回支持）
-        policies.forEachIndexed { i, entry ->
-            val obj = entry as? JsonObject ?: return@forEachIndexed
-            item(key = "policy_$i") {
-                val feature = (obj["feature"] as? JsonPrimitive)?.content.orEmpty()
-                val strategy = (obj["strategy"] as? JsonPrimitive)?.content.orEmpty()
-                val refresh = (obj["support_max_refresh"] as? JsonPrimitive)
-                val scenes = (obj["disable_scene_list"] as? JsonArray)
-                val status = (obj["switch_default_status"] as? JsonPrimitive)
+        if (novatekEntry == null) {
+            item(key = "nt_raw") {
                 HyperOsSectionCard(
-                    title = "策略 ${i + 1}",
-                    rows = buildList<@Composable () -> Unit> {
-                        add {
-                            HyperOsValueRow(title = "feature（增强类型）", value = feature) {
-                                textTarget = EditTarget("feature", feature, isNumber = false) { v ->
-                                    viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "feature"), JsonPrimitive(v))
-                                }
-                            }
-                        }
-                        add {
-                            HyperOsValueRow(title = "strategy（实现策略）", value = strategy) {
-                                textTarget = EditTarget("strategy", strategy, isNumber = false) { v ->
-                                    viewModel.updateFragmentNested(pointer, listOf("enhance_policy_config", "$i", "strategy"), JsonPrimitive(v))
-                                }
-                            }
-                        }
-                        if (refresh != null) {
-                            add {
-                                HyperOsValueRow(title = "support_max_refresh（上限刷新率）", value = refresh.content) {
-                                    intTarget = EditTarget("support_max_refresh", refresh.content, isNumber = true) { v ->
-                                        v.toLongOrNull()?.let { n ->
-                                            viewModel.updateFragmentNested(
-                                                pointer, listOf("enhance_policy_config", "$i", "support_max_refresh"), JsonPrimitive(n),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if (scenes != null) {
-                            add {
-                                HyperOsActionRow(
-                                    title = "disable_scene_list（命中即停增强）",
-                                    summary = scenes.joinToString(", ") { (it as? JsonPrimitive)?.content.orEmpty() },
-                                )
-                            }
-                        }
-                        if (status != null) {
-                            add {
-                                HyperOsValueRow(title = "switch_default_status", value = status.content) {
-                                    textTarget = EditTarget("switch_default_status", status.content, isNumber = false) { v ->
-                                        viewModel.updateFragmentNested(
-                                            pointer, listOf("enhance_policy_config", "$i", "switch_default_status"), JsonPrimitive(v),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        add {
-                            HyperOsActionRow(
-                                title = "删除此策略",
-                                summary = "从 enhance_policy_config 移除",
-                                onClick = {
-                                    viewModel.updateFragmentValue(
-                                        pointer, "enhance_policy_config",
-                                        JsonArray(policies.filterIndexed { idx, _ -> idx != i }),
-                                    )
-                                },
-                            )
-                        }
+                    title = "当前条目（格式不识别，只读）",
+                    rows = listOf<@Composable () -> Unit> {
+                        HyperOsMonoBlockRow(title = "raw", body = novatekRaw.orEmpty())
                     },
                 )
             }
         }
 
-        item(key = "add_policy") {
-            HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
-                HyperOsActionRow(
-                    title = "+ 添加策略",
-                    summary = "追加一条 {feature, strategy}",
-                    onClick = {
-                        val newEntry = JsonObject(mapOf("feature" to JsonPrimitive("FI"), "strategy" to JsonPrimitive("FRC")))
-                        viewModel.updateFragmentValue(pointer, "enhance_policy_config", JsonArray(policies + newEntry))
-                    },
-                )
-            })
-        }
-
-        item(key = "enum_hint") {
-            HyperOsSectionCard(
-                title = "取值参考",
-                rows = listOf<@Composable () -> Unit>(
-                    { HyperOsActionRow(title = "feature", summary = FISR_FEATURES.joinToString(" / ")) },
-                    { HyperOsActionRow(title = "strategy", summary = FISR_STRATEGIES.joinToString(" / ") + "（可 - 组合）") },
-                    {
-                        HyperOsActionRow(
-                            title = "support_max_refresh 档位",
-                            summary = "本机刷新率：" + (caps?.refreshRates?.joinToString("/ ") ?: "未知"),
-                        )
-                    },
-                ),
-            )
-        }
-
-        // ── Novatek 独显配置（songyuan 实际路径，方案 1.6）──
-        if (novatekFound != null) {
-            item(key = "sec_nt") { HyperOsSectionLabel("Novatek 独显（novatek_game_params）") }
-            if (novatekEntry == null) {
-                item(key = "nt_raw") {
-                    HyperOsSectionCard(
-                        title = "当前条目（格式不识别，只读）",
-                        rows = listOf<@Composable () -> Unit> {
-                            HyperOsMonoBlockRow(title = "raw", body = novatekRaw.orEmpty())
-                        },
-                    )
+        novatekEntry?.let { entry ->
+            val ntTarget = novatekFound.first
+            // 段整体变换写回（which = FI/SR/FISR）
+            fun rewrite(which: String, seg: NovatekCodec.Segment, t: (NovatekCodec.Level) -> NovatekCodec.Level) {
+                val ns = NovatekCodec.Segment(seg.levels.map(t))
+                val newEntry = when (which) {
+                    "FI" -> entry.copy(fi = ns)
+                    "SR" -> entry.copy(sr = ns)
+                    else -> entry.copy(fisr = ns)
+                }
+                viewModel.updateFragmentSelf(ntTarget, JsonPrimitive(NovatekCodec.serialize(newEntry)))
+            }
+            fun pickTemp(which: String, seg: NovatekCodec.Segment, target: Int) {
+                val delta = target - (tempApplied[which] ?: 0)
+                if (delta != 0) {
+                    rewrite(which, seg) { it.withTempOffset(delta) }
+                    tempApplied[which] = target
                 }
             }
-            novatekEntry?.let { entry ->
-                val ntTarget = novatekFound.first
-                val segments = listOf(
-                    "FI（插帧）" to entry.fi,
-                    "SR（超分）" to entry.sr,
-                    "FISR（插帧+超分）" to entry.fisr,
-                )
-                // 每段（FI/SR/FISR）合并为一张卡，段内等级为行
-                segments.forEach { (label, seg) ->
-                    if (seg == null) return@forEach
-                    item(key = "nt_$label") {
-                        HyperOsSectionCard(
-                            title = label,
-                            rows = seg.levels.mapIndexed { li, lvl ->
-                                val levels = seg.levels
-                                @Composable {
-                                    HyperOsValueRow(
-                                        title = "等级 $li（${lvl.dynamicFps} → ${lvl.targetFps}fps）",
-                                        value = lvl.params.joinToString(","),
-                                    ) {
-                                        ntLevelTarget = NtLevelTarget(label, li, lvl) { newLevel ->
-                                            val newSeg = NovatekCodec.Segment(
-                                                levels.toMutableList().also { it[li] = newLevel },
-                                            )
-                                            val newEntry = when (label) {
-                                                "FI（插帧）" -> entry.copy(fi = newSeg)
-                                                "SR（超分）" -> entry.copy(sr = newSeg)
-                                                else -> entry.copy(fisr = newSeg)
-                                            }
-                                            viewModel.updateFragmentSelf(
-                                                ntTarget,
-                                                JsonPrimitive(NovatekCodec.serialize(newEntry)),
-                                            )
-                                        }
-                                    }
-                                }
-                            },
-                        )
+            item(key = "nt") {
+                HyperOsSectionCard(rows = buildList<@Composable () -> Unit> {
+                    add {
+                        NovatekPresetDropdownRow("插帧方案（FI）", entry.fi, editable) { p ->
+                            rewrite("FI", entry.fi) { it.withFpsPreset(p) }
+                        }
                     }
-                }
+                    add { NovatekTempDropdownRow("温度档位（FI）", tempApplied["FI"] ?: 0, editable) { pickTemp("FI", entry.fi, it) } }
+                    add { NovatekTempDropdownRow("温度档位（SR）", tempApplied["SR"] ?: 0, editable) { pickTemp("SR", entry.sr, it) } }
+                    entry.fisr?.let { fs ->
+                        add {
+                            NovatekPresetDropdownRow("插帧方案（FISR）", fs, editable) { p ->
+                                rewrite("FISR", fs) { it.withFpsPreset(p) }
+                            }
+                        }
+                        add { NovatekTempDropdownRow("温度档位（FISR）", tempApplied["FISR"] ?: 0, editable) { pickTemp("FISR", fs, it) } }
+                    }
+                })
             }
+        }
 
-            // GEX 帧率上限（pkg:fps）
-            (gexFound?.second as? JsonPrimitive)?.let { gex ->
-                item(key = "nt_gex") {
-                    HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
-                        HyperOsValueRow(title = "Novatek GEX 帧率上限", value = gex.content) {
-                            val fps = gex.content.substringAfterLast(':')
-                            textTarget = EditTarget("GEX 帧率上限", fps, isNumber = true) { nv ->
-                                nv.toLongOrNull()?.let { n ->
-                                    viewModel.updateFragmentSelf(
-                                        gexFound.first,
-                                        JsonPrimitive(gex.content.substringBeforeLast(':') + ":" + n),
-                                    )
-                                }
-                            }
-                        }
-                    })
-                }
-            }
-            // 非游玩档（只读 + 跳 JSON）
-            (nonPlaying?.second as? JsonPrimitive)?.let { np ->
-                item(key = "nt_non_playing") {
-                    HyperOsSectionCard(
-                        title = "非游玩降级档（novatek_non_playing_config）",
-                        rows = listOf<@Composable () -> Unit>(
-                            { HyperOsMonoBlockRow(title = "raw", body = np.content) },
-                            {
-                                HyperOsActionRow(
-                                    title = "在 JSON 编辑器中修改",
-                                    summary = "格式与 game_params 相同",
-                                    onClick = { navigator.push(Route.HyperOsScopedEditor(pkg)) },
+        // GEX 帧率上限（pkg:fps）
+        (gexFound?.second as? JsonPrimitive)?.let { gex ->
+            item(key = "nt_gex") {
+                HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                    HyperOsValueRow(title = "GEX 帧率上限", value = gex.content) {
+                        val fps = gex.content.substringAfterLast(':')
+                        textTarget = EditTarget("GEX 帧率上限", fps, isNumber = true) { nv ->
+                            nv.toLongOrNull()?.let { n ->
+                                viewModel.updateFragmentSelf(
+                                    gexFound.first,
+                                    JsonPrimitive(gex.content.substringBeforeLast(':') + ":" + n),
                                 )
-                            },
-                        ),
-                    )
-                }
-            }
-            // 黑名单（仅在名单内时出现片段 → 可移除；加入走 JSON 编辑，不在名单不提示）
-            if (blacklistFound != null) {
-                val arr = blacklistFound.second as? JsonArray
-                item(key = "nt_blacklist") {
-                    HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
-                        HyperOsSwitchRow(
-                            title = "独显黑名单（novatek_black_app）",
-                            summary = "云游戏/串流等已是插帧后内容的应用；关闭 = 从名单移除",
-                            checked = true,
-                            enabled = !scoped.writing,
-                        ) { on ->
-                            if (!on) {
-                                val kept = (arr ?: JsonArray(emptyList())).filterNot {
-                                    (it as? JsonPrimitive)?.content == pkg
-                                }
-                                viewModel.updateFragmentSelf(blacklistFound.first, JsonArray(kept))
                             }
                         }
-                    })
-                }
+                    }
+                })
+            }
+        }
+        // 非游玩档（只读 + 跳 JSON）
+        (nonPlaying?.second as? JsonPrimitive)?.let { np ->
+            item(key = "nt_non_playing") {
+                HyperOsSectionCard(
+                    title = "非游玩降级档",
+                    rows = listOf<@Composable () -> Unit>(
+                        { HyperOsMonoBlockRow(title = "raw", body = np.content) },
+                        {
+                            HyperOsActionRow(
+                                title = "在 JSON 编辑器中修改",
+                                summary = "格式与 game_params 相同",
+                                onClick = { navigator.push(Route.HyperOsScopedEditor(pkg)) },
+                            )
+                        },
+                    ),
+                )
+            }
+        }
+        // 黑名单（仅在名单内时出现片段 → 可移除）
+        if (blacklistFound != null) {
+            val arr = blacklistFound.second as? JsonArray
+            item(key = "nt_blacklist") {
+                HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                    HyperOsSwitchRow(
+                        title = "独显黑名单",
+                        summary = "云游戏/串流等已是插帧后内容的应用；关闭 = 从名单移除",
+                        checked = true,
+                        enabled = !scoped.writing,
+                    ) { on ->
+                        if (!on) {
+                            val kept = (arr ?: JsonArray(emptyList())).filterNot {
+                                (it as? JsonPrimitive)?.content == pkg
+                            }
+                            viewModel.updateFragmentSelf(blacklistFound.first, JsonArray(kept))
+                        }
+                    }
+                })
             }
         }
     }

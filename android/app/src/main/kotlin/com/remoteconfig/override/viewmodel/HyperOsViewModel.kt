@@ -426,27 +426,17 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         requestScopedSave()
     }
 
-    // ── 温控限帧总开关（功能页 v2：关 = 从配置删除曲线并备份；开 = 恢复）──
+    // ── 温控限帧总开关（功能页 v2：仅记录开关状态，曲线保留、UI 灰置）──
 
-    /** 温控开关状态：enabled + 关闭时备份的曲线键值。 */
+    /** 温控开关状态（enabled 仅控制 UI 灰置；backup 兼容旧版 SP 备份字段）。 */
     data class ThermalState(
         val enabled: Boolean = true,
-        /** 关闭温控时暂存的曲线键值（开启后写回恢复）。 */
+        /** 兼容旧版：关闭时曾暂存的曲线键值（v2 不再使用）。 */
         val backup: Map<String, JsonElement> = emptyMap(),
     )
 
     private val _thermalState = MutableStateFlow(ThermalState())
     val thermalState = _thermalState.asStateFlow()
-
-    /** 温控限帧相关的曲线键（开关关闭时删除/开启时恢复的范围）。 */
-    private val THERMAL_CURVE_KEYS = listOf(
-        "dynamic_fps", "dynamic_fps_M", "dynamic_fps_multiWin",
-        "dynamic_targetfps", "dynamic_targetfps_M",
-        "dynamic_fan_targetfps", "dynamic_fan_targetfps_M",
-        "dynamicfps_by_battery_T", "dynamicfps_by_battery_M",
-        "dynamic_targetfps_cpufreq", "dynamic_targetfps_cpufreq_M",
-        "dynamic_targetfps_cpufreq_speedmode", "dynamic_yuanshen_high_quality_targetfps",
-    )
 
     private fun thermalPrefs() =
         getApplication<Application>().getSharedPreferences("thermal", Context.MODE_PRIVATE)
@@ -463,37 +453,11 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         _thermalState.value = ThermalState(enabled, backup)
     }
 
-    /** 温控开关切换：关 = 备份现有曲线并删除；开 = 从备份恢复并清空备份。 */
+    /** 温控开关切换（v2：只记录开关状态，不再删除/恢复曲线——曲线入口保留并灰置）。 */
     fun setThermalEnabled(pkg: String, on: Boolean) {
-        val st = _thermalState.value
-        if (st.enabled == on) return
-        val prefs = thermalPrefs()
-        if (on) {
-            val backup = st.backup
-            if (backup.isNotEmpty()) {
-                ovrrideFragment()?.let { (pointer, _) ->
-                    updateFragmentInsert(pointer, backup)
-                }
-            }
-            prefs.edit().remove("backup_$pkg").putBoolean("enabled_$pkg", true).apply()
-            _thermalState.update { it.copy(enabled = true, backup = emptyMap()) }
-        } else {
-            val existing = ovrrideFragment()?.second
-                ?.filterKeys { it in THERMAL_CURVE_KEYS }
-                .orEmpty()
-            if (existing.isNotEmpty()) {
-                prefs.edit()
-                    .putString("backup_$pkg", strictJson.encodeToString(JsonObject.serializer(), JsonObject(existing)))
-                    .putBoolean("enabled_$pkg", false)
-                    .apply()
-                ovrrideFragment()?.let { (pointer, _) ->
-                    updateFragmentRemoveKeys(pointer, existing.keys.toList())
-                }
-            } else {
-                prefs.edit().putBoolean("enabled_$pkg", false).apply()
-            }
-            _thermalState.update { it.copy(enabled = false, backup = existing) }
-        }
+        if (_thermalState.value.enabled == on) return
+        thermalPrefs().edit().putBoolean("enabled_$pkg", on).apply()
+        _thermalState.update { it.copy(enabled = on) }
     }
 
     /** 从片段删除一批键（温控开关关闭时）。 */

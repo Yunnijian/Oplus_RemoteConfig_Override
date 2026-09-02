@@ -119,8 +119,14 @@ fun MainScreen(
     // （首页/应用配置/通用配置/设置），ColorOS 维持现有 3 页完全不变。
     val hyperOS = LocalPlatform.current == Platform.HyperOS
 
+    // 持久化页选择按当前平台页数二次 clamp（平台切换/主题重建后避免越界，
+    // 也防止 ColorOS 旧值夹到通用配置页）。
+    val initialPageClamped = remember(initialPage, hyperOS) {
+        initialPage.coerceIn(0, (if (hyperOS) HYPEROS_PAGE_COUNT else PAGE_COUNT) - 1)
+    }
+
     val pagerState = rememberPagerState(
-        initialPage = initialPage,
+        initialPage = initialPageClamped,
         // pageCount lambda 每次重组都会被 rememberPagerState 刷新，平台切换后即时生效
         pageCount = { if (hyperOS) HYPEROS_PAGE_COUNT else PAGE_COUNT },
     )
@@ -269,8 +275,8 @@ fun MainScreen(
 
                         2 -> if (isCurrentPage || contentReady) PageBringIntoViewBarrier {
                             if (hyperOS) {
-                                // HyperOS：通用配置页（ColorOS 此页仍为设置）
-                                HyperOsCommonConfigScreen(bottomInnerPadding)
+                                // HyperOS：通用配置页（Pager 内嵌，无返回按钮；ColorOS 此页仍为设置）
+                                HyperOsCommonConfigScreen(bottomInnerPadding, embeddedInPager = true)
                             } else {
                                 SettingsContent(bottomInnerPadding)
                             }

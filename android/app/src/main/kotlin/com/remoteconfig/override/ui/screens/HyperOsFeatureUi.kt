@@ -1200,116 +1200,63 @@ private fun CmdEditorBody(
     }
 }
 
-// ── Novatek 等级编辑器（1.6：7 字段 + params 17 键命名表）──────────────────
+// ── Novatek 功能下拉行（原生组件，2026-09-02 v2：标题 + 右侧下拉，选中即生效）─
 
-/** Novatek 等级编辑状态（params 超过 17 token 时禁结构化，只允许原文编辑 params 串）。 */
-private class NovatekLevelState(level: NovatekCodec.Level) {
-    var dynamicFps by mutableStateOf(level.dynamicFps)
-    var targetFps by mutableStateOf(level.targetFps)
-    var tgTh by mutableStateOf(level.tgTh)
-    var tgRec by mutableStateOf(level.tgRec)
-    var mgTh by mutableStateOf(level.mgTh)
-    var mgRec by mutableStateOf(level.mgRec)
-    val structured = level.params.size <= NovatekCodec.PARAM_KEYS.size
-    val paramValues = NovatekCodec.PARAM_KEYS.mapIndexed { i, _ -> mutableStateOf(level.params.getOrNull(i).orEmpty()) }
-    var rawParams by mutableStateOf(level.params.joinToString(","))
-
-    val error: String?
-        get() = when {
-            dynamicFps.isBlank() || targetFps.isBlank() -> "dynamicFps / targetFps 不能为空"
-            else -> null
-        }
-
-    fun toLevel(): NovatekCodec.Level = NovatekCodec.Level(
-        dynamicFps = dynamicFps,
-        targetFps = targetFps,
-        params = if (structured) paramValues.map { it.value } else rawParams.split(','),
-        tgTh = tgTh, tgRec = tgRec, mgTh = mgTh, mgRec = mgRec,
-    )
-}
-
+/** 插帧方案下拉行：选项 = 预制方案，选中即回调该方案（当前值命中则回显）。 */
 @Composable
-internal fun NovatekLevelDialog(
+internal fun NovatekPresetDropdownRow(
     title: String,
-    level: NovatekCodec.Level,
-    refreshRates: List<Int>,
-    onCommit: (NovatekCodec.Level) -> Unit,
-    onDismiss: () -> Unit,
+    segment: NovatekCodec.Segment,
+    enabled: Boolean,
+    onPick: (NovatekCodec.FpsPreset) -> Unit,
 ) {
-    val state = remember(title) { NovatekLevelState(level) }
+    val labels = NovatekCodec.FPS_PRESETS.map { it.label }
+    val first = segment.levels.firstOrNull()
+    val idx = NovatekCodec.FPS_PRESETS.indexOfFirst {
+        first != null && it.dynamicFps == first.dynamicFps && it.targetFps == first.targetFps
+    }.coerceAtLeast(0)
     when (LocalUiMode.current) {
-        UiMode.Miuix -> WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
-            NovatekLevelBody(state, refreshRates, onCommit, onDismiss)
-        }
-        UiMode.Material -> AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(title, fontWeight = FontWeight.SemiBold) },
-            text = { NovatekLevelBody(state, refreshRates, onCommit, onDismiss) },
-            confirmButton = {
-                TextButton(onClick = { onCommit(state.toLevel()) }, enabled = state.error == null) { Text("确定") }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        UiMode.Miuix -> OverlayDropdownPreference(
+            items = labels,
+            selectedIndex = idx,
+            title = title,
+            enabled = enabled,
+            onSelectedIndexChange = { i -> NovatekCodec.FPS_PRESETS.getOrNull(i)?.let(onPick) },
+        )
+        UiMode.Material -> SegmentedDropdownItem(
+            items = labels,
+            selectedIndex = idx,
+            title = title,
+            enabled = enabled,
+            onItemSelected = { i -> NovatekCodec.FPS_PRESETS.getOrNull(i)?.let(onPick) },
         )
     }
 }
 
+/** 温度档位下拉行：选项 = +10/+20/+30/+40℃，选中即回调所选档位（相对基线）。 */
 @Composable
-private fun NovatekLevelBody(
-    state: NovatekLevelState,
-    refreshRates: List<Int>,
-    onCommit: (NovatekCodec.Level) -> Unit,
-    onDismiss: () -> Unit,
+internal fun NovatekTempDropdownRow(
+    title: String,
+    applied: Int,
+    enabled: Boolean,
+    onPick: (Int) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CurveFieldMiuixCompat(state.dynamicFps, { state.dynamicFps = it }, label = "dynamicFps（插帧门限，低于 ceil(v)-1 降级 bypass）")
-            CurveFieldMiuixCompat(state.targetFps, { state.targetFps = it }, label = "targetFps（输出刷新率${if (refreshRates.isNotEmpty()) "：${refreshRates.joinToString("/")}" else ""}）")
-            if (state.structured) {
-                MiuixHintLabel("params（17 键，留空 = 0）")
-                state.paramValues.forEachIndexed { i, v ->
-                    CurveFieldMiuixCompat(v.value, { v.value = it }, weight = 1f, label = NovatekCodec.PARAM_KEYS[i])
-                }
-            } else {
-                MiuixHintLabel("params 超过 17 token —— 结构化编辑不可用，请原文修改（保真）")
-                CurveFieldMiuixCompat(state.rawParams, { state.rawParams = it }, singleLine = false)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CurveFieldMiuixCompat(state.tgTh, { state.tgTh = it }, weight = 1f, label = "TGAME 降档℃")
-                CurveFieldMiuixCompat(state.tgRec, { state.tgRec = it }, weight = 1f, label = "TGAME 回档℃")
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                CurveFieldMiuixCompat(state.mgTh, { state.mgTh = it }, weight = 1f, label = "MGAME 降档℃")
-                CurveFieldMiuixCompat(state.mgRec, { state.mgRec = it }, weight = 1f, label = "MGAME 回档℃")
-            }
-            state.error?.let { err ->
-                when (LocalUiMode.current) {
-                    UiMode.Miuix -> MiuixText(text = err, fontSize = 11.sp, color = miuixColorScheme.error)
-                    UiMode.Material -> Text(err, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                }
-            }
-        }
-        if (LocalUiMode.current == UiMode.Miuix) {
-            Row(Modifier.align(Alignment.End).padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                MiuixTextButton(text = "取消", onClick = onDismiss)
-                Spacer(Modifier.width(12.dp))
-                MiuixTextButton(
-                    text = "确定",
-                    onClick = { onCommit(state.toLevel()) },
-                    enabled = state.error == null,
-                    colors = MiuixButtonDefaults.textButtonColorsPrimary(),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixHintLabel(text: String) {
+    val labels = NovatekCodec.TEMP_OFFSETS.map { "+$it℃" }
+    val idx = NovatekCodec.TEMP_OFFSETS.indexOfFirst { it * 10 == applied }.coerceAtLeast(0)
     when (LocalUiMode.current) {
-        UiMode.Miuix -> MiuixText(text = text, fontSize = 10.sp, color = miuixColorScheme.onSurfaceVariantSummary)
-        UiMode.Material -> Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        UiMode.Miuix -> OverlayDropdownPreference(
+            items = labels,
+            selectedIndex = idx,
+            title = title,
+            enabled = enabled,
+            onSelectedIndexChange = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let { onPick(it * 10) } },
+        )
+        UiMode.Material -> SegmentedDropdownItem(
+            items = labels,
+            selectedIndex = idx,
+            title = title,
+            enabled = enabled,
+            onItemSelected = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let { onPick(it * 10) } },
+        )
     }
 }

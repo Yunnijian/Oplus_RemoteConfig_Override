@@ -76,6 +76,7 @@ import com.remoteconfig.override.viewmodel.HyperOsViewModel
 fun HyperOsCommonConfigMaterial(
     state: HyperOsViewModel.CommonState,
     bottomInnerPadding: Dp = 0.dp,
+    embeddedInPager: Boolean = false,
     onToggle: (HyperOsViewModel.SwitchRow) -> Unit,
     onFreeze: () -> Unit,
     onUnfreeze: () -> Unit,
@@ -98,10 +99,13 @@ fun HyperOsCommonConfigMaterial(
         topBar = {
             LargeFlexibleTopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = { navigator.pop() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+                        // Pager 内嵌页无导航栈，不展示返回按钮（push 路由进入时保留）
+                        if (!embeddedInPager) {
+                            IconButton(onClick = { navigator.pop() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                        }
+                    },
                 title = { Text("HyperOS 通用配置") },
                 colors = expressiveTopAppBarColors(),
                 windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),

@@ -113,10 +113,15 @@ private class MainPageState(
     }
 }
 
-/** 对齐 KernelSU MainPagerConfig（本项目 3 tab：首页/配置/设置）。 */
+/** 对齐 KernelSU MainPagerConfig（本项目 3 tab 起步；HyperOS 为 4 tab，见 MainScreen）。
+ *  页选择持久化采用**全局最大页数** clamp（HyperOS Settings=index3），避免
+ *  ColorOS 旧值 2 把 HyperOS 的 Settings(3) 夹到通用配置(2)；越界恢复由
+ *  MainScreen 按当前平台 pageCount 二次 clamp（见 MainScreen.rememberPagerState）。 */
 object MainPagerConfig {
     const val PAGE_COUNT = 3
-    const val LAST_PAGE_INDEX = PAGE_COUNT - 1
+    /** HyperOS 页数（首页/应用配置/通用配置/设置）。 */
+    const val HYPEROS_PAGE_COUNT = 4
+    const val LAST_PAGE_INDEX = HYPEROS_PAGE_COUNT - 1
 
     fun coercePage(page: Int): Int = page.coerceIn(0, LAST_PAGE_INDEX)
 }

@@ -28,6 +28,7 @@ pub struct Param {
 }
 
 /// Where a hit's key comes from.
+#[allow(dead_code)] // Fallback：fisr enhance_config 已移出 per-app，序列化分支保留兜底
 pub enum Source {
     /// Key equals the package name itself.
     Direct,
@@ -217,7 +218,6 @@ pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
         ("novatek_game_params", '_'),
         ("migt", ';'),
         ("cgame_df", '@'),
-        ("support_highfps_app", ':'),
         ("mqs_enhance_list", ':'),
         ("force_scale_app_list", ':'),
     ] {
@@ -239,17 +239,9 @@ pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
         }
     }
 
-    // ③ plain package arrays.
+    // ③ plain package arrays (membership-only; keep blacklist relevant to per-app).
     for field in [
         "novatek_black_app",
-        "SOC_GameList",
-        "support_vrs_app",
-        "support_dynamic_refresh_rate_games",
-        "invalid_low_display_scenes_games",
-        "game_light_support_list",
-        "support_predownload_app_list",
-        "support_motor_app",
-        "support_scale_app_list",
     ] {
         for value in arr(gb, field) {
             if let Some(pkg) = value.as_str() {
@@ -533,42 +525,8 @@ pub fn collect(
         }
     }
 
-    // ⑤ fisr: direct membership, "OTHER" as fallback.
-    {
-        let mut direct = Vec::new();
-        let mut fallback = Vec::new();
-        for (i, entry) in arr(get(gb, "fisr_config"), "enhance_config")
-            .iter()
-            .enumerate()
-        {
-            let list = arr(entry, "game_list");
-            if list.iter().any(|v| v.as_str() == Some(package)) {
-                direct.push((i, entry));
-            } else if list.iter().any(|v| v.as_str() == Some("OTHER")) {
-                fallback.push((i, entry));
-            }
-        }
-        let used_fallback = direct.is_empty();
-        let chosen: Vec<(usize, &Value)> =
-            if used_fallback { fallback } else { direct };
-        for (i, entry) in chosen {
-            let source =
-                if used_fallback { Source::Fallback } else { Source::Direct };
-            features.push(FeatureHit {
-                category: "fisr",
-                label: "FISR 插帧/超分策略",
-                source,
-                key: package.to_owned(),
-                path: format!("/game_booster/fisr_config/enhance_config/{i}"),
-                params: vec![param(
-                    "enhance_policy_config",
-                    get(entry, "enhance_policy_config").clone(),
-                )],
-                overrides: Vec::new(),
-                gate: None,
-            });
-        }
-    }
+    // ⑤ fisr_config/enhance_config: removed from per-app view (全局策略表，不属
+    //    游戏单独 json；Novatek 实际生效路径在 novatek_game_params，见 ⑦)。
 
     // ⑥ package-keyed object: self GPU tuner modes.
     if let Some(entry) = get(gb, "self_gpu_tuner_config")
@@ -595,30 +553,17 @@ pub fn collect(
         });
     }
 
-    // ⑦ token-string lists: `;` `@` `:` separators.
+    // ⑦ token-string lists: `;` `@` `:` separators (全局名单类已移出 per-app view)。
     for (field, sep, category, label) in [
         ("migt", ';', "migt", "Migt 温控调频脚本"),
         ("cgame_df", '@', "cgame_df", "云控游戏接管动态帧率"),
-        ("support_highfps_app", ':', "highfps", "高帧率白名单"),
         ("mqs_enhance_list", ':', "mqs_enhance", "MQS 增强名单"),
         ("force_scale_app_list", ':', "force_scale", "强制分辨率缩放"),
     ] {
         for (i, raw) in arr(gb, field).iter().enumerate() {
             let Some(raw) = raw.as_str() else { continue };
             if token_matches(raw, sep, package) {
-                let params = if category == "highfps" {
-                    raw.split(':')
-                        .nth(1)
-                        .map(|fps| {
-                            vec![
-                                param("raw", Value::String(raw.to_owned())),
-                                param("fps", Value::from(fps)),
-                            ]
-                        })
-                        .unwrap_or_else(|| token_param(raw))
-                } else {
-                    token_param(raw)
-                };
+                let params = token_param(raw);
                 let gate = match category {
                     "cgame_df" => gate_of("cgame_enable"),
                     "force_scale" => gate_of("scale_app_enable"),
@@ -638,50 +583,10 @@ pub fn collect(
         }
     }
 
-    // ⑧ plain package-array whitelists.
-    for (field, category, label) in [
-        ("support_scale_app_list", "scale", "分辨率缩放白名单"),
-        ("SOC_GameList", "soc", "SOC 调度名单"),
-        ("support_vrs_app", "vrs", "VRS 可变着色率名单"),
-        (
-            "support_dynamic_refresh_rate_games",
-            "dynamic_rr",
-            "动态刷新率名单",
-        ),
-        (
-            "invalid_low_display_scenes_games",
-            "low_rr_invalid",
-            "低刷场景排除名单",
-        ),
-        ("game_light_support_list", "game_light", "游戏光效名单"),
-        ("support_predownload_app_list", "predownload", "资源预下载名单"),
-        ("support_motor_app", "motor", "马达支持名单"),
-        (
-            "background_freeze_whitelist",
-            "freeze_whitelist",
-            "后台冻结白名单",
-        ),
-    ] {
-        if arr(gb, field).iter().any(|v| v.as_str() == Some(package)) {
-            let gate = match category {
-                "soc" => gate_of("SOC_enable"),
-                "scale" => gate_of("scale_app_enable"),
-                "predownload" => gate_of("predownload_enable"),
-                "freeze_whitelist" => gate_of("background_freeze_enable"),
-                _ => None,
-            };
-            features.push(FeatureHit {
-                category,
-                label,
-                source: Source::Direct,
-                key: package.to_owned(),
-                path: format!("/game_booster/{field}"),
-                params: vec![param("enabled", Value::Bool(true))],
-                overrides: Vec::new(),
-                gate,
-            });
-        }
-    }
+    // ⑧ plain package-array whitelists: 通用名单类已移出 per-app view
+    //    （support_scale_app_list/SOC_GameList/support_vrs_app/
+    //    support_dynamic_refresh_rate_games/support_predownload_app_list/…），
+    //    后续统一由全局“支持列表”入口管理。
 
     // ⑨ package-keyed object: per-game low-refresh-rate scene ids.
     if let Some(scenes) = get(gb, "low_display_refresh_rate_scenes_by_single_game")
@@ -956,13 +861,16 @@ pub(crate) mod tests {
             "booster_override", // via SGAME group alias
             "novatek_main",
             "novatek_gex_limit",
-            "fisr",
-            "highfps",
+            "novatek_non_playing",
+            "cgame_df",
             "migt",
-            "soc",
             "resolution_enhance",
         ] {
             assert!(cats.contains(&expected), "missing {expected}: {cats:?}");
+        }
+        // 全局名单类段（highfps/scale/soc/fisr enhance_config…）不再注入 per-app。
+        for absent in ["fisr", "highfps", "scale", "soc"] {
+            assert!(!cats.contains(&absent), "unexpected {absent}: {cats:?}");
         }
         // novatek fps pair parsed.
         let novatek = view
@@ -979,21 +887,6 @@ pub(crate) mod tests {
         };
         assert_eq!(get("min_fps").as_deref(), Some("60"));
         assert_eq!(get("target_fps").as_deref(), Some("120"));
-        // highfps parsed.
-        let highfps = view
-            .features
-            .iter()
-            .find(|f| f.category == "highfps")
-            .unwrap();
-        assert_eq!(
-            highfps
-                .params
-                .iter()
-                .find(|p| p.name == "fps")
-                .unwrap()
-                .value,
-            json!("120")
-        );
     }
 
     #[test]
@@ -1013,22 +906,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fisr_falls_back_to_other_only_without_direct_hit() {
-        // com.miHoYo.hkrpg: no fisr entry, but mivk hit + OTHER fallback.
-        let view = collect(&doc(), "com.miHoYo.hkrpg", None).unwrap();
-        let fisr = view
-            .features
-            .iter()
-            .find(|f| f.category == "fisr")
-            .expect("OTHER fallback hit");
-        assert!(matches!(fisr.source, Source::Fallback));
-
-        // com.a.sgame has a direct fisr entry → no fallback hit.
-        let view = collect(&doc(), "com.a.sgame", None).unwrap();
-        let fisr: Vec<&FeatureHit> =
-            view.features.iter().filter(|f| f.category == "fisr").collect();
-        assert_eq!(fisr.len(), 1);
-        assert!(matches!(fisr[0].source, Source::Direct));
+    fn fisr_enhance_config_is_not_injected() {
+        // fisr_config/enhance_config 已移出 per-app view（全局策略表）：
+        // 即使 doc 里 sgame 有 direct 条目、hkrpg 无 direct 但有 OTHER 兜底，
+        // 两者都不再产出 "fisr" category。
+        for pkg in ["com.a.sgame", "com.miHoYo.hkrpg"] {
+            let view = collect(&doc(), pkg, None).unwrap();
+            let fisr: Vec<&FeatureHit> =
+                view.features.iter().filter(|f| f.category == "fisr").collect();
+            assert_eq!(fisr.len(), 0, "{pkg} should not carry fisr");
+        }
     }
 
     #[test]
@@ -1099,9 +986,10 @@ pub(crate) mod tests {
         };
         // gated hits: key + current value from the doc.
         assert_eq!(gate("cgame_df"), Some(Some(("cgame_enable", false))));
-        assert_eq!(gate("soc"), Some(Some(("SOC_enable", true))));
-        assert_eq!(gate("scale"), Some(Some(("scale_app_enable", true))));
         assert_eq!(gate("migt"), Some(None)); // no master switch
+        // 通用名单（soc/scale…）已移出 per-app，不再带 gate。
+        assert_eq!(gate("soc"), None);
+        assert_eq!(gate("scale"), None);
         // booster_override gated by the master booster_enable.
         assert_eq!(
             gate("booster_override"),
@@ -1119,8 +1007,10 @@ pub(crate) mod tests {
                 .find(|e| e.package == pkg)
                 .map(|e| (e.features, e.group.as_deref()))
         };
-        // sgame: ovrride(组展开) + novatek + non_playing + gex + fisr + highfps + scale + migt + soc + cgame_df + resolution_enhance
-        assert_eq!(find("com.a.sgame"), Some((11, Some("SGAME"))));
+        // sgame: ovrride(组展开) + novatek + non_playing + gex + migt + cgame_df + resolution_enhance
+        //   （fisr/highfps/scale/soc 等全局名单已移出；索引计数另含不产出
+        //    view feature 的条目，实测为 8）
+        assert_eq!(find("com.a.sgame"), Some((8, Some("SGAME"))));
         // sgamece: ovrride(同组展开)+novatek = 2 —— 组条目对组内每个成员都生效
         assert_eq!(find("com.a.sgamece"), Some((2, Some("SGAME"))));
         assert_eq!(find("com.miHoYo.Yuanshen"), Some((1, Some("YUANSHEN"))));

@@ -27,7 +27,10 @@ internal const val FREEZE_HINT =
  * UI 只渲染状态：writing 时开关与按钮禁用（避免连点，ViewModel 亦有并发守护兜底）。
  */
 @Composable
-fun HyperOsCommonConfigScreen(bottomInnerPadding: Dp = 0.dp) {
+fun HyperOsCommonConfigScreen(
+    bottomInnerPadding: Dp = 0.dp,
+    embeddedInPager: Boolean = false,
+) {
     val viewModel: HyperOsViewModel = viewModel()
     val state by viewModel.commonState.collectAsStateWithLifecycle()
     // 进入页面触发一次首刷
@@ -36,6 +39,7 @@ fun HyperOsCommonConfigScreen(bottomInnerPadding: Dp = 0.dp) {
         UiMode.Miuix -> HyperOsCommonConfigMiuix(
             state = state,
             bottomInnerPadding = bottomInnerPadding,
+            embeddedInPager = embeddedInPager,
             onToggle = viewModel::toggleSwitch,
             onFreeze = viewModel::freeze,
             onUnfreeze = viewModel::unfreeze,
@@ -44,6 +48,7 @@ fun HyperOsCommonConfigScreen(bottomInnerPadding: Dp = 0.dp) {
         UiMode.Material -> HyperOsCommonConfigMaterial(
             state = state,
             bottomInnerPadding = bottomInnerPadding,
+            embeddedInPager = embeddedInPager,
             onToggle = viewModel::toggleSwitch,
             onFreeze = viewModel::freeze,
             onUnfreeze = viewModel::unfreeze,
