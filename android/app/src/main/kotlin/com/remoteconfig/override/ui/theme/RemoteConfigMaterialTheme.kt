@@ -2,7 +2,8 @@ package com.remoteconfig.override.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
@@ -17,13 +18,9 @@ import com.remoteconfig.override.settings.ColorMode
  * [rememberRemoteConfigColorScheme] 解析）——色彩风格/标准在默认色块下同样生效。
  * colorMode 六态（含 AMOLED 纯黑）。
  *
- * 主题切换不做颜色弹簧动画（perfetto 实证：48 路 animateAsState 在动画窗口内
- * 逐帧失效全树 11 个 composition，每帧 70-120ms，单次点色块级联 4-5 个长帧；
- * 直接切换收敛为单波重组，点击卡顿大幅缩短）。
- *
- * 注：KernelSU 用 MaterialExpressiveTheme/MotionScheme.expressive()，但它们在锁定版
- * material3 1.4.0 中为 internal（KernelSU 用 1.5.0-alpha26 才公开）——为保留 1.4.0 锁定
- * （R0/R1 硬约束），这里回落到标准 MaterialTheme。
+ * 主题壳用 MaterialExpressiveTheme + MotionScheme.expressive()（与 KernelSU 一致），
+ * 主题切换时整套颜色方案由 [rememberRemoteConfigColorScheme] 的 animateAsState()
+ * 做 spring 平滑过渡（对齐 KernelSU ThemeExt.animateAsState），不做生硬跳变。
  */
 @Composable
 fun RemoteConfigMaterialTheme(
@@ -60,8 +57,9 @@ fun RemoteConfigMaterialTheme(
         }
     }
 
-    MaterialTheme(
+    MaterialExpressiveTheme(
         colorScheme = colorScheme,
+        motionScheme = MotionScheme.expressive(),
         typography = Typography,
         content = content,
     )

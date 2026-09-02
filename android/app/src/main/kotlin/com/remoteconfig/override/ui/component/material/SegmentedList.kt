@@ -427,6 +427,19 @@ fun SegmentedColumn(
     }
 }
 
+@Composable
+fun SegmentedItem(
+    index: Int,
+    count: Int,
+    content: @Composable () -> Unit,
+) {
+    CompositionLocalProvider(
+        LocalListItemShapes provides defaultSingleSegmentedShape(index, count),
+    ) {
+        content()
+    }
+}
+
 /**
  * 分段开关项 — 对齐 KernelSU `SegmentedSwitchItem`：
  * 前导图标 + 标题/摘要 + 末尾 [ExpressiveSwitch]，整行点击切换。

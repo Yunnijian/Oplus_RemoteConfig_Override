@@ -2,7 +2,6 @@ package com.remoteconfig.override.ui.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,10 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
@@ -39,8 +35,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
@@ -63,12 +57,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -78,6 +70,8 @@ import com.remoteconfig.override.navigation.Route
 import com.remoteconfig.override.ui.component.ScrollToTopOnChange
 import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
 import com.remoteconfig.override.ui.component.material.SearchAppBar
+import com.remoteconfig.override.ui.component.material.SegmentedItem
+import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.viewmodel.AppSortConfig
 import com.remoteconfig.override.viewmodel.AppSortType
 import com.remoteconfig.override.viewmodel.AppRow
@@ -140,18 +134,27 @@ fun HyperOsAppListMaterial(
         isBusy = { latestRefreshing.value },
     ) { latestApps.value }
 
-    /** 一行应用（图标 + 名称 + 组别名/功能数 + 箭头），折叠列表与搜索结果共用。 */
-    val appRow: @Composable (AppRow) -> Unit = { app ->
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.medium),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            ),
-        ) {
-            ListItem(
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    /** 一行应用（图标 + 名称 + 组别名/功能数），折叠列表与搜索结果共用。 */
+    val appRow: @Composable (Int, Int, AppRow) -> Unit = { index, count, app ->
+        SegmentedItem(index = index, count = count) {
+            SegmentedListItem(
+                selected = false,
+                onClick = { navigator.push(Route.HyperOsAppDetail(app.pkg)) },
+                headlineContent = {
+                    Text(
+                        text = app.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = materialAppSubtitle(app.group, app.features),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 leadingContent = {
                     // 应用图标：IO 线程预加载缓存，组合期零 PackageManager 调用
                     val icon = viewModel.getCachedIcon(app.pkg)
@@ -160,38 +163,10 @@ fun HyperOsAppListMaterial(
                             bitmap = icon.asImageBitmap(),
                             contentDescription = null,
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(48.dp)
                                 .clip(MaterialTheme.shapes.small),
                         )
                     }
-                },
-                headlineContent = {
-                    Text(
-                        text = app.label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                supportingContent = {
-                    Text(
-                        text = materialAppSubtitle(app.group, app.features),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                trailingContent = {
-                    Icon(
-                        Icons.Default.KeyboardArrowRight,
-                        contentDescription = "查看详情",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                modifier = Modifier.clickable {
-                    navigator.push(Route.HyperOsAppDetail(app.pkg))
                 },
             )
         }
@@ -297,7 +272,7 @@ fun HyperOsAppListMaterial(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .nestedScroll(scrollBehavior.nestedScrollConnection),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                             contentPadding = PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,
@@ -305,8 +280,8 @@ fun HyperOsAppListMaterial(
                                 bottom = 16.dp + bottomPadding,
                             ),
                         ) {
-                            itemsIndexed(filtered, key = { _, item -> item.pkg }) { _, app ->
-                                appRow(app)
+                            itemsIndexed(filtered, key = { _, item -> item.pkg }) { index, app ->
+                                appRow(index, filtered.size, app)
                             }
                         }
                     }
@@ -369,15 +344,16 @@ fun HyperOsAppListMaterial(
                     modifier = Modifier
                         .fillMaxSize()
                         .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 0.dp,
+                        bottom = 16.dp + bottomInnerPadding,
+                    ),
                 ) {
-                    itemsIndexed(filtered, key = { _, item -> item.pkg }) { _, app ->
-                        appRow(app)
-                    }
-                    // 底栏留白：由页面自己消费（对齐 ConfigListMaterial 的末尾 Spacer 模式）
-                    item(key = "bottom-space") {
-                        Spacer(Modifier.height(bottomInnerPadding))
+                    itemsIndexed(filtered, key = { _, item -> item.pkg }) { index, app ->
+                        appRow(index, filtered.size, app)
                     }
                 }
             }

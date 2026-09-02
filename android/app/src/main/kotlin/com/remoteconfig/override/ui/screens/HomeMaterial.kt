@@ -28,6 +28,7 @@ import com.remoteconfig.override.R
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.platform.Platform
 import com.remoteconfig.override.platform.appDisplayName
+import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
@@ -76,7 +77,7 @@ fun HomeContentMaterial(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Box(modifier = modifier.fillMaxSize()) {
-        Scaffold(
+        ExpressiveScaffold(
             topBar = {
                 LargeTopAppBar(
                     title = { Text(LocalPlatform.current.appDisplayName(), style = MaterialTheme.typography.headlineLarge) },
@@ -171,55 +172,50 @@ fun HomeContentMaterial(
                 }
                 } // if (hyperOS) else 旧 Root 状态卡
 
-                // ── 设备信息卡 ──
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    elevation = CardDefaults.cardElevation(0.dp)
-                ) {
-                    Column(Modifier.padding(24.dp)) {
-                        InfoCardItem(label = "设备型号", content = deviceModel, icon = Icons.Filled.Smartphone)
-                        Spacer(Modifier.height(16.dp))
-                        InfoCardItem(label = "安卓版本", content = "Android ${android.os.Build.VERSION.RELEASE}", icon = Icons.Filled.Android)
-                        Spacer(Modifier.height(16.dp))
-                        InfoCardItem(label = "内核版本", content = kernelVersion, icon = Icons.Filled.Memory)
-                        Spacer(Modifier.height(16.dp))
+                // ── 设备信息卡（图二 MaterialHome 写法：Card + ListItem + HorizontalDivider）──
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    val infoItems = buildList<Pair<String, String>> {
+                        add("设备型号" to deviceModel)
+                        add("安卓版本" to "Android ${android.os.Build.VERSION.RELEASE}")
+                        add("内核版本" to kernelVersion)
                         if (hyperOS) {
-                            InfoCardItem(label = "Joyose 云控服务", content = "v$joyoseVersion · com.xiaomi.joyose", icon = Icons.Filled.SettingsSuggest)
+                            add("Joyose 云控服务" to "v$joyoseVersion · com.xiaomi.joyose")
                         } else {
-                            InfoCardItem(label = "应用增强服务", content = "v${cosaVersion} · com.oplus.cosa", icon = Icons.Filled.SettingsSuggest)
+                            add("应用增强服务" to "v${cosaVersion} · com.oplus.cosa")
                         }
+                    }
+                    infoItems.forEachIndexed { index, (label, content) ->
+                        ListItem(
+                            headlineContent = { Text(label) },
+                            supportingContent = { Text(content) },
+                        )
+                        if (index != infoItems.lastIndex) HorizontalDivider()
                     }
                 }
 
-                // ── 作者卡片 ──
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
+                // ── 作者卡片（图二 MaterialHome 卡片风格：Card + ListItem）──
+                Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth()) {
-                        // 作者信息
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
+                        ListItem(
+                            leadingContent = {
+                                Image(painter = painterResource(id = R.drawable.author_avatar),
+                                    contentDescription = "作者头像", modifier = Modifier.size(64.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                            },
+                            headlineContent = { Text("Smartisan_Apple") },
+                            supportingContent = {
+                                Text(
+                                    text = "酷安 @Smartisan_Apple\nColor云控修改 v1.2.1",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            trailingContent = {
+                                Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                            modifier = Modifier.clickable {
                                 try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/1404550"))) }
                                 catch (_: Exception) {}
-                            }.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Image(painter = painterResource(id = R.drawable.author_avatar),
-                                contentDescription = "作者头像", modifier = Modifier.size(64.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Smartisan_Apple", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text("酷安 @Smartisan_Apple", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.height(4.dp))
-                                Text("Color云控修改 v1.2.1", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-                            }
-                            Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            },
+                        )
                         // 捐赠描述
                         Text(
                             text = "${LocalPlatform.current.appDisplayName()}始终保持免费，向开发者捐赠以表示支持。",
@@ -250,25 +246,24 @@ fun HomeContentMaterial(
                         }
                     }
                 }
-                // ── 开源仓库卡片 ──
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Yunnijian/Oplus_RemoteConfig_Override")))
-                        } catch (_: Exception) {}
-                    },
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Image(painter = painterResource(id = R.drawable.author_avatar),
-                            contentDescription = "GitHub 头像", modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("查看源代码", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text("在 GitHub 上查看源代码", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                // ── 开源仓库卡片（图二 MaterialHome 卡片风格：Card + ListItem）──
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    ListItem(
+                        headlineContent = { Text("查看源代码") },
+                        supportingContent = { Text("在 GitHub 上查看源代码") },
+                        leadingContent = {
+                            Image(painter = painterResource(id = R.drawable.author_avatar),
+                                contentDescription = "GitHub 头像", modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        },
+                        trailingContent = {
+                            Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Yunnijian/Oplus_RemoteConfig_Override")))
+                            } catch (_: Exception) {}
+                        },
+                    )
                 }
                 // 底栏留白：由页面自己消费（对齐 KernelSU HomeMaterial.kt:140）
                 Spacer(Modifier.height(bottomInnerPadding))
@@ -292,22 +287,6 @@ fun HomeContentMaterial(
                 }
             }
         )
-    }
-}
-
-@Composable
-private fun InfoCardItem(label: String, content: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 20.dp).size(24.dp))
-        }
-        Column {
-            Text(text = label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text = content, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 4.dp))
-        }
     }
 }
 
