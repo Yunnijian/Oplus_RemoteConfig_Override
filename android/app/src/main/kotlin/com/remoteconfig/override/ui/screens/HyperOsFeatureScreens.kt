@@ -4,7 +4,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -191,6 +190,7 @@ fun HyperOsThermalFpsScreen(pkg: String) {
                                     HyperOsActionRow(
                                         title = "$bandKey $noun",
                                         summary = "$bandKey FPS 下$noun",
+                                        enabled = editable,
                                         end = {
                                             when (LocalUiMode.current) {
                                                 UiMode.Miuix -> MiuixIcon(
@@ -240,6 +240,7 @@ fun HyperOsThermalFpsScreen(pkg: String) {
                             HyperOsActionRow(
                                 title = p.label,
                                 summary = summary,
+                                enabled = thermal.enabled,
                                 end = {
                                     when (LocalUiMode.current) {
                                         UiMode.Miuix -> MiuixIcon(
@@ -798,6 +799,17 @@ fun HyperOsFisrScreen(pkg: String) {
     val novatekFound = remember(document) { document.findAnyFragment("/game_booster/novatek_game_params/") }
     val novatekRaw = (novatekFound?.second as? JsonPrimitive)?.content
     val novatekEntry = remember(novatekRaw) { novatekRaw?.let { NovatekCodec.parse(it) } }
+
+    // 原始基线：首次读取捕获当前串（此后固定），温度档位一律按「基线 + 档位」取绝对值。
+    var baselineEntry by remember(pkg) { mutableStateOf<NovatekCodec.Entry?>(null) }
+    LaunchedEffect(novatekRaw) {
+        if (novatekRaw != null) {
+            val stored = viewModel.novatekBaseline(pkg) ?: novatekRaw.also {
+                viewModel.captureNovatekBaseline(pkg, it)
+            }
+            baselineEntry = NovatekCodec.parse(stored)
+        }
+    }
     val gexFound = remember(document) {
         document.findAnyFragment("/game_booster/novatek_extend_config/novatek_gex_fps_limit/")
     }
@@ -805,9 +817,6 @@ fun HyperOsFisrScreen(pkg: String) {
         document.findAnyFragment("/game_booster/novatek_extend_config/novatek_non_playing_config/")
     }
     val blacklistFound = remember(document) { document.findAnyFragment("/game_booster/novatek_black_app") }
-
-    // 温度档位：记录每段已应用的偏移（相对基线），下拉切换按增量写回
-    val tempApplied = remember { mutableStateMapOf<String, Int>() }
 
     var textTarget by remember { mutableStateOf<EditTarget?>(null) }
     textTarget?.let { t ->
@@ -842,9 +851,14 @@ fun HyperOsFisrScreen(pkg: String) {
 
         novatekEntry?.let { entry ->
             val ntTarget = novatekFound.first
+            fun baseSeg(which: String): NovatekCodec.Segment? = when (which) {
+                "FI" -> baselineEntry?.fi
+                "SR" -> baselineEntry?.sr
+                else -> baselineEntry?.fisr
+            }
             // 段整体变换写回（which = FI/SR/FISR）
-            fun rewrite(which: String, seg: NovatekCodec.Segment, t: (NovatekCodec.Level) -> NovatekCodec.Level) {
-                val ns = NovatekCodec.Segment(seg.levels.map(t))
+            fun rewrite(which: String, seg: NovatekCodec.Segment, t: (Int, NovatekCodec.Level) -> NovatekCodec.Level) {
+                val ns = NovatekCodec.Segment(seg.levels.mapIndexed { i, lvl -> t(i, lvl) })
                 val newEntry = when (which) {
                     "FI" -> entry.copy(fi = ns)
                     "SR" -> entry.copy(sr = ns)
@@ -852,29 +866,39 @@ fun HyperOsFisrScreen(pkg: String) {
                 }
                 viewModel.updateFragmentSelf(ntTarget, JsonPrimitive(NovatekCodec.serialize(newEntry)))
             }
-            fun pickTemp(which: String, seg: NovatekCodec.Segment, target: Int) {
-                val delta = target - (tempApplied[which] ?: 0)
-                if (delta != 0) {
-                    rewrite(which, seg) { it.withTempOffset(delta) }
-                    tempApplied[which] = target
-                }
+            // 温度档位：绝对值 = 基线同位等级温度 + 档位（幂等，不累加，以文档为唯一真相）
+            fun pickTemp(which: String, seg: NovatekCodec.Segment, tier: Int) {
+                val base = baseSeg(which) ?: return
+                rewrite(which, seg) { i, lvl -> lvl.withTempsFrom(base.levels.getOrNull(i) ?: lvl, tier) }
             }
             item(key = "nt") {
                 HyperOsSectionCard(rows = buildList<@Composable () -> Unit> {
                     add {
                         NovatekPresetDropdownRow("插帧方案（FI）", entry.fi, editable) { p ->
-                            rewrite("FI", entry.fi) { it.withFpsPreset(p) }
+                            rewrite("FI", entry.fi) { _, it -> it.withFpsPreset(p) }
                         }
                     }
-                    add { NovatekTempDropdownRow("温度档位（FI）", tempApplied["FI"] ?: 0, editable) { pickTemp("FI", entry.fi, it) } }
-                    add { NovatekTempDropdownRow("温度档位（SR）", tempApplied["SR"] ?: 0, editable) { pickTemp("SR", entry.sr, it) } }
+                    add {
+                        NovatekTempDropdownRow("温度档位（FI）", entry.fi.tierDiff(baseSeg("FI")), editable) {
+                            pickTemp("FI", entry.fi, it)
+                        }
+                    }
+                    add {
+                        NovatekTempDropdownRow("温度档位（SR）", entry.sr.tierDiff(baseSeg("SR")), editable) {
+                            pickTemp("SR", entry.sr, it)
+                        }
+                    }
                     entry.fisr?.let { fs ->
                         add {
                             NovatekPresetDropdownRow("插帧方案（FISR）", fs, editable) { p ->
-                                rewrite("FISR", fs) { it.withFpsPreset(p) }
+                                rewrite("FISR", fs) { _, it -> it.withFpsPreset(p) }
                             }
                         }
-                        add { NovatekTempDropdownRow("温度档位（FISR）", tempApplied["FISR"] ?: 0, editable) { pickTemp("FISR", fs, it) } }
+                        add {
+                            NovatekTempDropdownRow("温度档位（FISR）", fs.tierDiff(baseSeg("FISR")), editable) {
+                                pickTemp("FISR", fs, it)
+                            }
+                        }
                     }
                 })
             }

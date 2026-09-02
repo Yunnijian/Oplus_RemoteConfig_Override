@@ -256,4 +256,37 @@ class NovatekCodecTest {
         assertEquals(listOf("InputFPS", "TargetFPS", "MEMC", "MEMCMode"), names)
         assertEquals(NovatekCodec.PARAM_KEYS.size, 17)
     }
+
+    @Test
+    fun `temp tier is absolute from baseline and idempotent`() {
+        // 原始基线 45/43/43/41；档位 +40 应得 85/83/83/81（绝对值，非累加）
+        val raw = "com.tencent.jkchess_93#185#93,185,1,0x2012#45#43#43#41_0#0#0,0,0,0,1,2,1,0x535,1,1,0,0,0x22#45#43#43#41"
+        val e = NovatekCodec.parse(raw)!!
+        val base = e.fi
+        val tier40 = NovatekCodec.Segment(base.levels.map { lvl -> lvl.withTempsFrom(lvl, 40) })
+        assertEquals(listOf("85", "83", "83", "81"),
+            with(tier40.levels[0]) { listOf(tgTh, tgRec, mgTh, mgRec) })
+        // 方案字段不受影响
+        assertEquals("93", tier40.levels[0].dynamicFps)
+        assertEquals("185", tier40.levels[0].targetFps)
+        // 从已 +40 的文档再按基线取 +40 → 仍 85（幂等，不累加）
+        val again = NovatekCodec.Segment(tier40.levels.mapIndexed { i, lvl -> lvl.withTempsFrom(base.levels[i], 40) })
+        assertEquals(listOf("85", "83", "83", "81"),
+            with(again.levels[0]) { listOf(tgTh, tgRec, mgTh, mgRec) })
+        // 档位反推：文档 vs 基线
+        assertEquals(0, base.tierDiff(base))
+        assertEquals(40, tier40.tierDiff(base))
+    }
+
+    @Test
+    fun `fps preset changes only first two pairs`() {
+        val raw = "com.a.b_93#185#93,185,1,0x2012#45#43#43#41_0#0#0,0,0,0,1,2#45#43#43#41"
+        val e = NovatekCodec.parse(raw)!!
+        val preset = NovatekCodec.FPS_PRESETS.first { it.label == "60-120" }
+        val lvl = e.fi.levels[0].withFpsPreset(preset)
+        assertEquals("61", lvl.dynamicFps)
+        assertEquals("120", lvl.targetFps)
+        // params 头两枚 = InputFPS,TargetFPS；MEMC/MEMCMode 原样
+        assertEquals(listOf("60", "120", "1", "0x2012"), lvl.params)
+    }
 }

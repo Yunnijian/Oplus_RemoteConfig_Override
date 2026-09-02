@@ -460,6 +460,20 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         _thermalState.update { it.copy(enabled = on) }
     }
 
+    // ── Novatek 温度档位基线：首次读取捕获原始串，档位取「基线 + 偏移」绝对值 ──
+
+    private fun novatekPrefs() =
+        getApplication<Application>().getSharedPreferences("novatek", Context.MODE_PRIVATE)
+
+    /** 首次读取时捕获原始基线串（已存在则不覆盖），供温度档位取绝对值、幂等回显。 */
+    fun captureNovatekBaseline(pkg: String, raw: String) {
+        val key = "base_$pkg"
+        if (!novatekPrefs().contains(key)) novatekPrefs().edit().putString(key, raw).apply()
+    }
+
+    /** 读取原始基线串（无则 null）。 */
+    fun novatekBaseline(pkg: String): String? = novatekPrefs().getString("base_$pkg", null)
+
     /** 从片段删除一批键（温控开关关闭时）。 */
     fun updateFragmentRemoveKeys(pointer: String, keys: List<String>) {
         mutateScopedFragment(pointer) { frag ->

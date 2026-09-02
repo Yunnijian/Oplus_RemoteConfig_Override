@@ -54,3 +54,6 @@ android/wechat_icon.svg
 _br.js
 _br.js
 .qoder/
+
+# SDD planning docs (local only, do not commit)
+/docs/superpowers/

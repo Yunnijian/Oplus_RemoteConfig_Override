@@ -38,8 +38,9 @@ object NovatekCodec {
         FpsPreset("73-144", "73", "144", "72", "144"),
     )
 
-    /** 温度档位偏移（℃）预制值。 */
-    val TEMP_OFFSETS = listOf(10, 20, 30, 40)
+    /** 温度档位（℃，相对原始基线的绝对偏移）；0 = 原始（未调整）。 */
+    val TEMP_OFFSETS = listOf(0, 10, 20, 30, 40)
+    fun tempLabel(v: Int): String = if (v == 0) "原始" else "+${v}℃"
 
     /** 一个温度等级（7 字段；params 保持原 token 列表）。 */
     data class Level(
@@ -61,16 +62,17 @@ object NovatekCodec {
             return copy(dynamicFps = p.dynamicFps, targetFps = p.targetFps, params = newParams)
         }
 
-        /** 温度偏移：4 个温度字段整体加 offset（容忍小数如 46.7；整数结果不带 .0）。 */
-        fun withTempOffset(offset: Int): Level = copy(
-            tgTh = offsetTemp(tgTh, offset),
-            tgRec = offsetTemp(tgRec, offset),
-            mgTh = offsetTemp(mgTh, offset),
-            mgRec = offsetTemp(mgRec, offset),
+        /** 温度档位（绝对）：4 个温度字段 = 基线等级同位字段 + offset（保留本级的帧率/params）。
+         *  以基线为准取绝对值，幂等、不累加，且始终以文档为唯一真相。 */
+        fun withTempsFrom(base: Level, offset: Int): Level = copy(
+            tgTh = addTemp(base.tgTh, offset),
+            tgRec = addTemp(base.tgRec, offset),
+            mgTh = addTemp(base.mgTh, offset),
+            mgRec = addTemp(base.mgRec, offset),
         )
 
         private companion object {
-            fun offsetTemp(v: String, offset: Int): String = v.trim().toDoubleOrNull()?.let {
+            fun addTemp(v: String, offset: Int): String = v.trim().toDoubleOrNull()?.let {
                 val r = it + offset
                 if (r % 1.0 == 0.0) r.toLong().toString() else r.toString()
             } ?: v
@@ -78,7 +80,14 @@ object NovatekCodec {
     }
 
     /** 一段策略链（FI / SR / FISR）。 */
-    data class Segment(val levels: List<Level>)
+    data class Segment(val levels: List<Level>) {
+        /** 相对基线的档位（首级 tgTh 差值，四舍五入到整数℃）；无基线返回 0。 */
+        fun tierDiff(base: Segment?): Int {
+            val a = levels.firstOrNull()?.tgTh?.toDoubleOrNull() ?: return 0
+            val b = base?.levels?.firstOrNull()?.tgTh?.toDoubleOrNull() ?: return 0
+            return Math.round(a - b).toInt()
+        }
+    }
 
     data class Entry(
         val pkg: String,

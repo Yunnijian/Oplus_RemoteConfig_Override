@@ -418,25 +418,34 @@ fun HyperOsActionRow(
     title: String,
     summary: String? = null,
     end: (@Composable RowScope.() -> Unit)? = null,
+    enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
 ) {
-    when (LocalUiMode.current) {
-        UiMode.Miuix -> BasicComponent(
-            onClick = onClick ?: {},
-            title = title,
-            summary = summary,
-            endActions = end,
-        )
-        UiMode.Material -> SegmentedListItem(
-            onClick = onClick ?: {},
-            headlineContent = {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-            },
-            supportingContent = summary?.let {
-                { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
-            },
-            trailingContent = end?.let { content -> { Row { content() } } },
-        )
+    val effClick: () -> Unit = if (enabled) (onClick ?: {}) else ({})
+    val row: @Composable () -> Unit = {
+        when (LocalUiMode.current) {
+            UiMode.Miuix -> BasicComponent(
+                onClick = effClick,
+                title = title,
+                summary = summary,
+                endActions = end,
+            )
+            UiMode.Material -> SegmentedListItem(
+                onClick = effClick,
+                headlineContent = {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                },
+                supportingContent = summary?.let {
+                    { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
+                },
+                trailingContent = end?.let { content -> { Row { content() } } },
+            )
+        }
+    }
+    if (enabled) {
+        row()
+    } else {
+        Box(Modifier.alpha(0.4f)) { row() }
     }
 }
 
@@ -1233,30 +1242,30 @@ internal fun NovatekPresetDropdownRow(
     }
 }
 
-/** 温度档位下拉行：选项 = +10/+20/+30/+40℃，选中即回调所选档位（相对基线）。 */
+/** 温度档位下拉行：选项 = 原始/+10/+20/+30/+40℃（相对基线绝对值），选中即回调档位。 */
 @Composable
 internal fun NovatekTempDropdownRow(
     title: String,
-    applied: Int,
+    tier: Int,
     enabled: Boolean,
     onPick: (Int) -> Unit,
 ) {
-    val labels = NovatekCodec.TEMP_OFFSETS.map { "+$it℃" }
-    val idx = NovatekCodec.TEMP_OFFSETS.indexOfFirst { it * 10 == applied }.coerceAtLeast(0)
+    val labels = NovatekCodec.TEMP_OFFSETS.map { NovatekCodec.tempLabel(it) }
+    val idx = NovatekCodec.TEMP_OFFSETS.indexOfFirst { it == tier }.coerceAtLeast(0)
     when (LocalUiMode.current) {
         UiMode.Miuix -> OverlayDropdownPreference(
             items = labels,
             selectedIndex = idx,
             title = title,
             enabled = enabled,
-            onSelectedIndexChange = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let { onPick(it * 10) } },
+            onSelectedIndexChange = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let(onPick) },
         )
         UiMode.Material -> SegmentedDropdownItem(
             items = labels,
             selectedIndex = idx,
             title = title,
             enabled = enabled,
-            onItemSelected = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let { onPick(it * 10) } },
+            onItemSelected = { i -> NovatekCodec.TEMP_OFFSETS.getOrNull(i)?.let(onPick) },
         )
     }
 }
