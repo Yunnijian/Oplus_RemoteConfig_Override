@@ -14,8 +14,13 @@ import com.remoteconfig.override.data.MigtCodec
 import com.remoteconfig.override.data.NovatekCodec
 import com.remoteconfig.override.navigation.LocalNavigator
 import com.remoteconfig.override.navigation.Route
+import com.remoteconfig.override.settings.UiMode
+import com.remoteconfig.override.ui.theme.LocalUiMode
 import com.remoteconfig.override.viewmodel.HyperOsSwitchCatalog
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -23,6 +28,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme as miuixColorScheme
 
 /**
  * HyperOS 功能页 v2 — 8 个功能子屏（方案第三章）。
@@ -104,7 +111,9 @@ fun HyperOsThermalFpsScreen(pkg: String) {
             format = t.format,
             chips = when (t.format) {
                 CurveCodec.TEMP_FPS, CurveCodec.FPS_THRESH -> fpsChips(caps)
-                CurveCodec.TEMP_FPS_FREQ -> cpuFreqChips(caps)
+                // 多档曲线：档首 = 刷新率档，用设备档位预填 key 列；限频曲线另加频率 y 列
+                CurveCodec.FPS_SOC_FPS -> targetFpsBandChips(caps)
+                CurveCodec.TEMP_FPS_FREQ -> targetFpsBandChips(caps) + cpuFreqChips(caps)
                 else -> emptyList()
             },
             onCommit = { text ->
@@ -128,11 +137,13 @@ fun HyperOsThermalFpsScreen(pkg: String) {
             return@HyperOsFeatureScaffold
         }
 
-        // 参数行收集器：把一组 ThermalParam 转成分组卡的行列表（无值则跳过）
+        // 参数行收集器：把一组 ThermalParam 转成分组卡的行列表（无值则跳过；
+        // 多档帧率曲线走内联卡片，不在此列）
         fun paramRows(params: List<ThermalParam>): List<@Composable () -> Unit> =
             params.mapNotNull { p ->
                 val current = fragment[p.key] ?: return@mapNotNull null
                 val text = (current as? JsonPrimitive)?.content ?: return@mapNotNull null
+                if (p.format === CurveCodec.FPS_TARGET_BAND) return@mapNotNull null
                 // 温控曲线（dynamic_*）受总开关控制：关闭时灰置不可编辑（PID/阈值等监控项不受控）
                 val editable = !p.key.startsWith("dynamic") || thermal.enabled
                 val fmt = p.format
@@ -149,6 +160,60 @@ fun HyperOsThermalFpsScreen(pkg: String) {
                     }
                 }
             }
+
+        // 多档帧率曲线（帧率曲线 / 风扇帧率曲线 / 低电量限帧，含 _M）：
+        // 小标题 = 曲线名，rows = 各档位功能入口行 → push 档位编辑页
+        fun bandCurveItems(params: List<ThermalParam>, section: String) {
+            params.filter {
+                it.format === CurveCodec.FPS_TARGET_BAND || it.format === CurveCodec.FPS_SOC_FPS
+            }.forEach { p ->
+                val current = fragment[p.key] as? JsonPrimitive ?: return@forEach
+                val text = if (current.isString) current.content else return@forEach
+                val bands = parseFpsBands(text)
+                item(key = "band_${p.key}") {
+                    if (bands.isNotEmpty()) {
+                        // 电量轴（by_battery）：低电量档；其余：温控档
+                        val noun = if (p.format === CurveCodec.FPS_SOC_FPS) "低电量档" else "温控档"
+                        HyperOsSectionCard(
+                            title = "${p.label}（$section）",
+                            rows = bands.map { (bandKey, _) ->
+                                val row: @Composable () -> Unit = {
+                                    val click: (() -> Unit)? = if (thermal.enabled) {
+                                        { navigator.push(Route.HyperOsBandEditor(pkg, p.key, p.label, bandKey)) }
+                                    } else {
+                                        null
+                                    }
+                                    HyperOsActionRow(
+                                        title = "$bandKey $noun",
+                                        summary = "$bandKey FPS 下$noun",
+                                        end = {
+                                            when (LocalUiMode.current) {
+                                                UiMode.Miuix -> MiuixIcon(
+                                                    imageVector = Icons.Filled.KeyboardArrowRight,
+                                                    contentDescription = "编辑",
+                                                    tint = miuixColorScheme.onSurfaceVariantActions,
+                                                )
+                                                UiMode.Material -> Icon(
+                                                    Icons.Filled.KeyboardArrowRight,
+                                                    contentDescription = "编辑",
+                                                )
+                                            }
+                                        },
+                                        onClick = click,
+                                    )
+                                }
+                                row
+                            },
+                        )
+                    } else {
+                        // 解析失败：回退原文编辑（仍按格式校验 gate）
+                        HyperOsValueRow(title = p.label, value = text, enabled = thermal.enabled) {
+                            curveTarget = CurveTarget(p.key, p.label, p.format!!)
+                        }
+                    }
+                }
+            }
+        }
 
         // 温控限帧总开关：关闭 = 曲线从配置删除（编辑灰置），开启 = 恢复
         item(key = "thermal_switch") {
@@ -170,12 +235,153 @@ fun HyperOsThermalFpsScreen(pkg: String) {
         if (tgameRows.isNotEmpty()) {
             item(key = "tgame") { HyperOsSectionCard(title = "TGAME", rows = tgameRows) }
         }
+        bandCurveItems(THERMAL_TGAME, "TGAME")
         val mgameRows = paramRows(THERMAL_MGAME)
         if (mgameRows.isNotEmpty()) {
             item(key = "mgame") { HyperOsSectionCard(title = "MGAME", rows = mgameRows) }
         }
+        bandCurveItems(THERMAL_MGAME, "MGAME")
         // 说明：_M 档与基础档分节（方案「温控与帧率」）；songyuan 云控无
         // ovrride_config#90/#120 档（appview 亦不索引），故无档位切换 UI。
+    }
+}
+
+// ── S3-1b 单档位编辑页（温控与帧率 → 帧率曲线/低电量限帧 → 某档入口）────────
+
+/**
+ * 单个帧率档位的编辑页：每个触发点一张卡（阈值行 + 触发后限帧下拉 + 删除），
+ * 尾部「添加阈值」。温度轴用滑条，电量轴用数值输入。改动即时序列化整条曲线写回。
+ */
+@Composable
+fun HyperOsBandEditorScreen(pkg: String, curveKey: String, curveLabel: String, bandKey: String) {
+    val navigator = LocalNavigator.current
+    val viewModel: HyperOsViewModel = viewModel()
+    val detail by viewModel.detailState.collectAsStateWithLifecycle()
+    val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
+    val caps by viewModel.deviceCapsState.collectAsStateWithLifecycle()
+    LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
+
+    // 电量轴（by_battery）：阈值 = 电量百分比；其余 = 温度滑条
+    val battery = curveKey.contains("battery")
+    val noun = if (battery) "低电量档" else "温控档"
+
+    val document = remember(scoped.edited) {
+        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
+    }
+    val found = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
+    val (pointer, fragment) = found ?: (null to null)
+    val bands = remember(scoped.edited, curveKey) {
+        (fragment?.get(curveKey) as? JsonPrimitive)?.takeIf { it.isString }
+            ?.content?.let { parseFpsBands(it) }.orEmpty()
+    }
+    val band = bands.firstOrNull { it.first == bandKey }
+    val currentPrimitive = fragment?.get(curveKey) as? JsonPrimitive
+
+    var batteryTarget by remember { mutableStateOf<EditTarget?>(null) }
+    batteryTarget?.let { t ->
+        EditValueDialog(
+            title = t.title, initial = t.initial, isNumber = true,
+            onCommit = { v ->
+                batteryTarget = null
+                t.onCommit(v)
+            },
+            onDismiss = { batteryTarget = null },
+        )
+    }
+
+    fun commit(mutate: (MutableList<FpsBand>) -> Unit) {
+        val el = currentPrimitive ?: return
+        val ptr = pointer ?: return
+        val bs = parseFpsBands(el.content).map { it.first to it.second.toMutableList() }.toMutableList()
+        mutate(bs)
+        viewModel.updateFragmentValue(ptr, curveKey, el.sameTypePrimitive(formatFpsBands(bs)))
+    }
+
+    HyperOsFeatureScaffold(
+        title = "$curveLabel · ${bandKey} $noun",
+        error = detail.switchError ?: scoped.error,
+        loading = detail.loading || scoped.loading,
+        onBack = navigator::pop,
+    ) {
+        if (band == null || pointer == null) {
+            item(key = "empty") { HyperOsEmptyHint("档位不存在或配置已变更") }
+            return@HyperOsFeatureScaffold
+        }
+        val options = fpsOptions(caps?.refreshRates.orEmpty(), band.second.map { it.second })
+        band.second.forEachIndexed { i, point ->
+            item(key = "pt_$i") {
+                HyperOsSectionCard(
+                    title = "触发点 ${i + 1}",
+                    rows = buildList {
+                        if (battery) {
+                            add {
+                                HyperOsValueRow(title = "低电量阈值", value = "${point.first}%") {
+                                    batteryTarget = EditTarget(
+                                        title = "低电量阈值（%）", initial = point.first, isNumber = true,
+                                    ) { v ->
+                                        commit { bs ->
+                                            val bi = bs.indexOfFirst { it.first == bandKey }
+                                            if (bi >= 0) bs[bi].second[i] = v to bs[bi].second[i].second
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            add { BandTempSliderRow(temp = point.first, enabled = true) { t ->
+                                commit { bs ->
+                                    val bi = bs.indexOfFirst { it.first == bandKey }
+                                    if (bi >= 0) bs[bi].second[i] = t to bs[bi].second[i].second
+                                }
+                            } }
+                        }
+                        add { BandFpsDropdownRow(fps = point.second, options = options, enabled = true) { f ->
+                            commit { bs ->
+                                val bi = bs.indexOfFirst { it.first == bandKey }
+                                if (bi >= 0) bs[bi].second[i] = bs[bi].second[i].first to f
+                            }
+                        } }
+                        if (band.second.size > 1) {
+                            add {
+                                HyperOsActionRow(
+                                    title = "删除此触发点",
+                                    summary = if (battery) {
+                                        "移除「${point.first}% → ${if (point.second == "0") "不限" else point.second}」"
+                                    } else {
+                                        "移除「${point.first}℃ → ${if (point.second == "0") "不限" else point.second}」"
+                                    },
+                                    onClick = {
+                                        commit { bs ->
+                                            val bi = bs.indexOfFirst { it.first == bandKey }
+                                            if (bi >= 0 && bs[bi].second.size > 1) bs[bi].second.removeAt(i)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        item(key = "add") {
+            HyperOsSectionCard(
+                rows = listOf<@Composable () -> Unit> {
+                    HyperOsActionRow(
+                        title = if (battery) "添加低电量阈值" else "添加温度阈值",
+                        summary = if (battery) {
+                            "新增一个「电量 → 限帧」触发点（默认 20% → 60）"
+                        } else {
+                            "新增一个「温度 → 限帧」触发点（默认 45℃ → 60）"
+                        },
+                        onClick = {
+                            commit { bs ->
+                                val bi = bs.indexOfFirst { it.first == bandKey }
+                                if (bi >= 0) bs[bi].second.add(if (battery) "20" to "60" else "45" to "60")
+                            }
+                        },
+                    )
+                },
+            )
+        }
     }
 }
 

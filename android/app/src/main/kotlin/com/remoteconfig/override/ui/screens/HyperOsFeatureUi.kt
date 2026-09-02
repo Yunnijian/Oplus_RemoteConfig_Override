@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +18,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -36,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -71,6 +74,7 @@ import com.remoteconfig.override.ui.component.material.ExpressiveSwitch
 import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
 import com.remoteconfig.override.ui.component.material.expressiveTopAppBarColors
 import com.remoteconfig.override.ui.component.material.SegmentedColumn
+import com.remoteconfig.override.ui.component.material.SegmentedDropdownItem
 import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.ui.theme.LocalUiMode
 import kotlinx.serialization.json.Json
@@ -85,6 +89,7 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator as MiuixSpinner
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
@@ -92,6 +97,8 @@ import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
 import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme as miuixColorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -147,8 +154,9 @@ private fun FeatureScaffoldMiuix(
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
+    // 底部不消费 inset：内容延伸到导航条后面（对齐主页沉浸），列表自补 navigationBars padding
     MiuixScaffold(
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             MiuixTopAppBar(
                 title = title,
@@ -170,7 +178,9 @@ private fun FeatureScaffoldMiuix(
                         .fillMaxSize()
                         .nestedScroll(scrollBehavior.nestedScrollConnection)
                         .padding(horizontal = 12.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp),
+                    contentPadding = PaddingValues(
+                        bottom = 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                    ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     error?.let { item(key = "error") { ErrorBannerMiuix(it) } }
@@ -378,7 +388,7 @@ fun HyperOsSwitchRow(
                 enabled = enabled,
                 interactionSource = interactionSource,
                 headlineContent = {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(title, style = MaterialTheme.typography.titleMedium)
                 },
                 supportingContent = summary?.let {
                     { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
@@ -420,7 +430,7 @@ fun HyperOsActionRow(
         UiMode.Material -> SegmentedListItem(
             onClick = onClick ?: {},
             headlineContent = {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(title, style = MaterialTheme.typography.titleMedium)
             },
             supportingContent = summary?.let {
                 { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
@@ -466,7 +476,7 @@ fun HyperOsValueRow(
             UiMode.Material -> SegmentedListItem(
                 onClick = effClick,
                 headlineContent = {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(title, style = MaterialTheme.typography.titleMedium)
                 },
                 trailingContent = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -590,6 +600,122 @@ internal fun EditValueDialog(
                 TextButton(onClick = { onCommit(text) }, enabled = numericOk) { Text("确定") }
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        )
+    }
+}
+
+// ── 多档帧率曲线（档位 = 独立功能页入口；纯解析/序列化助手）──────────────
+
+/** 一个档位：档位值 + 触发点列表（温度 → 限帧）。 */
+internal typealias FpsBand = Pair<String, MutableList<Pair<String, String>>>
+
+/** `165#10:0,45:120;120#…` → 档位结构（带 key 的段 = 档首）。 */
+internal fun parseFpsBands(value: String): List<FpsBand> {
+    val segs = CurveCodec.parse(value, CurveCodec.FPS_TARGET_BAND) ?: return emptyList()
+    val bands = ArrayList<FpsBand>()
+    var current: String? = null
+    for (s in segs) {
+        val key = s.key
+        if (key != null || current == null) {
+            current = key ?: segs.first().x
+            bands.add(current!! to mutableListOf())
+        }
+        bands.last().second.add(s.x to s.y)
+    }
+    return bands
+}
+
+/** 档位结构 → 曲线串（每档恒带 `key#` 前缀）。 */
+internal fun formatFpsBands(bands: List<FpsBand>): String =
+    bands.joinToString(";") { (key, pts) -> "$key#" + pts.joinToString(",") { p -> "${p.first}:${p.second}" } }
+
+/** 限帧下拉选项：不限(0) + 设备刷新率档（升序），已有值不在表内时并入。 */
+internal fun fpsOptions(refreshRates: List<Int>, existing: List<String>): List<String> {
+    val values = (listOf(0) + refreshRates + existing.mapNotNull { it.toIntOrNull() }).distinct().sorted()
+    return values.map { if (it == 0) "不限" else "$it" }
+}
+
+internal fun fpsIndexOf(options: List<String>, fps: String): Int =
+    options.indexOf(fps).takeIf { it >= 0 } ?: 0
+
+/** 温度串格式化：整数值去掉小数点（0.5℃ 步进）。 */
+internal fun tempStr(v: Float): String = if (v % 1f == 0f) v.toInt().toString() else v.toString()
+
+/** 温度关键点（滑轨视觉参考点，0–80℃ 每 10℃）。 */
+private val TEMP_KEY_POINTS = (0..80 step 10).map { it.toFloat() }
+
+/** 温控阈值滑条行（0.5℃ 一档：显示与提交均量化；关键点 + 步进震动）。 */
+@Composable
+internal fun BandTempSliderRow(temp: String, enabled: Boolean, onCommit: (String) -> Unit) {
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val v = dragging ?: temp.toFloatOrNull() ?: 0f
+    val snapped = (v * 2).toInt() / 2f
+    val shown = "${tempStr(snapped)}℃"
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> SliderPreference(
+            value = v,
+            onValueChange = { dragging = it },
+            onValueChangeFinished = {
+                dragging?.let { d -> onCommit(tempStr((d * 2).toInt() / 2f)) }
+                dragging = null
+            },
+            title = "温控阈值",
+            valueText = shown,
+            enabled = enabled,
+            valueRange = 0f..80f,
+            showKeyPoints = true,
+            keyPoints = TEMP_KEY_POINTS,
+            hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+        )
+        // Material：标题行（左标题右数值）+ 滑条占满整行（对齐「界面缩放」既有滑条卡片布局）
+        UiMode.Material -> Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "温控阈值",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = shown,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Slider(
+                value = v,
+                onValueChange = { dragging = it },
+                onValueChangeFinished = {
+                    dragging?.let { d -> onCommit(tempStr((d * 2).toInt() / 2f)) }
+                    dragging = null
+                },
+                valueRange = 0f..80f,
+                steps = 160,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** 触发后限帧下拉行（选项 = 不限 + 设备刷新率档）。 */
+@Composable
+internal fun BandFpsDropdownRow(fps: String, options: List<String>, enabled: Boolean, onSelect: (String) -> Unit) {
+    when (LocalUiMode.current) {
+        UiMode.Miuix -> OverlayDropdownPreference(
+            items = options,
+            selectedIndex = fpsIndexOf(options, fps),
+            title = "触发后限帧",
+            enabled = enabled,
+            onSelectedIndexChange = { idx -> onSelect(if (options[idx] == "不限") "0" else options[idx]) },
+        )
+        UiMode.Material -> SegmentedDropdownItem(
+            title = "触发后限帧",
+            items = options,
+            selectedIndex = fpsIndexOf(options, fps),
+            enabled = enabled,
+            onItemSelected = { idx -> onSelect(if (options[idx] == "不限") "0" else options[idx]) },
         )
     }
 }
@@ -850,6 +976,13 @@ internal fun fpsChips(caps: JoyoseManager.DeviceCaps?, onX: Boolean = false): Li
 /** CPU 频率档 chips（限频曲线 y 轴；MHz 展示，取最高 12 档防溢出）。 */
 internal fun cpuFreqChips(caps: JoyoseManager.DeviceCaps?): List<CurveChip> =
     caps?.cpuFrequencies.orEmpty().takeLast(12).map { CurveChip(label = "${it / 1000} MHz", y = it.toString()) }
+
+/**
+ * 目标帧率档 chips（多档曲线档首：dynamic_targetfps / _fan / by_battery / cpufreq）。
+ * 档首必须与当前目标帧率完全相等才命中，用设备刷新率档预填 key 列。
+ */
+internal fun targetFpsBandChips(caps: JoyoseManager.DeviceCaps?): List<CurveChip> =
+    caps?.refreshRates.orEmpty().map { CurveChip(label = "${it} fps 档", key = it.toString()) }
 
 /**
  * 按当前 JSON 值类型写回：字符串保持字符串；数字尝试 Long→Double 回退文本。

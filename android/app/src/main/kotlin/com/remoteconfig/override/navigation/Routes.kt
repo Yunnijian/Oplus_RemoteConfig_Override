@@ -39,6 +39,15 @@ sealed interface Route : NavKey, Parcelable {
     @Parcelize
     data class HyperOsThermalFps(val packageName: String) : Route
 
+    /** 单个帧率档位编辑页（温控与帧率页「帧率曲线」下某档入口）。 */
+    @Parcelize
+    data class HyperOsBandEditor(
+        val packageName: String,
+        val curveKey: String,
+        val curveLabel: String,
+        val bandKey: String,
+    ) : Route
+
     @Parcelize
     data class HyperOsFisr(val packageName: String) : Route
 

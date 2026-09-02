@@ -123,17 +123,39 @@ class CurveCodecTest {
     }
 
     @Test
-    fun `battery curve round-trips`() {
-        val raw = "60#1:45,20:0,100:0"
-        assertEquals(raw, CurveCodec.format(CurveCodec.parse(raw, CurveCodec.FPS_SOC_FPS)!!, CurveCodec.FPS_SOC_FPS))
+    fun `real PID_T multi-band value round-trips`() {
+        // 真实云控值（sgame）：`;` 分档，每档 `fps#温度:参数串`，档内温度点仅首段带 fps key
+        val raw = "165#10:0 0 0 0 0 0,45:45.5 165 90 20 2 3;90#10:0 0 0 0 0 0,44.5:45 90 60 15 1.5"
+        val segs = CurveCodec.parse(raw, CurveCodec.FPS_TEMP_PARAM)!!
+        assertEquals(4, segs.size)
+        assertEquals(CurveCodec.Segment("165", "10", "0 0 0 0 0 0"), segs[0])
+        assertEquals(CurveCodec.Segment(null, "45", "45.5 165 90 20 2 3"), segs[1])
+        assertEquals(CurveCodec.Segment("90", "10", "0 0 0 0 0 0"), segs[2])
+        assertEquals(raw, CurveCodec.format(segs, CurveCodec.FPS_TEMP_PARAM))
     }
 
     @Test
-    fun `cpufreq curve parses temperature key`() {
-        val segs = CurveCodec.parse("43.5#60:1804800,45#60:1555200", CurveCodec.TEMP_FPS_FREQ)!!
-        assertEquals("43.5", segs[0].key)
-        assertEquals("60", segs[0].x)
+    fun `battery multi-band round-trips`() {
+        // 真实值：`;` 分档，每档 `fps#电量:限帧`（G1 消费端按 targetFps 精确匹配档首）
+        val raw = "165#1:60,4:0;144#1:60,4:0;120#1:60,4:0;90#1:60,4:0"
+        val segs = CurveCodec.parse(raw, CurveCodec.FPS_SOC_FPS)!!
+        assertEquals(8, segs.size)
+        assertEquals(CurveCodec.Segment("165", "1", "60"), segs[0])
+        assertEquals(CurveCodec.Segment("144", "1", "60"), segs[2])
+        assertEquals(raw, CurveCodec.format(segs, CurveCodec.FPS_SOC_FPS))
+        // 单档形态也合法
+        val single = "60#1:45,20:0,100:0"
+        assertEquals(single, CurveCodec.format(CurveCodec.parse(single, CurveCodec.FPS_SOC_FPS)!!, CurveCodec.FPS_SOC_FPS))
+    }
+
+    @Test
+    fun `cpufreq band key is integer target-fps not temperature`() {
+        // G() 解析：档首 Integer.valueOf（帧率档），非温度
+        val segs = CurveCodec.parse("60#43.5:1804800;120#45:1555200", CurveCodec.TEMP_FPS_FREQ)!!
+        assertEquals("60", segs[0].key)
+        assertEquals("43.5", segs[0].x)
         assertEquals("1804800", segs[0].y)
+        assertEquals("60#43.5:1804800;120#45:1555200", CurveCodec.format(segs, CurveCodec.TEMP_FPS_FREQ))
     }
 
     @Test

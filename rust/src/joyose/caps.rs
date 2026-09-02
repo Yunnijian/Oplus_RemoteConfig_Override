@@ -158,24 +158,48 @@ fn thermal_zones() -> Value {
     }
 }
 
-/// Scan `dumpsys display` output for `refreshRate=<float>` tokens (both the
-/// `=` and `:` separator variants occur across Android versions), round to
-/// whole fps, dedup + sort. Sanity-filtered to 10..=240 to skip bogus tokens.
+/// Scan `dumpsys display` output for supported refresh rates. Songyuan-era
+/// dumps carry the mode table as `fps=120.00001` inside `supportedModes=[…]`
+/// plus an aggregated `supportedRefreshRates [a, b, …]`; older versions used
+/// `refreshRate=` tokens. All variants are scanned, rounded to whole fps,
+/// deduped + sorted. Sanity-filtered to 10..=240 to skip bogus tokens.
 fn extract_refresh_rates(text: &str) -> Vec<i64> {
+    const MARKERS: [&str; 2] = ["refreshRate", "fps="];
     let mut rates: Vec<i64> = Vec::new();
-    let marker = "refreshRate";
+    let mut push = |v: f64, rates: &mut Vec<i64>| {
+        let fps = v.round() as i64;
+        if (10..=240).contains(&fps) && !rates.contains(&fps) {
+            rates.push(fps);
+        }
+    };
+    // `supportedRefreshRates [a, b, …]`：解析整个数组（songyuan 档位全在这）
     let mut rest = text;
-    while let Some(pos) = rest.find(marker) {
-        rest = &rest[pos + marker.len()..];
+    while let Some(pos) = rest.find("supportedRefreshRates") {
+        rest = &rest[pos + "supportedRefreshRates".len()..];
         let tail = rest.trim_start_matches(['=', ':', ' ', '\t']);
-        let num: String = tail
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect();
-        if let Ok(v) = num.parse::<f64>() {
-            let fps = v.round() as i64;
-            if (10..=240).contains(&fps) && !rates.contains(&fps) {
-                rates.push(fps);
+        if let Some(end) = tail.find(']') {
+            for tok in tail[..end].split(',') {
+                if let Ok(v) = tok.trim().parse::<f64>() {
+                    push(v, &mut rates);
+                }
+            }
+            rest = &tail[end..];
+        } else {
+            break;
+        }
+    }
+    // 旧版本 token 形态
+    for marker in MARKERS {
+        let mut rest = text;
+        while let Some(pos) = rest.find(marker) {
+            rest = &rest[pos + marker.len()..];
+            let tail = rest.trim_start_matches(['=', ':', ' ', '\t']);
+            let num: String = tail
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if let Ok(v) = num.parse::<f64>() {
+                push(v, &mut rates);
             }
         }
     }
@@ -231,6 +255,18 @@ mod tests {
     #[test]
     fn refresh_rate_colon_separator_is_parsed() {
         assert_eq!(extract_refresh_rates("a refreshRate: 90.5 b"), vec![91]);
+    }
+
+    #[test]
+    fn songyuan_supported_modes_and_rates_are_parsed() {
+        // songyuan 实测：无 refreshRate= token，档位在 supportedRefreshRates 数组与 fps= 里
+        let text = "supportedRefreshRates [120.00001, 185.00002, 165.0, 144.00002, 90.0, \
+                    60.000004], defaultModeId 2, supportedModes [{id=1, fps=120.00001, \
+                    vsync=120.00001}, {id=2, fps=185.00002}]";
+        assert_eq!(
+            extract_refresh_rates(text),
+            vec![60, 90, 120, 144, 165, 185]
+        );
     }
 
     #[test]

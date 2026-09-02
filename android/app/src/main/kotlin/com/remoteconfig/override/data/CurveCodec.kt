@@ -150,43 +150,60 @@ object CurveCodec {
     )
 
     /**
-     * `fps#温度:参数串,...`（PID_*）：单档，key=fps 档，档内按温度拆行。
-     * 例：`60#10:0 0 0 0 0 0,42.5:43.5 60 30 10 1 2`
+     * `fps#温度:参数串;fps#温度:参数串`（PID_T / PID_M）：**多档**，`;` 分档，
+     * 档首 = 目标帧率档（Y() 解析；实机 sgame：
+     * `165#10:0 0 0 0 0 0,45:45.5 165 90 20 2 3;144#10:…;90#10:…`）。
      */
     val FPS_TEMP_PARAM = Format(
         separator = ",", xKind = AxisKind.DOUBLE, yKind = AxisKind.TEXT, keyKind = AxisKind.INT,
         xLabel = "温度", yLabel = "参数", keyLabel = "fps",
-        hint = "fps#温度:参数，逗号分隔；key 前缀仅首段需要（如 60#10:0 0 0,42.5:43.5 60 30）",
+        groupSeparator = ";",
+        hint = "每档「fps#温度:参数串…」，档间用 ; 分隔（如 60#10:0 0 0,44.5:45.5 60 30 10 0.8 3）",
     )
 
     /**
-     * `fps#温度:档位fps;fps#温度:档位fps;...`（dynamic_targetfps / _M /
-     * dynamic_fan_targetfps / _M）：多档，`;` 分档，每档以 targetFps 开头。
-     * 例：`165#10:0,45:120,47:90;120#10:0,45:90,47:60`
+     * `档位fps#温度:帧率,温度:帧率;档位fps#…`（dynamic_targetfps / _M /
+     * dynamic_fan_targetfps / _M）：多档，`;` 分档，档首 = 目标帧率档。
+     *
+     * 解析 = Joyose f0/z.java H()（`;` 拆档 → `#` 拆两半，档首 Integer 键）；
+     * 消费 = t0/t.java:193-208：按当前目标帧率**精确匹配**档首（非 floorEntry），
+     * 命中档的值再按 F() 解析成 温度→限帧 曲线；无匹配回退本游戏 dynamic_fps → 全局默认。
+     * 实机值（sgame）：`165#10:0,45:120,47:90;120#10:0,45:90,47:60;90#10:0,47:60`
      */
     val FPS_TARGET_BAND = Format(
         separator = ",", xKind = AxisKind.DOUBLE, yKind = AxisKind.INT, keyKind = AxisKind.INT,
-        xLabel = "温度", yLabel = "帧率", keyLabel = "档位fps",
+        xLabel = "温度", yLabel = "限帧", keyLabel = "档位",
         groupSeparator = ";",
-        hint = "每档「档位fps#温度:帧率,温度:帧率…」，档间用 ; 分隔（如 165#10:0,45:120;120#10:0,45:90）",
-    )
-
-    /** `fps#socLevel:limitFps,...`（dynamicfps_by_battery_T/_M）。 */
-    val FPS_SOC_FPS = Format(
-        separator = ",", xKind = AxisKind.INT, yKind = AxisKind.INT, keyKind = AxisKind.INT,
-        xLabel = "电量", yLabel = "限帧", keyLabel = "fps",
-        hint = "fps#电量:限帧，逗号分隔；限帧 0 = 解除（如 60#1:45,20:0）",
+        hint = "每档「档位#温度:限帧,温度:限帧…」，档间用 ; 分隔。" +
+            "档位须与当前刷新率档完全相等才生效（不匹配整档永不命中，如 60/90/120/165 各一档）；限帧 0 = 不限" +
+            "（如 165#10:0,45:120;120#10:0,45:90）",
     )
 
     /**
-     * `温度#fps:频率;温度#fps:频率;...`（dynamic_targetfps_cpufreq / _speedmode / _M）：
-     * 多档，`;` 分档，每档以温度开头。例：`43.5#60:1804800;45#60:1555200`
+     * `fps#电量:限帧,电量:限帧;fps#…`（dynamicfps_by_battery_T / _M）：**多档**，`;` 分档，
+     * 档首 = 目标帧率档（H() 解析，同 targetfps）。
+     * 实机值：`165#1:60,4:0;144#1:60,4:0;120#1:60,4:0;90#1:60,4:0`（单档 `60#1:45,20:0,100:0` 也合法）。
+     */
+    val FPS_SOC_FPS = Format(
+        separator = ",", xKind = AxisKind.INT, yKind = AxisKind.INT, keyKind = AxisKind.INT,
+        xLabel = "电量", yLabel = "限帧", keyLabel = "档位",
+        groupSeparator = ";",
+        hint = "每档「档位#电量:限帧…」，档间用 ; 分隔。档位须与当前刷新率档完全相等才生效" +
+            "（如 144#1:90,4:0;120#1:90,4:0）",
+    )
+
+    /**
+     * `档位fps#温度:频率;档位fps#…`（dynamic_targetfps_cpufreq / _speedmode / _M）：
+     * 多档，`;` 分档。解析 = f0/z.java G()：`;` 拆档 → `#` 拆两半，**档首 Integer.valueOf**
+     * （非整数抛异常被吞并记日志）→ 档首必须是整数帧率档（此前把档首当 Double 温度是错的）。
+     * 档内曲线形态：songyuan 云控暂无该键样本，未实证 —— 按 温度:频率(Hz) 最小形态处理。
      */
     val TEMP_FPS_FREQ = Format(
-        separator = ",", xKind = AxisKind.INT, yKind = AxisKind.INT, keyKind = AxisKind.DOUBLE,
-        xLabel = "fps", yLabel = "频率", keyLabel = "温度",
+        separator = ",", xKind = AxisKind.DOUBLE, yKind = AxisKind.INT, keyKind = AxisKind.INT,
+        xLabel = "温度", yLabel = "频率", keyLabel = "档位",
         groupSeparator = ";",
-        hint = "每档「温度#fps:频率(Hz)…」，档间用 ; 分隔（如 43.5#60:1804800;45#60:1555200）",
+        hint = "每档「档位#温度:频率(Hz)…」，档间用 ; 分隔。档位须与当前刷新率档完全相等才生效" +
+            "（如 60#43.5:1804800;120#45:1555200）",
     )
 
     /** `fps:thresh ...`（migt 参数包第 3 段，空格分隔）。 */
