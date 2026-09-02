@@ -12,6 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,13 +25,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.R
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.platform.Platform
 import com.remoteconfig.override.platform.appDisplayName
+import com.remoteconfig.override.ui.LocalMainPagerState
 import com.remoteconfig.override.ui.component.material.ExpressiveScaffold
+import com.remoteconfig.override.ui.component.material.TonalCard
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
@@ -54,15 +60,25 @@ fun HomeContentMaterial(
     modifier: Modifier = Modifier
 ) {
     val systemStatus by viewModel.systemStatus.collectAsState()
+    val installedConfigCount by viewModel.installedConfigCount.collectAsState()
     val cosaVersion by viewModel.cosaVersion.collectAsState()
     val context = LocalContext.current
+    val mainPagerState = LocalMainPagerState.current
 
     // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
     val hyperOS = LocalPlatform.current == Platform.HyperOS
     val hyperOsViewModel: HyperOsViewModel = composeViewModel()
     val joyoseStat by hyperOsViewModel.statState.collectAsState()
+    val listState by hyperOsViewModel.listState.collectAsState()
+    val commonState by hyperOsViewModel.commonState.collectAsState()
     val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
-    LaunchedEffect(hyperOS) { if (hyperOS) hyperOsViewModel.refreshStat() }
+    LaunchedEffect(hyperOS) {
+        if (hyperOS) {
+            hyperOsViewModel.refreshStat()
+            hyperOsViewModel.refreshList()
+            hyperOsViewModel.refreshCommon()
+        }
+    }
 
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
@@ -96,78 +112,27 @@ fun HomeContentMaterial(
                     .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // ── Root / Joyose 状态卡（HyperOS 分支：Joyose 状态卡）──
+                // ── Root / Joyose 状态卡（KernelSU v3.2.5 布局：顶部大卡 + 下方计数小卡）──
                 // 检测未完成前显示中性“正在检测”卡，避免冷启动闪现红色错误卡误导用户。
-                if (hyperOS) {
-                    JoyoseStatusCardMaterial(joyoseStat)
-                } else {
-                // 检测未完成前显示中性“正在检测”卡，避免冷启动闪现红色错误卡误导用户。
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = when {
-                            !systemStatus.checked -> MaterialTheme.colorScheme.surfaceVariant
-                            systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.primaryContainer
-                            systemStatus.isRooted -> MaterialTheme.colorScheme.tertiaryContainer
-                            else -> MaterialTheme.colorScheme.errorContainer
+                StatusCardLayout(
+                    hyperOS = hyperOS,
+                    systemStatus = systemStatus,
+                    joyoseStat = joyoseStat,
+                    appConfigCount = if (hyperOS) listState.apps.size else systemStatus.configuredCount,
+                    commonConfigCount = commonState.switches.size,
+                    installedConfigCount = installedConfigCount,
+                    onAppConfigClick = { mainPagerState.animateToPage(1) },
+                    onCommonConfigClick = { mainPagerState.animateToPage(2) },
+                    onRefreshClick = {
+                        if (hyperOS) {
+                            hyperOsViewModel.refreshStat()
+                            hyperOsViewModel.refreshList()
+                            hyperOsViewModel.refreshCommon()
+                        } else {
+                            viewModel.refreshAll()
                         }
-                    ),
-                    elevation = CardDefaults.cardElevation(0.dp)
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = when {
-                                !systemStatus.checked -> Icons.Filled.HourglassEmpty
-                                systemStatus.isRooted && systemStatus.dbAvailable -> Icons.Filled.Verified
-                                systemStatus.isRooted -> Icons.Filled.Warning
-                                else -> Icons.Filled.GppBad
-                            },
-                            contentDescription = null,
-                            tint = when {
-                                !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant
-                                systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer
-                                systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer
-                                else -> MaterialTheme.colorScheme.onErrorContainer
-                            },
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = when {
-                                    !systemStatus.checked -> "正在检测..."
-                                    systemStatus.isRooted && systemStatus.dbAvailable -> "Root 权限正常"
-                                    systemStatus.isRooted -> "数据库连接失败"
-                                    else -> "未授予 Root 权限"
-                                },
-                                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                                color = when {
-                                    !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer
-                                    systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer
-                                    else -> MaterialTheme.colorScheme.onErrorContainer
-                                }
-                            )
-                            Text(
-                                text = when {
-                                    !systemStatus.checked -> "正在检测 Root 权限与数据库状态"
-                                    systemStatus.isRooted && systemStatus.dbAvailable -> "数据库已连接，可读写配置"
-                                    systemStatus.isRooted -> "已获取 Root 权限，但数据库文件不可访问"
-                                    else -> "请授予 Root 权限后重启应用"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = when {
-                                    !systemStatus.checked -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                    systemStatus.isRooted && systemStatus.dbAvailable -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                    systemStatus.isRooted -> MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
-                                    else -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
-                                }
-                            )
-                        }
-                    }
-                }
-                } // if (hyperOS) else 旧 Root 状态卡
+                    },
+                )
 
                 // ── 设备信息卡（图二 MaterialHome 写法：Card + ListItem + HorizontalDivider）──
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -240,68 +205,134 @@ fun HomeContentMaterial(
     }
 }
 
-// ── Joyose 状态卡（HyperOS）──
-// 数据源 = HyperOsViewModel.statState（joyose-stat 轻量查询），状态视觉与 Root 状态卡一致。
+// ── Root / Joyose 状态卡（KernelSU v3.2.5 布局）──
+// 顶部大卡（Root / Joyose 状态）+ 下方计数小卡（应用配置 / 通用配置）。
+// 大卡数据源：ColorOS = MainViewModel.SystemStatus；HyperOS = HyperOsViewModel.statState。
+// 小卡数据源：应用配置 = listState.apps.size（HyperOS）/ configuredCount（ColorOS）；
+//            第二卡 HyperOS = 通用配置（commonState.switches.size）；
+//            ColorOS = 已安装应用配置（installedConfigCount）。
+// 卡片点击交互对齐 KernelSU：大卡点击重新检测，小卡点击跳转对应页面。
 @Composable
-private fun JoyoseStatusCardMaterial(stat: JoyoseManager.Stat?) {
-    val connected = stat != null && (stat.smartp.exists || stat.teg.exists)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                stat == null -> MaterialTheme.colorScheme.surfaceVariant
-                connected -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.errorContainer
+private fun StatusCardLayout(
+    hyperOS: Boolean,
+    systemStatus: MainViewModel.SystemStatus,
+    joyoseStat: JoyoseManager.Stat?,
+    appConfigCount: Int,
+    commonConfigCount: Int,
+    installedConfigCount: Int,
+    onAppConfigClick: () -> Unit,
+    onCommonConfigClick: () -> Unit,
+    onRefreshClick: () -> Unit,
+) {
+    val checking = if (hyperOS) joyoseStat == null else !systemStatus.checked
+    val connected = if (hyperOS) {
+        joyoseStat != null && (joyoseStat.smartp.exists || joyoseStat.teg.exists)
+    } else {
+        !checking && systemStatus.isRooted && systemStatus.dbAvailable
+    }
+    val frozen = hyperOS && joyoseStat?.sp?.frozen == true
+
+    // 照搬 KernelSU v3.2.5 StatusCard 的容器色：激活 secondaryContainer / 异常 errorContainer
+    val containerColor = when {
+        checking -> MaterialTheme.colorScheme.surfaceVariant
+        connected -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.errorContainer
+    }
+    val icon = when {
+        checking -> Icons.Outlined.HourglassEmpty
+        connected -> Icons.Outlined.CheckCircle
+        else -> Icons.Outlined.Warning
+    }
+    val title = when {
+        checking -> "正在检测..."
+        connected -> if (hyperOS) "Joyose 云控正常" else "Root 权限正常"
+        else -> if (hyperOS) "Joyose 云控不可用" else "请授予 Root 权限"
+    }
+    val subtitle = when {
+        checking -> if (hyperOS) "正在读取 Joyose 数据库状态" else "正在检测 Root 权限与数据库状态"
+        connected -> if (hyperOS) {
+            "SmartP / teg_config 已连接 · ${if (frozen) "云控已冻结" else "云控未冻结"}"
+        } else {
+            "数据库已连接，可读写配置"
+        }
+        else -> if (hyperOS) {
+            "未找到 Joyose 数据库，请确认设备为 HyperOS"
+        } else {
+            if (systemStatus.isRooted) "数据库连接失败" else "请授予 Root 权限后重启应用"
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // 大卡：照搬 KernelSU v3.2.5（TonalCard + onClick + Row(24dp) + 图标 + 状态文字）
+        TonalCard(containerColor = containerColor, onClick = onRefreshClick) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                )
+                Column(Modifier.padding(start = 20.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
-        ),
-        elevation = CardDefaults.cardElevation(0.dp)
-    ) {
-        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = when {
-                    stat == null -> Icons.Filled.HourglassEmpty
-                    connected -> Icons.Filled.Verified
-                    else -> Icons.Filled.GppBad
-                },
-                contentDescription = null,
-                tint = when {
-                    stat == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                    connected -> MaterialTheme.colorScheme.onPrimaryContainer
-                    else -> MaterialTheme.colorScheme.onErrorContainer
-                },
-                modifier = Modifier.size(40.dp)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SmallCountCard(
+                modifier = Modifier.weight(1f),
+                label = "应用配置",
+                count = appConfigCount,
+                onClick = onAppConfigClick,
             )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = when {
-                        stat == null -> "正在检测..."
-                        connected -> "Joyose 云控正常"
-                        else -> "Joyose 云控不可用"
-                    },
-                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                    color = when {
-                        stat == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                        connected -> MaterialTheme.colorScheme.onPrimaryContainer
-                        else -> MaterialTheme.colorScheme.onErrorContainer
-                    }
-                )
-                Text(
-                    text = when {
-                        stat == null -> "正在读取 Joyose 数据库状态"
-                        connected -> "SmartP / teg_config 已连接 · " +
-                            if (stat.sp.frozen) "云控已冻结" else "云控未冻结"
-                        else -> "未找到 Joyose 数据库，请确认设备为 HyperOS"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = when {
-                        stat == null -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        connected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        else -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
-                    }
-                )
-            }
+            SmallCountCard(
+                modifier = Modifier.weight(1f),
+                label = if (hyperOS) "通用配置" else "已安装应用配置",
+                count = if (hyperOS) commonConfigCount else installedConfigCount,
+                onClick = if (hyperOS) onCommonConfigClick else onAppConfigClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmallCountCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    count: Int,
+    onClick: (() -> Unit)? = null,
+) {
+    TonalCard(modifier = modifier, onClick = onClick) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.outline
+            )
         }
     }
 }

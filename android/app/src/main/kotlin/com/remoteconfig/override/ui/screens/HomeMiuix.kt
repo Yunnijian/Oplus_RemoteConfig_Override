@@ -6,27 +6,30 @@ import android.os.Build
 import android.system.Os
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GppBad
-import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -36,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -48,8 +52,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.remoteconfig.override.R
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.platform.Platform
+import com.remoteconfig.override.ui.LocalMainPagerState
 import com.remoteconfig.override.platform.appDisplayName
 import com.remoteconfig.override.ui.theme.LocalPlatform
+import com.remoteconfig.override.ui.theme.isInDarkTheme
 import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
 import com.remoteconfig.override.viewmodel.MainViewModel
@@ -64,6 +70,8 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme.isDynamicColor
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 首页 — Miuix 实现。
@@ -84,15 +92,25 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 @Composable
 fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
     val systemStatus by viewModel.systemStatus.collectAsState()
+    val installedConfigCount by viewModel.installedConfigCount.collectAsState()
     val cosaVersion by viewModel.cosaVersion.collectAsState()
     val context = LocalContext.current
+    val mainPagerState = LocalMainPagerState.current
 
     // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
     val hyperOS = LocalPlatform.current == Platform.HyperOS
     val hyperOsViewModel: HyperOsViewModel = composeViewModel()
     val joyoseStat by hyperOsViewModel.statState.collectAsState()
+    val listState by hyperOsViewModel.listState.collectAsState()
+    val commonState by hyperOsViewModel.commonState.collectAsState()
     val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
-    LaunchedEffect(hyperOS) { if (hyperOS) hyperOsViewModel.refreshStat() }
+    LaunchedEffect(hyperOS) {
+        if (hyperOS) {
+            hyperOsViewModel.refreshStat()
+            hyperOsViewModel.refreshList()
+            hyperOsViewModel.refreshCommon()
+        }
+    }
 
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
@@ -122,11 +140,27 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
                 .padding(start = 12.dp, end = 12.dp, top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (hyperOS) {
-                JoyoseStatusCard(stat = joyoseStat)
-            } else {
-                RootStatusCard(systemStatus = systemStatus)
-            }
+            // ── Root / Joyose 状态卡（照搬 KernelSU v3.2.5 HomeMiuix.kt StatusCard）──
+            // 检测未完成前显示中性"正在检测"卡，避免冷启动闪现红色错误卡误导用户。
+            StatusCardLayout(
+                hyperOS = hyperOS,
+                systemStatus = systemStatus,
+                joyoseStat = joyoseStat,
+                appConfigCount = if (hyperOS) listState.apps.size else systemStatus.configuredCount,
+                commonConfigCount = commonState.switches.size,
+                installedConfigCount = installedConfigCount,
+                onAppConfigClick = { mainPagerState.animateToPage(1) },
+                onCommonConfigClick = { mainPagerState.animateToPage(2) },
+                onRefreshClick = {
+                    if (hyperOS) {
+                        hyperOsViewModel.refreshStat()
+                        hyperOsViewModel.refreshList()
+                        hyperOsViewModel.refreshCommon()
+                    } else {
+                        viewModel.refreshAll()
+                    }
+                },
+            )
             DeviceInfoCard(
                 kernelVersion = kernelVersion,
                 hyperOS = hyperOS,
@@ -153,136 +187,180 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
     }
 }
 
-// ── Root 状态卡 ──
-// 四态颜色映射：surfaceContainer/primaryContainer/tertiaryContainer/errorContainer
-// 对应 检测中/正常/警告/错误；检测未完成前不得显示红色错误卡（避免误导用户重启应用）
+// ── Root / Joyose 状态卡（照搬 KernelSU v3.2.5 HomeMiuix.kt StatusCard）──
+// 左侧大卡：KernelSU 激活态"绿卡 + CheckCircleOutline 大图标 + 状态文字"（带 Tilt 按压反馈）；
+// 右侧小卡：KernelSU 超级用户/模块计数卡结构（应用配置 + 通用配置/已安装应用配置）。
+// 数据源：ColorOS = MainViewModel.SystemStatus / installedConfigCount；
+//         HyperOS = HyperOsViewModel.statState / listState / commonState。
+// 卡片点击对齐 KernelSU：大卡点击重新检测，小卡点击跳转对应页面。
+// 检测未完成前显示中性"正在检测"卡，避免冷启动闪现红色错误卡误导用户。
 @Composable
-private fun RootStatusCard(systemStatus: MainViewModel.SystemStatus) {
+private fun StatusCardLayout(
+    hyperOS: Boolean,
+    systemStatus: MainViewModel.SystemStatus,
+    joyoseStat: JoyoseManager.Stat?,
+    appConfigCount: Int,
+    commonConfigCount: Int,
+    installedConfigCount: Int,
+    onAppConfigClick: () -> Unit,
+    onCommonConfigClick: () -> Unit,
+    onRefreshClick: () -> Unit,
+) {
+    val checking = if (hyperOS) joyoseStat == null else !systemStatus.checked
+    val connected = if (hyperOS) {
+        joyoseStat != null && (joyoseStat.smartp.exists || joyoseStat.teg.exists)
+    } else {
+        !checking && systemStatus.isRooted && systemStatus.dbAvailable
+    }
+    val frozen = hyperOS && joyoseStat?.sp?.frozen == true
+
+    // 照搬 KernelSU v3.2.5 激活态大卡配色（isDynamicColor → secondaryContainer；
+    // 非 Monet 时深色 0xFF1A3825 / 浅色 0xFFDFFAE4 与 CheckCircleOutline 绿 0xFF36D167 一致）
     val containerColor = when {
-        !systemStatus.checked -> colorScheme.surfaceContainer
-        systemStatus.isRooted && systemStatus.dbAvailable -> colorScheme.primaryContainer
-        systemStatus.isRooted -> colorScheme.tertiaryContainer
+        checking -> colorScheme.surfaceContainer
+        connected -> when {
+            isDynamicColor -> colorScheme.secondaryContainer
+            isInDarkTheme() -> Color(0xFF1A3825)
+            else -> Color(0xFFDFFAE4)
+        }
         else -> colorScheme.errorContainer
     }
-    val onContainerColor = when {
-        !systemStatus.checked -> colorScheme.onSurfaceVariantSummary
-        systemStatus.isRooted && systemStatus.dbAvailable -> colorScheme.onPrimaryContainer
-        systemStatus.isRooted -> colorScheme.onTertiaryContainer
+    val iconTint = when {
+        checking -> colorScheme.onSurfaceVariantSummary
+        connected -> if (isDynamicColor) colorScheme.primary.copy(alpha = 0.8f) else Color(0xFF36D167)
         else -> colorScheme.onErrorContainer
     }
-    val icon = when {
-        !systemStatus.checked -> Icons.Filled.HourglassEmpty
-        systemStatus.isRooted && systemStatus.dbAvailable -> Icons.Filled.Verified
-        systemStatus.isRooted -> Icons.Filled.Warning
-        else -> Icons.Filled.GppBad
+    val iconVector = when {
+        checking -> Icons.Rounded.HourglassEmpty
+        connected -> Icons.Rounded.CheckCircleOutline
+        else -> Icons.Rounded.ErrorOutline
     }
     val title = when {
-        !systemStatus.checked -> "正在检测..."
-        systemStatus.isRooted && systemStatus.dbAvailable -> "Root 权限正常"
-        systemStatus.isRooted -> "数据库连接失败"
-        else -> "未授予 Root 权限"
+        checking -> "正在检测..."
+        connected -> if (hyperOS) "Joyose 云控正常" else "Root 权限正常"
+        else -> if (hyperOS) "Joyose 云控不可用" else "请授予 Root 权限"
     }
     val subtitle = when {
-        !systemStatus.checked -> "正在检测 Root 权限与数据库状态"
-        systemStatus.isRooted && systemStatus.dbAvailable -> "数据库已连接，可读写配置"
-        systemStatus.isRooted -> "已获取 Root 权限，但数据库文件不可访问"
-        else -> "请授予 Root 权限后重启应用"
+        checking -> if (hyperOS) "正在读取 Joyose 数据库状态" else "正在检测 Root 权限与数据库状态"
+        connected -> if (hyperOS) {
+            "SmartP / teg_config 已连接 · ${if (frozen) "云控已冻结" else "云控未冻结"}"
+        } else {
+            "数据库已连接，可读写配置"
+        }
+        else -> if (hyperOS) {
+            "未找到 Joyose 数据库，请确认设备为 HyperOS"
+        } else {
+            if (systemStatus.isRooted) "数据库连接失败" else "请授予 Root 权限后重启应用"
+        }
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.defaultColors(color = containerColor),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // 左大卡：照搬 KernelSU v3.2.5（Card + onClick + showIndication + Tilt + Box + offset 大图标 + 状态文字）
+        Card(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            colors = CardDefaults.defaultColors(color = containerColor),
+            onClick = onRefreshClick,
+            showIndication = true,
+            pressFeedbackType = PressFeedbackType.Tilt,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = onContainerColor,
-                modifier = Modifier.size(40.dp),
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = onContainerColor,
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 14.sp,
-                    color = onContainerColor.copy(alpha = 0.7f),
-                )
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset(38.dp, 45.dp),
+                    contentAlignment = Alignment.BottomEnd,
+                ) {
+                    Icon(
+                        modifier = Modifier.size(170.dp),
+                        imageVector = iconVector,
+                        tint = iconTint,
+                        contentDescription = null,
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(all = 16.dp),
+                ) {
+                    Text(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = title,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = subtitle,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+        ) {
+            SmallCountCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                label = "应用配置",
+                count = appConfigCount,
+                onClick = onAppConfigClick,
+            )
+            Spacer(Modifier.height(12.dp))
+            SmallCountCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                label = if (hyperOS) "通用配置" else "已安装应用配置",
+                count = if (hyperOS) commonConfigCount else installedConfigCount,
+                onClick = if (hyperOS) onCommonConfigClick else onAppConfigClick,
+            )
         }
     }
 }
 
-// ── Joyose 状态卡（HyperOS）──
-// 数据源 = HyperOsViewModel.statState（joyose-stat 轻量查询）。
-// 双库任一存在 → primaryContainer 正常态；双库全缺 → errorContainer 不可用态；
-// stat 未返回前 → surfaceContainer 检测中态（避免闪红）。
 @Composable
-private fun JoyoseStatusCard(stat: JoyoseManager.Stat?) {
-    val connected = stat != null && (stat.smartp.exists || stat.teg.exists)
-    val containerColor = when {
-        stat == null -> colorScheme.surfaceContainer
-        connected -> colorScheme.primaryContainer
-        else -> colorScheme.errorContainer
-    }
-    val onContainerColor = when {
-        stat == null -> colorScheme.onSurfaceVariantSummary
-        connected -> colorScheme.onPrimaryContainer
-        else -> colorScheme.onErrorContainer
-    }
-    val icon = when {
-        stat == null -> Icons.Filled.HourglassEmpty
-        connected -> Icons.Filled.Verified
-        else -> Icons.Filled.GppBad
-    }
-    val title = when {
-        stat == null -> "正在检测..."
-        connected -> "Joyose 云控正常"
-        else -> "Joyose 云控不可用"
-    }
-    val subtitle = when {
-        stat == null -> "正在读取 Joyose 数据库状态"
-        connected -> "SmartP / teg_config 已连接 · " +
-            if (stat.sp.frozen) "云控已冻结" else "云控未冻结"
-        else -> "未找到 Joyose 数据库，请确认设备为 HyperOS"
-    }
-
+private fun SmallCountCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    count: Int,
+    onClick: (() -> Unit)? = null,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.defaultColors(color = containerColor),
+        modifier = modifier,
+        insideMargin = PaddingValues(16.dp),
+        onClick = onClick,
+        showIndication = true,
+        pressFeedbackType = PressFeedbackType.Tilt,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = onContainerColor,
-                modifier = Modifier.size(40.dp),
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+            Text(
+                modifier = Modifier.fillMaxWidth(),
+                text = label,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = colorScheme.onSurfaceVariantSummary,
             )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = onContainerColor,
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 14.sp,
-                    color = onContainerColor.copy(alpha = 0.7f),
-                )
-            }
+            Text(
+                modifier = Modifier.fillMaxWidth(),
+                text = count.toString(),
+                fontSize = 26.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colorScheme.onSurface,
+            )
         }
     }
 }

@@ -36,6 +36,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _systemStatus = MutableStateFlow(SystemStatus())
     val systemStatus: StateFlow<SystemStatus> = _systemStatus.asStateFlow()
 
+    /** 已配置且当前已安装的应用数（供首页"已安装应用配置"计数卡）。 */
+    private val _installedConfigCount = MutableStateFlow(0)
+    val installedConfigCount: StateFlow<Int> = _installedConfigCount.asStateFlow()
+
     /** 当前编辑的原始 JSON 文本 */
     private val _editingJson = MutableStateFlow<String?>(null)
     val editingJson: StateFlow<String?> = _editingJson.asStateFlow()
@@ -251,6 +255,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         allRows = results
+        _installedConfigCount.value = results.count { it.isInstalled }
         _gameList.value = visibleRows(results, _sortConfig.value, _showInstalledOnly.value)
     }
 
