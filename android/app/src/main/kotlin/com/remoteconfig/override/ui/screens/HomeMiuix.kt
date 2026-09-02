@@ -6,7 +6,6 @@ import android.os.Build
 import android.system.Os
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,16 +14,13 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GppBad
@@ -35,8 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,7 +54,6 @@ import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
 import com.remoteconfig.override.viewmodel.MainViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -71,20 +64,18 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 首页 — Miuix 实现。
  *
- * 内容分区与 Material 版一致（Root 状态卡 / 设备信息 / 作者·捐赠 / 源码卡 / 捐赠弹窗），
+ * 内容分区与 Material 版一致（Root 状态卡 / 设备信息 / 作者 / 源码卡），
  * 组件对齐 KernelSU HomeMiuix.kt 用法：
  * `Scaffold + TopAppBar(MiuixScrollBehavior) + Column(verticalScroll + nestedScroll) + Card +
- *  BasicComponent + Button`。
+ *  BasicComponent`。
  *
  * 注意（miuix 0.9.3 实际签名）：
  * - TopAppBar 的 `title` 为 String（Task 7 同款用法）
  * - BasicComponent 的槽位名为 `startAction`/`endActions`（简报中的 leftAction/rightActions 在 0.9.3 不存在）
- * - TextButton 只接收 `text: String`（无 content 槽），故捐赠按钮用带 content 槽的 `Button`
  *
  * [bottomInnerPadding]：底栏占位高度，在滚动内容末尾用 `Spacer` 消费
  * （对齐 KernelSU HomeMiuix.kt:84,177）。Pager 不加 bottom padding，内容需铺到底栏下方
@@ -106,9 +97,6 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
     val kernelVersion = remember {
         try { Os.uname().release } catch (_: Exception) { "未知" }
     }
-
-    var showDonateDialog by remember { mutableStateOf(false) }
-    var donateImageId by remember { mutableIntStateOf(0) }
 
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -151,8 +139,6 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/1404550")))
                     } catch (_: Exception) {}
                 },
-                onWechatDonate = { donateImageId = R.drawable.wechat; showDonateDialog = true },
-                onAlipayDonate = { donateImageId = R.drawable.alipay; showDonateDialog = true },
             )
             SourceCard(
                 onClick = {
@@ -163,27 +149,6 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
             )
             // 底栏留白：由页面自己消费（对齐 KernelSU HomeMiuix.kt:177）
             Spacer(Modifier.height(bottomInnerPadding))
-        }
-    }
-
-    // ── 捐赠弹窗（Miuix 用 WindowDialog，内容与 Material 版一致）──
-    WindowDialog(
-        show = showDonateDialog,
-        onDismissRequest = { showDonateDialog = false },
-    ) {
-        Box(
-            Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(id = donateImageId),
-                contentDescription = null,
-                modifier = Modifier
-                    .width(260.dp)
-                    .heightIn(max = 400.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-                contentScale = ContentScale.Fit,
-            )
         }
     }
 }
@@ -339,9 +304,10 @@ private fun DeviceInfoCard(
             BasicComponent(title = "设备型号", summary = deviceModel)
             BasicComponent(title = "安卓版本", summary = "Android ${Build.VERSION.RELEASE}")
             BasicComponent(title = "内核版本", summary = kernelVersion)
+            BasicComponent(title = "系统指纹", summary = Build.FINGERPRINT.ifBlank { "未知" })
             if (hyperOS) {
                 BasicComponent(
-                    title = "Joyose 云控服务",
+                    title = "Joyose 版本",
                     summary = "v$joyoseVersion · com.xiaomi.joyose",
                 )
             } else {
@@ -351,12 +317,10 @@ private fun DeviceInfoCard(
     }
 }
 
-// ── 作者卡片（作者信息 + 版本 + 捐赠描述 + 微信/支付宝捐赠入口）──
+// ── 作者卡片（作者信息）──
 @Composable
 private fun AuthorCard(
     onCoolapkClick: () -> Unit,
-    onWechatDonate: () -> Unit,
-    onAlipayDonate: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column {
@@ -380,45 +344,7 @@ private fun AuthorCard(
                 },
                 onClick = onCoolapkClick,
             )
-            // 版本行（与 Material 版作者信息第三行一致）
-            Text(
-                text = "${LocalPlatform.current.appDisplayName()} v1.2.1",
-                fontSize = 13.sp,
-                color = colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f),
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp),
-            )
-            // 捐赠描述
-            Text(
-                text = "${LocalPlatform.current.appDisplayName()}始终保持免费，向开发者捐赠以表示支持。",
-                fontSize = 13.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
-            // 捐赠入口
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                DonateButton(icon = R.drawable.ic_wechat, label = "微信", onClick = onWechatDonate)
-                DonateButton(icon = R.drawable.ic_alipay, label = "支付宝", onClick = onAlipayDonate)
-            }
         }
-    }
-}
-
-@Composable
-private fun RowScope.DonateButton(icon: Int, label: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.weight(1f),
-    ) {
-        Icon(
-            painter = painterResource(id = icon),
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(label, fontSize = 16.sp)
     }
 }
 
