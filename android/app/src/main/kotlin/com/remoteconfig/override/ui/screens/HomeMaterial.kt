@@ -70,9 +70,6 @@ fun HomeContentMaterial(
     // 设备型号对齐 KernelSU：resolveDeviceName() 解析各厂商市场名（remember 缓存一次）。
     val deviceModel = remember { resolveDeviceName() }
 
-    var showDonateDialog by remember { mutableStateOf(false) }
-    var donateImageId by remember { mutableIntStateOf(0) }
-
     val scrollState = rememberScrollState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -178,8 +175,9 @@ fun HomeContentMaterial(
                         add("设备型号" to deviceModel)
                         add("安卓版本" to "Android ${android.os.Build.VERSION.RELEASE}")
                         add("内核版本" to kernelVersion)
+                        add("系统指纹" to android.os.Build.FINGERPRINT.ifBlank { "未知" })
                         if (hyperOS) {
-                            add("Joyose 云控服务" to "v$joyoseVersion · com.xiaomi.joyose")
+                            add("Joyose 版本" to "v$joyoseVersion · com.xiaomi.joyose")
                         } else {
                             add("应用增强服务" to "v${cosaVersion} · com.oplus.cosa")
                         }
@@ -195,56 +193,26 @@ fun HomeContentMaterial(
 
                 // ── 作者卡片（图二 MaterialHome 卡片风格：Card + ListItem）──
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth()) {
-                        ListItem(
-                            leadingContent = {
-                                Image(painter = painterResource(id = R.drawable.author_avatar),
-                                    contentDescription = "作者头像", modifier = Modifier.size(64.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                            },
-                            headlineContent = { Text("Smartisan_Apple") },
-                            supportingContent = {
-                                Text(
-                                    text = "酷安 @Smartisan_Apple\nColor云控修改 v1.2.1",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            },
-                            trailingContent = {
-                                Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            },
-                            modifier = Modifier.clickable {
-                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/1404550"))) }
-                                catch (_: Exception) {}
-                            },
-                        )
-                        // 捐赠描述
-                        Text(
-                            text = "${LocalPlatform.current.appDisplayName()}始终保持免费，向开发者捐赠以表示支持。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                        )
-                        // 捐赠入口
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedButton(
-                                onClick = { donateImageId = R.drawable.wechat; showDonateDialog = true },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(painter = painterResource(id = R.drawable.ic_wechat), contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("微信", style = MaterialTheme.typography.bodyMedium)
-                            }
-                            OutlinedButton(
-                                onClick = { donateImageId = R.drawable.alipay; showDonateDialog = true },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(painter = painterResource(id = R.drawable.ic_alipay), contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("支付宝", style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
+                    ListItem(
+                        leadingContent = {
+                            Image(painter = painterResource(id = R.drawable.author_avatar),
+                                contentDescription = "作者头像", modifier = Modifier.size(64.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        },
+                        headlineContent = { Text("Smartisan_Apple") },
+                        supportingContent = {
+                            Text(
+                                text = "酷安 @Smartisan_Apple",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingContent = {
+                            Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/1404550"))) }
+                            catch (_: Exception) {}
+                        },
+                    )
                 }
                 // ── 开源仓库卡片（图二 MaterialHome 卡片风格：Card + ListItem）──
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -269,24 +237,6 @@ fun HomeContentMaterial(
                 Spacer(Modifier.height(bottomInnerPadding))
             }
         }
-    }
-
-    // ── 捐赠弹窗 ──
-    if (showDonateDialog) {
-        AlertDialog(
-            onDismissRequest = { showDonateDialog = false },
-            confirmButton = { TextButton(onClick = { showDonateDialog = false }) { Text("关闭") } },
-            text = {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(id = donateImageId),
-                        contentDescription = null,
-                        modifier = Modifier.width(260.dp).heightIn(max = 400.dp).clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Fit
-                    )
-                }
-            }
-        )
     }
 }
 
