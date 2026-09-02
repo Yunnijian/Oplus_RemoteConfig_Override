@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.remoteconfig.override.R
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.platform.Platform
+import com.remoteconfig.override.platform.appDisplayName
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
@@ -78,7 +79,7 @@ fun HomeContentMaterial(
         Scaffold(
             topBar = {
                 LargeTopAppBar(
-                    title = { Text("Color云控修改", style = MaterialTheme.typography.headlineLarge) },
+                    title = { Text(LocalPlatform.current.appDisplayName(), style = MaterialTheme.typography.headlineLarge) },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
                         scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -221,7 +222,7 @@ fun HomeContentMaterial(
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         // 捐赠描述
                         Text(
-                            text = "Color云控修改始终保持免费，向开发者捐赠以表示支持。",
+                            text = "${LocalPlatform.current.appDisplayName()}始终保持免费，向开发者捐赠以表示支持。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)

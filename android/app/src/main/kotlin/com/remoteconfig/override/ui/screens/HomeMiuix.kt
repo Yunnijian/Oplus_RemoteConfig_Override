@@ -54,6 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.remoteconfig.override.R
 import com.remoteconfig.override.data.JoyoseManager
 import com.remoteconfig.override.platform.Platform
+import com.remoteconfig.override.platform.appDisplayName
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.ui.util.resolveDeviceName
 import com.remoteconfig.override.viewmodel.HyperOsViewModel
@@ -117,7 +118,7 @@ fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         topBar = {
             TopAppBar(
-                title = "Color云控修改",
+                title = LocalPlatform.current.appDisplayName(),
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -381,14 +382,14 @@ private fun AuthorCard(
             )
             // 版本行（与 Material 版作者信息第三行一致）
             Text(
-                text = "Color云控修改 v1.2.1",
+                text = "${LocalPlatform.current.appDisplayName()} v1.2.1",
                 fontSize = 13.sp,
                 color = colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f),
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp),
             )
             // 捐赠描述
             Text(
-                text = "Color云控修改始终保持免费，向开发者捐赠以表示支持。",
+                text = "${LocalPlatform.current.appDisplayName()}始终保持免费，向开发者捐赠以表示支持。",
                 fontSize = 13.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),

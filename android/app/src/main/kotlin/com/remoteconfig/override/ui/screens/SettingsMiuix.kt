@@ -35,6 +35,8 @@ import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.util.BlurredBar
 import com.remoteconfig.override.ui.util.rememberBlurBackdrop
+import com.remoteconfig.override.platform.appDisplayName
+import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.viewmodel.SettingsViewModel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -51,7 +53,9 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /** 关于项展示的版本文本（与简报逐字一致）。 */
-private const val ABOUT_VERSION = "Color云控修改 v1.2.1"
+/** 关于项版本文本（应用名随生效平台：ColorOS=Color云控修改 / HyperOS=Hyper 云控修改）。 */
+private val aboutVersion: String
+    @Composable get() = "${LocalPlatform.current.appDisplayName()} v1.2.1"
 
 /**
  * 设置页 — Miuix 实现（精简为对齐 KernelSU 设置页外观组）。
@@ -164,7 +168,7 @@ fun SettingsContentMiuix(
                     ) {
                         ArrowPreference(
                             title = "关于",
-                            summary = ABOUT_VERSION,
+                            summary = aboutVersion,
                             startAction = {
                                 Icon(
                                     Icons.Rounded.ContactPage,
@@ -187,6 +191,6 @@ fun SettingsContentMiuix(
         show = showAbout,
         title = "关于",
         onDismissRequest = { showAbout = false },
-        content = { Text(ABOUT_VERSION) },
+        content = { Text(aboutVersion) },
     )
 }

@@ -40,3 +40,9 @@ fun resolvePlatform(mode: String, detected: Platform): Platform = when (mode) {
     "hyperos" -> Platform.HyperOS
     else -> detected
 }
+
+/** 应用显示名：ColorOS 平台「Color云控修改」，HyperOS 平台「Hyper 云控修改」。 */
+fun Platform.appDisplayName(): String = when (this) {
+    Platform.ColorOS -> "Color云控修改"
+    Platform.HyperOS -> "Hyper 云控修改"
+}
