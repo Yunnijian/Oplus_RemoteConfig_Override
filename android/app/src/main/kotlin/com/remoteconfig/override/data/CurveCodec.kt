@@ -129,7 +129,7 @@ object CurveCodec {
     private fun kindOk(value: String, kind: AxisKind?): Boolean = when (kind) {
         null -> true
         AxisKind.INT -> value.toLongOrNull() != null
-        AxisKind.DOUBLE -> value.toDoubleOrNull() != null
+        AxisKind.DOUBLE -> value.toDoubleOrNull()?.isFinite() == true
         AxisKind.TEXT -> value.isNotBlank()
     }
 
