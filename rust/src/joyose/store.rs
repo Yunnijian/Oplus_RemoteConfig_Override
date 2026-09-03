@@ -121,7 +121,11 @@ fn remove_sidecars(db: &Path) {
 
 fn restore_db_atomically(src: &Path, dest: &str) -> CliResult<()> {
     let dest_path = Path::new(dest);
-    let mode = fs::metadata(dest)?.permissions().mode();
+    // Keep the original DB metadata so the restored file keeps both mode and
+    // owner: the backup copy is app-uid owned, and without chown the renamed
+    // DB becomes root-owned, which makes Joyose crash with SQLITE_CANTOPEN
+    // (same lesson as the teg SP rewrite below).
+    let meta = fs::metadata(dest)?;
     // Sidecars must go before the main file is replaced, otherwise WAL
     // replay would mix the backup payload with leftover journals.
     remove_sidecars(dest_path);
@@ -137,12 +141,12 @@ fn restore_db_atomically(src: &Path, dest: &str) -> CliResult<()> {
         let _ = fs::remove_file(&tmp);
         return Err(format!(
             "restore size mismatch for {dest}: src={src_len} tmp={tmp_len}"
-        )
-        .into());
+        ).into());
     }
+    let _ = chown(&tmp, Some(meta.uid()), Some(meta.gid()));
     fs::rename(&tmp, dest)?;
     // fs::copy applies the source mode bits; restore the original dest mode.
-    fs::set_permissions(dest, fs::Permissions::from_mode(mode))?;
+    fs::set_permissions(dest, fs::Permissions::from_mode(meta.permissions().mode()))?;
     heal_sidecars(dest_path);
     restorecon(dest);
     Ok(())
