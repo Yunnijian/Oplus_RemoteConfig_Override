@@ -5,7 +5,13 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class CurveCodecTest {
+/**
+ * 十种 [CurveCodec.Format] 的 round-trip + NaN/Infinity 拒绝。
+ *
+ * 名称带 Formats：`CodecTest.kt` 里已有同包的 `CurveCodecTest`（真实云控值/分组解析），
+ * 两者互补，重名会撞出 duplicate JVM class 使整个测试源集编译失败。
+ */
+class CurveCodecFormatsTest {
     private fun roundTrip(sample: String, format: CurveCodec.Format) {
         val parsed = CurveCodec.parse(sample, format)
         assertNotNull(sample, parsed)

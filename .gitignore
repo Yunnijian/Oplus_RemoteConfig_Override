@@ -52,7 +52,6 @@ android/wechat_icon.svg
 /ushio-md-main/
 
 _br.js
-_br.js
 .qoder/
 
 # SDD planning docs (local only, do not commit)
@@ -61,6 +60,7 @@ _br.js
 # IDE / agent working files
 /.trae/
 /.workbuddy/
-/CODE_REVIEW.md
-/FIX_PLAN.md
-/UI_UX_REVIEW.md
+
+# Local documents — never committed unless explicitly asked to sync them
+/docs/reviews/
+/docs/PROJECT_GUIDE.md

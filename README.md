@@ -1,6 +1,6 @@
 # Oplus Remote Config Override (欧真加云控数据覆盖)
 
-通过修改 `com.oplus.cosa`（应用增强服务）数据库，覆盖游戏云控配置，优化风驰策略。
+通过修改 `com.oplus.cosa`（应用增强服务）数据库，覆盖游戏云控配置，优化风驰策略。同时支持小米 HyperOS 的 `com.xiaomi.joyose` 云控。
 
 > ⚠ **需要 Root 权限**  
 > 本工具需要 Root 权限才能读写系统应用数据库，未 Root 的设备无法使用。
