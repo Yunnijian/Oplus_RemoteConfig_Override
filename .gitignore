@@ -57,3 +57,10 @@ _br.js
 
 # SDD planning docs (local only, do not commit)
 /docs/superpowers/
+
+# IDE / agent working files
+/.trae/
+/.workbuddy/
+/CODE_REVIEW.md
+/FIX_PLAN.md
+/UI_UX_REVIEW.md
