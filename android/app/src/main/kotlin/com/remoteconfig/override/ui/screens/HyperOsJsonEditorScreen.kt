@@ -243,14 +243,20 @@ private fun HyperOsEditorScreen(
     val canSave = base != null && !writing && syntaxError == null
 
     // ── 顶栏操作区（双皮肤共享语义）：字号 ±、保存 ──
+    // 3.8：字号按钮按皮肤分支（Miuix 用 MiuixIconButton 按压态反馈而非 M3 波纹）；
+    // 「更多」溢出按钮 + 弹层整体保留 M3 一套（miuix 无 action-menu 等价组件，
+    // 触发与弹层同语言自成一体），对齐 ConfigEditorScreen 的取舍。
     val editorActions: @Composable RowScope.() -> Unit = {
         var showOverflow by remember { mutableStateOf(false) }
         val actionTint = if (isMiuix) colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
-        IconButton(onClick = { fontSize = (fontSize - 1f).coerceIn(8f, 32f) }) {
-            Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint)
-        }
-        IconButton(onClick = { fontSize = (fontSize + 1f).coerceIn(8f, 32f) }) {
-            Icon(Icons.Default.ZoomIn, "放大", tint = actionTint)
+        val onZoomOut = { fontSize = (fontSize - 1f).coerceIn(8f, 32f) }
+        val onZoomIn = { fontSize = (fontSize + 1f).coerceIn(8f, 32f) }
+        if (isMiuix) {
+            MiuixIconButton(onClick = onZoomOut) { MiuixIcon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
+            MiuixIconButton(onClick = onZoomIn) { MiuixIcon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
+        } else {
+            IconButton(onClick = onZoomOut) { Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
+            IconButton(onClick = onZoomIn) { Icon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
         }
         if (writing) {
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {

@@ -10,11 +10,54 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -273,11 +316,21 @@ private fun ConfigEditorContent(
     // 菜单项文案与现有 Material 版逐字一致（"注入数据"已改名"写入数据库"，"回退配置"已删除）。
     // 注：M3 组件在 Miuix TopAppBar 内无 MaterialTheme 包裹，默认 LocalContentColor 为黑；
     // 深色 Miuix 主题下对比度差，故按当前模式显式取 onSurface 作为 tint。
+    // 3.8：图标按钮按皮肤分支（Miuix 用 MiuixIconButton 的按压态反馈而非 M3 波纹）；
+    // 「更多」溢出按钮 + 弹层整体保留 M3 一套——miuix 无 action-menu 等价组件
+    // （OverlayListPopup 是单选列表语义），触发按钮与弹层同语言自成一体。
     val editorActions: @Composable RowScope.() -> Unit = {
         var showOverflow by remember { mutableStateOf(false) }
         val actionTint = if (isMiuix) colorScheme.onSurface else MaterialTheme.colorScheme.onSurface
-        IconButton(onClick = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
-        IconButton(onClick = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }) { Icon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
+        val onZoomOut = { fontSize = (fontSize - 1).coerceIn(8f, 32f) }
+        val onZoomIn = { fontSize = (fontSize + 1).coerceIn(8f, 32f) }
+        if (isMiuix) {
+            MiuixIconButton(onClick = onZoomOut) { MiuixIcon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
+            MiuixIconButton(onClick = onZoomIn) { MiuixIcon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
+        } else {
+            IconButton(onClick = onZoomOut) { Icon(Icons.Default.ZoomOut, "缩小", tint = actionTint) }
+            IconButton(onClick = onZoomIn) { Icon(Icons.Default.ZoomIn, "放大", tint = actionTint) }
+        }
         if (isWriting) {
             // 写入进行中：以进度指示替换更多菜单，防止重复触发。
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {

@@ -970,13 +970,15 @@ class NativeJsonEditorView @JvmOverloads constructor(
     }
 
     private fun scheduleHighlight() {
-        val snapshot = editor.text.toString()
+        // 3.15：先判长度再 toString——大文档(>MAX_HIGHLIGHT_CHARS)每次敲键不再
+        // 分配整份文本快照（64k+ 的 char[] 拷贝是键入路径上主要的 GC 源）。
         val generation = highlightGeneration.incrementAndGet()
         highlightJob?.cancel()
-        if (snapshot.length > MAX_HIGHLIGHT_CHARS) {
+        if (editor.text.length > MAX_HIGHLIGHT_CHARS) {
             clearHighlightSpans()
             return
         }
+        val snapshot = editor.text.toString()
         val dark = darkTheme
         highlightJob = highlightScope.launch {
             try {
@@ -1502,6 +1504,12 @@ class NativeJsonEditorView @JvmOverloads constructor(
         private val backgroundPaint = Paint()
         private var gutterBackground = lineBackgroundLight
         private var numberColor = lineLight
+        // 3.15：行号列的最大位数只在文档行数增长时变化，缓存 sample 串避免每帧 "8".repeat()。
+        private var cachedDigitCount = -1
+        private var cachedSampleText = "8"
+        // 3.15：行号写入缓冲复用，避免 onDraw 每帧为每个可视行分配 (line+1).toString()。
+        // JSON 文档不可能接近 1e12 行（12 位上限），溢出时退化为 String 兜底。
+        private val lineNumberBuf = CharArray(12)
 
         fun setColors(background: Int, text: Int) {
             gutterBackground = background
@@ -1534,8 +1542,12 @@ class NativeJsonEditorView @JvmOverloads constructor(
             // "352"). Fit the largest line-number sample to the available
             // width without changing the document's text size.
             val digitCount = max(1, layout.lineCount).toString().length
+            if (digitCount != cachedDigitCount) {
+                cachedDigitCount = digitCount
+                cachedSampleText = "8".repeat(digitCount)
+            }
             val availableWidth = (width - dp(8f)).coerceAtLeast(dp(8f)).toFloat()
-            val sampleWidth = paint.measureText("8".repeat(digitCount))
+            val sampleWidth = paint.measureText(cachedSampleText)
             if (sampleWidth > availableWidth && sampleWidth > 0f) {
                 paint.textSize *= availableWidth / sampleWidth
             }
@@ -1545,7 +1557,22 @@ class NativeJsonEditorView @JvmOverloads constructor(
                 val baseline = layout.getLineBaseline(line) +
                     editor.totalPaddingTop - scrollY
                 if (baseline + paint.ascent() > height || baseline + paint.descent() < 0) continue
-                canvas.drawText((line + 1).toString(), right.toFloat(), baseline.toFloat(), paint)
+                val n = line + 1
+                if (n < 1000000000000L) {
+                    var idx = lineNumberBuf.size
+                    var v = n
+                    while (v > 0) {
+                        lineNumberBuf[--idx] = ('0'.code + v % 10).toChar()
+                        v /= 10
+                    }
+                    canvas.drawText(
+                        lineNumberBuf, idx, lineNumberBuf.size - idx,
+                        right.toFloat(), baseline.toFloat(), paint,
+                    )
+                } else {
+                    // 防御兜底（实际不可达）：行号超过缓冲位数上限时退回 String 路径。
+                    canvas.drawText(n.toString(), right.toFloat(), baseline.toFloat(), paint)
+                }
             }
         }
     }

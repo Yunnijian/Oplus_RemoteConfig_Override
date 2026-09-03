@@ -91,6 +91,7 @@ import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
@@ -287,11 +288,8 @@ fun HyperOsSectionCard(
 @Composable
 fun HyperOsSectionLabel(text: String) {
     when (LocalUiMode.current) {
-        UiMode.Miuix -> MiuixText(
+        UiMode.Miuix -> SmallTitle(
             text = text,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = miuixColorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 6.dp),
         )
         UiMode.Material -> Text(
