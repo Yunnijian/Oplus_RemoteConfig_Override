@@ -21,6 +21,7 @@ HOST_TAG=darwin-x86_64
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) HOST_TAG=darwin-arm64 ;;
     Linux-x86_64) HOST_TAG=linux-x86_64 ;;
+    Linux-aarch64) HOST_TAG=linux-aarch64 ;;
 esac
 
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin"

@@ -1,7 +1,7 @@
 use rusqlite::{
     params_from_iter,
     types::{Value as SqlValue, ValueRef},
-    Connection,
+    Connection, OpenFlags,
 };
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -179,6 +179,20 @@ fn finish(conn: Connection, db: &Path) {
     chown_sidecars(db);
 }
 
+fn open_cosa_ro(db: &Path) -> Result<Connection> {
+    match Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(conn) => Ok(conn),
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if err.extended_code == 1034 /* SQLITE_READONLY_CANTINIT */ =>
+        {
+            let conn = Connection::open(db)?;
+            chown_sidecars(db);
+            Ok(conn)
+        }
+        Err(other) => Err(other.into()),
+    }
+}
+
 fn package_column(cols: &Columns) -> Result<String> {
     column(cols, "package_name").ok_or_else(|| "缺少 package_name 列".into())
 }
@@ -189,22 +203,28 @@ fn cmd_list() -> Result<bool> {
     }
     let mut packages = BTreeSet::new();
     for db in db_paths() {
-        let conn = Connection::open(&db)?;
-        let cols = columns(&conn)?;
-        let package_name = package_column(&cols)?;
-        let mut stmt = conn.prepare(&format!(
-            "SELECT DISTINCT {} FROM {} ORDER BY {}",
-            quote_identifier(&package_name),
-            quote_identifier(TABLE),
-            quote_identifier(&package_name)
-        ))?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        for package in rows {
-            let package = package?;
-            if !package.trim().is_empty() && !EXCLUDED.contains(&package.as_str()) {
-                packages.insert(package);
+        chown_sidecars(&db);
+        let listed = (|| -> Result<()> {
+            let conn = open_cosa_ro(&db)?;
+            let cols = columns(&conn)?;
+            let package_name = package_column(&cols)?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT DISTINCT {} FROM {} ORDER BY {}",
+                quote_identifier(&package_name),
+                quote_identifier(TABLE),
+                quote_identifier(&package_name)
+            ))?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for package in rows {
+                let package = package?;
+                if !package.trim().is_empty() && !EXCLUDED.contains(&package.as_str()) {
+                    packages.insert(package);
+                }
             }
-        }
+            Ok(())
+        })();
+        chown_sidecars(&db);
+        listed?;
     }
     for package in packages {
         println!("{package}");
@@ -214,45 +234,51 @@ fn cmd_list() -> Result<bool> {
 
 fn cmd_read(package: &str, output: Option<&str>) -> Result<bool> {
     for db in db_paths() {
-        // Heal sidecars possibly left root-owned by a previous interrupted run.
         chown_sidecars(&db);
-        let conn = Connection::open(&db)?;
-        let cols = columns(&conn)?;
-        let package_name = package_column(&cols)?;
-        let mut stmt = conn.prepare(&format!(
-            "SELECT * FROM {} WHERE {} = ?1 LIMIT 1",
-            quote_identifier(TABLE),
-            quote_identifier(&package_name)
-        ))?;
-        let names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        let mut rows = stmt.query([package])?;
-        if let Some(row) = rows.next()? {
-            let mut object = Map::with_capacity(names.len());
-            for (index, name) in names.iter().enumerate() {
-                object.insert(
-                    name.clone(),
-                    value_to_json(row.get_ref(index)?, column_type(&cols, name)),
-                );
-            }
-            let text = serde_json::to_string_pretty(&Value::Object(object))?;
-            if let Some(path) = output {
-                let path = Path::new(path);
-                if let Some(parent) = path
-                    .parent()
-                    .filter(|parent| !parent.as_os_str().is_empty())
-                {
-                    fs::create_dir_all(parent)?;
+        let found = (|| -> Result<bool> {
+            let conn = open_cosa_ro(&db)?;
+            let cols = columns(&conn)?;
+            let package_name = package_column(&cols)?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT * FROM {} WHERE {} = ?1 LIMIT 1",
+                quote_identifier(TABLE),
+                quote_identifier(&package_name)
+            ))?;
+            let names: Vec<String> = stmt
+                .column_names()
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            let mut rows = stmt.query([package])?;
+            if let Some(row) = rows.next()? {
+                let mut object = Map::with_capacity(names.len());
+                for (index, name) in names.iter().enumerate() {
+                    object.insert(
+                        name.clone(),
+                        value_to_json(row.get_ref(index)?, column_type(&cols, name)),
+                    );
                 }
-                fs::write(path, text)?;
-                fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
-                println!("已导出: {}", path.display());
-            } else {
-                println!("{text}");
+                let text = serde_json::to_string_pretty(&Value::Object(object))?;
+                if let Some(path) = output {
+                    let path = Path::new(path);
+                    if let Some(parent) = path
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                    {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(path, text)?;
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+                    println!("已导出: {}", path.display());
+                } else {
+                    println!("{text}");
+                }
+                return Ok(true);
             }
+            Ok(false)
+        })();
+        chown_sidecars(&db);
+        if found? {
             return Ok(true);
         }
     }

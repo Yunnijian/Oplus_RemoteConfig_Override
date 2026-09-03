@@ -117,11 +117,11 @@ pub fn cmd_migt_write(entry: Option<&String>) -> CliResult<bool> {
     };
     let entry = entry.trim();
     let pkg = validate_entry(entry).map_err(|e| -> Box<dyn Error> { e.into() })?;
-    let (name, mut booster) = store::read_params_any("booster_config")?;
+    let (_src, mut booster) = store::read_params_any("booster_config")?;
     let list = migt_array_mut(&mut booster).map_err(|e| -> Box<dyn Error> { e.into() })?;
     let removed = drop_entries(list, &pkg);
     list.push(Value::String(entry.to_owned()));
-    let mut report = store::write_document(&name, booster)?;
+    let mut report = store::write_document("booster_config", booster)?;
     report["replaced"] = json!(removed);
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(true)
@@ -135,10 +135,10 @@ pub fn cmd_migt_remove(package: Option<&String>) -> CliResult<bool> {
     if pkg.is_empty() || pkg.contains(|c: char| c.is_whitespace()) {
         return Err("非法包名".into());
     }
-    let (name, mut booster) = store::read_params_any("booster_config")?;
+    let (_name, mut booster) = store::read_params_any("booster_config")?;
     let list = migt_array_mut(&mut booster).map_err(|e| -> Box<dyn Error> { e.into() })?;
     let removed = drop_entries(list, pkg);
-    let mut report = store::write_document(&name, booster)?;
+    let mut report = store::write_document("booster_config", booster)?;
     report["removed"] = json!(removed);
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(true)
@@ -196,5 +196,39 @@ mod tests {
             list.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
             vec!["com.a.mi;0:384000", "com.b;0:384000"]
         );
+    }
+
+    #[test]
+    fn migt_write_targets_booster_config_not_smartp_name() {
+        use rusqlite::Connection;
+        use std::fs;
+        let _guard = crate::joyose::store::TEST_DB_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!("migt-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&tmp).unwrap();
+        let smartp = tmp.join("SmartP.db");
+        let teg = tmp.join("teg_config.db");
+        let conn = Connection::open(&smartp).unwrap();
+        conn.execute_batch("CREATE TABLE cloud_config (config_name TEXT, group_name TEXT, enable INTEGER, version INTEGER, with_model INTEGER, model TEXT, params TEXT);").unwrap();
+        let params = r#"{"game_booster":{"migt":[]}}"#;
+        conn.execute("INSERT INTO cloud_config (config_name, group_name, enable, version, with_model, model, params) VALUES ('booster_config','booster_config',1,1,0,'{}',?1)", [params]).unwrap();
+        drop(conn);
+        let tconn = Connection::open(&teg).unwrap();
+        tconn.execute_batch("CREATE TABLE rules (_id INTEGER PRIMARY KEY, rule_module TEXT, rule_version INTEGER, rule_content TEXT);").unwrap();
+        drop(tconn);
+        std::env::set_var("JOYOSE_SMARTP_PATH", &smartp);
+        std::env::set_var("JOYOSE_TEG_PATH", &teg);
+        let entry = "com.example.test;0:384000;30;90:18 60:20;2;10;1;0:0 1:0".to_string();
+        cmd_migt_write(Some(&entry)).unwrap();
+        let conn = Connection::open(&smartp).unwrap();
+        let names: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT config_name FROM cloud_config").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect()
+        };
+        assert_eq!(names, vec!["booster_config".to_string()]);
+        let stored: String = conn.query_row("SELECT params FROM cloud_config WHERE config_name='booster_config'", [], |r| r.get(0)).unwrap();
+        assert!(stored.contains("com.example.test"), "{stored}");
+        std::env::remove_var("JOYOSE_SMARTP_PATH");
+        std::env::remove_var("JOYOSE_TEG_PATH");
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

@@ -33,12 +33,54 @@ const SP_KEY: &str = "<long name=\"pref_local_max_version\" value=\"";
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
+#[cfg(test)]
+pub(crate) static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WriteSide {
+    Updated(usize),
+    Inserted,
+    Skipped(&'static str),
+}
+
+impl WriteSide {
+    fn label(&self) -> String {
+        match self {
+            WriteSide::Updated(n) if *n > 1 => format!("updated:{n}"),
+            WriteSide::Updated(_) => "updated".into(),
+            WriteSide::Inserted => "inserted".into(),
+            WriteSide::Skipped(why) => format!("skipped({why})"),
+        }
+    }
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
+fn smartp_db() -> String {
+    std::env::var("JOYOSE_SMARTP_PATH").unwrap_or_else(|_| SMARTP.to_string())
+}
+
+fn teg_db() -> String {
+    std::env::var("JOYOSE_TEG_PATH").unwrap_or_else(|_| TEG.to_string())
+}
+
 fn open_ro(path: &str) -> CliResult<Connection> {
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    conn.busy_timeout(Duration::from_secs(3))?;
-    Ok(conn)
+    match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(conn) => {
+            conn.busy_timeout(Duration::from_secs(3))?;
+            Ok(conn)
+        }
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if err.extended_code == 1034 /* SQLITE_READONLY_CANTINIT */ =>
+        {
+            let conn = Connection::open(path)?;
+            conn.busy_timeout(Duration::from_secs(3))?;
+            heal_sidecars(Path::new(path));
+            Ok(conn)
+        }
+        Err(other) => Err(other.into()),
+    }
 }
 
 fn open_rw(path: &str) -> CliResult<Connection> {
@@ -68,12 +110,63 @@ fn heal_sidecars(db: &Path) {
     }
 }
 
+fn remove_sidecars(db: &Path) {
+    let name = db.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let sidecar = db.with_file_name(format!("{name}{suffix}"));
+        let _ = fs::remove_file(sidecar);
+    }
+}
+
+fn restore_db_atomically(src: &Path, dest: &str) -> CliResult<()> {
+    let dest_path = Path::new(dest);
+    let mode = fs::metadata(dest)?.permissions().mode();
+    // Sidecars must go before the main file is replaced, otherwise WAL
+    // replay would mix the backup payload with leftover journals.
+    remove_sidecars(dest_path);
+    let tmp = dest_path.with_file_name(format!(
+        "{}.restore.tmp",
+        dest_path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let _ = fs::remove_file(&tmp);
+    fs::copy(src, &tmp)?;
+    let src_len = fs::metadata(src)?.len();
+    let tmp_len = fs::metadata(&tmp)?.len();
+    if src_len != tmp_len {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!(
+            "restore size mismatch for {dest}: src={src_len} tmp={tmp_len}"
+        )
+        .into());
+    }
+    fs::rename(&tmp, dest)?;
+    // fs::copy applies the source mode bits; restore the original dest mode.
+    fs::set_permissions(dest, fs::Permissions::from_mode(mode))?;
+    heal_sidecars(dest_path);
+    restorecon(dest);
+    Ok(())
+}
+
 fn restorecon(path: &str) {
-    let _ = Command::new("restorecon").arg(path).output();
+    if !Path::new("/system/bin/restorecon").exists() {
+        return;
+    }
+    match Command::new("/system/bin/restorecon").arg(path).status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("restorecon {path} failed: {status}"),
+        Err(err) => eprintln!("restorecon {path} failed: {err}"),
+    }
 }
 
 fn stop_joyose() {
-    let _ = Command::new("am").args(["force-stop", PKG]).output();
+    if !Path::new("/system/bin/am").exists() {
+        return;
+    }
+    match Command::new("/system/bin/am").args(["force-stop", PKG]).status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("am force-stop {PKG} failed: {status}"),
+        Err(err) => eprintln!("am force-stop {PKG} failed: {err}"),
+    }
 }
 
 fn epoch() -> u64 {
@@ -86,6 +179,8 @@ fn epoch() -> u64 {
 /// Backup / history names must never escape their directory.
 fn safe_name(name: &str) -> CliResult<()> {
     let ok = !name.is_empty()
+        && name != "."
+        && name != ".."
         && !name.contains("..")
         && name
             .chars()
@@ -170,7 +265,7 @@ pub fn read_params_any(config: &str) -> CliResult<(String, Value)> {
     let mut problems = Vec::new();
 
     match read_side(
-        SMARTP,
+        &smartp_db(),
         "SELECT params FROM cloud_config WHERE config_name = ?1",
         "SmartP",
         false,
@@ -180,7 +275,7 @@ pub fn read_params_any(config: &str) -> CliResult<(String, Value)> {
         Err(reason) => problems.push(reason),
     }
     match read_side(
-        TEG,
+        &teg_db(),
         "SELECT rule_content FROM rules WHERE rule_module = ?1 ORDER BY _id DESC LIMIT 1",
         "teg",
         true,
@@ -253,8 +348,8 @@ pub fn cmd_stat(backup_root: Option<&String>) -> CliResult<bool> {
         json!({
             "ok": true,
             "pkg": PKG,
-            "smartp": stat_one(SMARTP),
-            "teg": stat_one(TEG),
+            "smartp": stat_one(&smartp_db()),
+            "teg": stat_one(&teg_db()),
             "sp": {
                 "exists": sp_text.is_some(),
                 "path": TEG_SP,
@@ -270,8 +365,8 @@ pub fn cmd_stat(backup_root: Option<&String>) -> CliResult<bool> {
 /// `joyose-list` — cloud_config rows ∪ rules modules.
 pub fn cmd_list() -> CliResult<bool> {
     let mut cloud_config = Vec::new();
-    if Path::new(SMARTP).exists() {
-        let conn = open_ro(SMARTP)?;
+    if Path::new(&smartp_db()).exists() {
+        let conn = open_ro(&smartp_db())?;
         let mut stmt =
             conn.prepare("SELECT config_name, COALESCE(version, 0), COALESCE(enable, 0) FROM cloud_config ORDER BY config_name")?;
         let rows = stmt.query_map([], |r| {
@@ -287,8 +382,8 @@ pub fn cmd_list() -> CliResult<bool> {
         }
     }
     let mut rules = Vec::new();
-    if Path::new(TEG).exists() {
-        let conn = open_ro(TEG)?;
+    if Path::new(&teg_db()).exists() {
+        let conn = open_ro(&teg_db())?;
         let mut stmt = conn.prepare(
             "SELECT rule_module, MAX(rule_version), COUNT(*) FROM rules GROUP BY rule_module ORDER BY rule_module",
         )?;
@@ -348,81 +443,133 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
 
     stop_joyose();
 
-    // ── SmartP.cloud_config upsert ──
-    let mut smartp_result = "skipped(missing db)".to_owned();
-    if Path::new(SMARTP).exists() {
-        let conn = open_rw(SMARTP)?;
-        let existing: Option<i64> = conn
-            .query_row(
-                "SELECT version FROM cloud_config WHERE config_name = ?1",
-                [config],
-                |r| r.get(0),
-            )
-            .optional()?;
-        // No bump policy: keep the stored version unless the document itself
-        // carries an explicit header.version (kept identical on round-trips).
-        let version = doc
-            .get("header")
-            .and_then(|h| h.get("version"))
-            .and_then(Value::as_str)
-            .and_then(|s| s.parse::<i64>().ok())
-            .or(existing)
-            .or_else(|| {
-                Path::new(TEG).exists().then_some(()).and_then(|_| {
-                    open_ro(TEG).ok().and_then(|c| {
-                        c.query_row(
-                            "SELECT MAX(rule_version) FROM rules WHERE rule_module = ?1",
-                            [config],
-                            |r| r.get::<_, Option<i64>>(0),
-                        )
-                        .ok()
-                        .flatten()
-                    })
-                })
-            })
-            .unwrap_or(0);
-        let doc_str = doc.to_string();
-        match existing {
-            Some(_) => {
-                conn.execute(
-                    "UPDATE cloud_config SET params = ?1, version = ?2 WHERE config_name = ?3",
-                    params![doc_str, version, config],
-                )?;
-                smartp_result = "updated".into();
-            }
-            None => {
-                conn.execute(
-                    "INSERT INTO cloud_config (config_name, group_name, enable, version, with_model, model, params) VALUES (?1, ?1, 1, ?2, 0, '{}', ?3)",
-                    params![config, version, doc_str],
-                )?;
-                smartp_result = "inserted".into();
-            }
-        }
-        checkpoint_and_close(conn, SMARTP);
-    }
+    let smartp_path = smartp_db();
+    let teg_path = teg_db();
 
-    // ── teg.rules mirror (shape-preserving, only existing rows) ──
-    let mut teg_result = "skipped(missing db)".to_owned();
-    if Path::new(TEG).exists() {
-        let conn = open_rw(TEG)?;
+    // Compute teg payloads first so a malformed row aborts before any write.
+    let mut teg_payloads: Vec<(i64, String)> = Vec::new();
+    let mut teg_result = WriteSide::Skipped("missing db");
+    if Path::new(&teg_path).exists() {
+        let conn = open_ro(&teg_path)?;
         let mut stmt = conn.prepare("SELECT _id, rule_content FROM rules WHERE rule_module = ?1")?;
         let rows: Vec<(i64, String)> = stmt
             .query_map([config], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
+        drop(conn);
         if rows.is_empty() {
-            teg_result = "skipped(no rule rows)".into();
+            teg_result = WriteSide::Skipped("no rule rows");
         } else {
+            let mut problems = Vec::new();
             for (id, content) in &rows {
-                let mirrored = mirror_rule_content(content, &doc)?;
-                conn.execute("UPDATE rules SET rule_content = ?1 WHERE _id = ?2", params![mirrored, id])?;
+                match mirror_rule_content(content, &doc) {
+                    Ok(mirrored) => teg_payloads.push((*id, mirrored)),
+                    Err(err) => problems.push(format!("_id={id}: {err}")),
+                }
             }
-            teg_result = format!("updated:{}", rows.len());
+            if !problems.is_empty() {
+                return Err(format!(
+                    "SmartP=not written, teg=rolled back: {}",
+                    problems.join("; ")
+                )
+                .into());
+            }
+            teg_result = WriteSide::Updated(teg_payloads.len());
         }
-        checkpoint_and_close(conn, TEG);
     }
 
-    // ── read-back verification (both sides must equal the document) ──
+    let mut smartp_result = WriteSide::Skipped("missing db");
+    if Path::new(&smartp_path).exists() {
+        let mut conn = open_rw(&smartp_path)?;
+        let smartp_write: CliResult<WriteSide> = (|| {
+            let tx = conn.transaction()?;
+            let existing: Option<i64> = tx
+                .query_row(
+                    "SELECT version FROM cloud_config WHERE config_name = ?1",
+                    [config],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let version = doc
+                .get("header")
+                .and_then(|h| h.get("version"))
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<i64>().ok())
+                .or(existing)
+                .or_else(|| {
+                    Path::new(&teg_path).exists().then_some(()).and_then(|_| {
+                        open_ro(&teg_path).ok().and_then(|c| {
+                            c.query_row(
+                                "SELECT MAX(rule_version) FROM rules WHERE rule_module = ?1",
+                                [config],
+                                |r| r.get::<_, Option<i64>>(0),
+                            )
+                            .ok()
+                            .flatten()
+                        })
+                    })
+                })
+                .unwrap_or(0);
+            let doc_str = doc.to_string();
+            let side = match existing {
+                Some(_) => {
+                    tx.execute(
+                        "UPDATE cloud_config SET params = ?1, version = ?2 WHERE config_name = ?3",
+                        params![doc_str, version, config],
+                    )?;
+                    WriteSide::Updated(1)
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO cloud_config (config_name, group_name, enable, version, with_model, model, params) VALUES (?1, ?1, 1, ?2, 0, '{}', ?3)",
+                        params![config, version, doc_str],
+                    )?;
+                    WriteSide::Inserted
+                }
+            };
+            tx.commit()?;
+            Ok(side)
+        })();
+        match smartp_write {
+            Ok(side) => {
+                smartp_result = side;
+                checkpoint_and_close(conn, &smartp_path);
+            }
+            Err(err) => {
+                drop(conn);
+                heal_sidecars(Path::new(&smartp_path));
+                return Err(format!("SmartP=rolled back, teg=not written: {err}").into());
+            }
+        }
+    }
+
+    if matches!(teg_result, WriteSide::Updated(_)) {
+        let mut conn = open_rw(&teg_path)?;
+        let teg_write: CliResult<()> = (|| {
+            let tx = conn.transaction()?;
+            for (id, mirrored) in &teg_payloads {
+                tx.execute(
+                    "UPDATE rules SET rule_content = ?1 WHERE _id = ?2",
+                    params![mirrored, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+        match teg_write {
+            Ok(()) => checkpoint_and_close(conn, &teg_path),
+            Err(err) => {
+                drop(conn);
+                heal_sidecars(Path::new(&teg_path));
+                return Err(format!(
+                    "SmartP={}, teg=rolled back: {err}",
+                    smartp_result.label()
+                )
+                .into());
+            }
+        }
+    }
+
     let verify = |db: &str, text: &str| -> CliResult<()> {
         let value: Value = serde_json::from_str(text).map_err(|e| format!("{db} 回读解析失败: {e}"))?;
         if unwrap_rule(value) != doc {
@@ -430,8 +577,8 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
         }
         Ok(())
     };
-    if smartp_result != "skipped(missing db)" {
-        let conn = open_ro(SMARTP)?;
+    if !matches!(smartp_result, WriteSide::Skipped(_)) {
+        let conn = open_ro(&smartp_path)?;
         let text: String = conn.query_row(
             "SELECT params FROM cloud_config WHERE config_name = ?1",
             [config],
@@ -439,13 +586,12 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
         )?;
         verify("SmartP", &text)?;
     }
-    if let Some(n) = teg_result.strip_prefix("updated:") {
-        let conn = open_ro(TEG)?;
+    if matches!(teg_result, WriteSide::Updated(_)) {
+        let conn = open_ro(&teg_path)?;
         let mut stmt = conn.prepare("SELECT rule_content FROM rules WHERE rule_module = ?1")?;
         let rows: Vec<String> = stmt
             .query_map([config], |r| r.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let _ = n;
         for text in rows {
             verify("teg", &text)?;
         }
@@ -454,8 +600,8 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
     Ok(json!({
         "ok": true,
         "config": config,
-        "smartp": smartp_result,
-        "teg": teg_result,
+        "smartp": smartp_result.label(),
+        "teg": teg_result.label(),
     }))
 }
 
@@ -509,10 +655,15 @@ pub fn cmd_backup(data_root: Option<&String>, label: Option<&String>) -> CliResu
     };
     fs::create_dir_all(&dir)?;
     let root_meta = fs::metadata(root)?;
-    for (db, name) in [(SMARTP, "SmartP.db"), (TEG, "teg_config.db")] {
-        if Path::new(db).exists() {
+    stop_joyose();
+    for (db, name) in [(smartp_db(), "SmartP.db"), (teg_db(), "teg_config.db")] {
+        if Path::new(&db).exists() {
+            let conn = open_rw(&db)?;
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+            drop(conn);
+            heal_sidecars(Path::new(&db));
             let dest = dir.join(name);
-            fs::copy(db, &dest)?;
+            fs::copy(&db, &dest)?;
             // Hand the backup back to the app uid so Kotlin can list/read it
             // without a root shell (same ownership-return pattern as the
             // cosa SQLite sidecars).
@@ -567,15 +718,10 @@ pub fn cmd_revert(data_root: Option<&String>, name: Option<&String>) -> CliResul
     }
     stop_joyose();
     let mut restored = Vec::new();
-    for (db, fname) in [(SMARTP, "SmartP.db"), (TEG, "teg_config.db")] {
+    for (db, fname) in [(smartp_db(), "SmartP.db"), (teg_db(), "teg_config.db")] {
         let src = dir.join(fname);
-        if src.exists() && Path::new(db).exists() {
-            // fs::copy truncates the existing destination, preserving its
-            // owner/SELinux context — exactly what we want for in-place
-            // restore under the Joyose uid.
-            fs::copy(&src, db)?;
-            heal_sidecars(Path::new(db));
-            restorecon(db);
+        if src.exists() && Path::new(&db).exists() {
+            restore_db_atomically(&src, &db)?;
             restored.push(fname);
         }
     }
@@ -648,6 +794,160 @@ mod tests {
         assert!(safe_name("a b").is_err());
         assert!(safe_name("").is_err());
         assert!(safe_name("a;b").is_err());
+        assert!(safe_name(".").is_err());
+        assert!(safe_name("..").is_err());
+    }
+
+    fn make_smartp(path: &Path, params: &str) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cloud_config (config_name TEXT, group_name TEXT, enable INTEGER, version INTEGER, with_model INTEGER, model TEXT, params TEXT);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cloud_config (config_name, group_name, enable, version, with_model, model, params) VALUES ('booster_config','booster_config',1,1,0,'{}',?1)",
+            [params],
+        )
+        .unwrap();
+    }
+
+    fn make_teg(path: &Path, rows: &[(i64, &str)]) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE rules (_id INTEGER PRIMARY KEY, rule_module TEXT, rule_version INTEGER, rule_content TEXT);",
+        )
+        .unwrap();
+        for (id, content) in rows {
+            conn.execute(
+                "INSERT INTO rules (_id, rule_module, rule_version, rule_content) VALUES (?1, 'booster_config', 1, ?2)",
+                rusqlite::params![id, *content],
+            )
+            .unwrap();
+        }
+    }
+
+    fn with_dbs<T>(f: impl FnOnce(&Path, &Path) -> T) -> T {
+        let _guard = TEST_DB_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!(
+            "joyose-test-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&tmp).unwrap();
+        let smartp = tmp.join("SmartP.db");
+        let teg = tmp.join("teg_config.db");
+        std::env::set_var("JOYOSE_SMARTP_PATH", &smartp);
+        std::env::set_var("JOYOSE_TEG_PATH", &teg);
+        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&smartp, &teg)));
+        std::env::remove_var("JOYOSE_SMARTP_PATH");
+        std::env::remove_var("JOYOSE_TEG_PATH");
+        let _ = fs::remove_dir_all(&tmp);
+        match out {
+            Ok(v) => v,
+            Err(p) => std::panic::resume_unwind(p),
+        }
+    }
+
+    #[test]
+    fn write_document_rolls_back_when_teg_row_malformed() {
+        with_dbs(|smartp, teg| {
+            make_smartp(smartp, r#"{"game_booster":{"migt":[]}}"#);
+            make_teg(
+                teg,
+                &[
+                    (1, r#"{"config_name":"booster_config","params":{"game_booster":{"migt":[]}}}"#),
+                    (2, "not-json{{{{"),
+                ],
+            );
+            let doc: Value = serde_json::from_str(r#"{"game_booster":{"migt":["com.x;0:1"]}}"#).unwrap();
+            let err = write_document("booster_config", doc).unwrap_err().to_string();
+            assert!(err.contains("SmartP=not written"), "{err}");
+            let conn = Connection::open(smartp).unwrap();
+            let params: String = conn
+                .query_row(
+                    "SELECT params FROM cloud_config WHERE config_name='booster_config'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(params.contains("migt"), "{params}");
+        });
+    }
+
+    #[test]
+    fn backup_includes_wal_committed_rows() {
+        with_dbs(|smartp, teg| {
+            make_smartp(smartp, r#"{"v":1}"#);
+            make_teg(teg, &[]);
+            let keep = Connection::open(smartp).unwrap();
+            keep.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+            keep.execute(
+                "UPDATE cloud_config SET params = ?1 WHERE config_name='booster_config'",
+                [r#"{"v":2}"#],
+            )
+            .unwrap();
+            let root = smartp.parent().unwrap();
+            cmd_backup(Some(&root.to_string_lossy().into_owned()), Some(&"t1".to_string())).unwrap();
+            drop(keep);
+            let backup_dir = fs::read_dir(root.join("backup")).unwrap().next().unwrap().unwrap().path();
+            let bconn = Connection::open(backup_dir.join("SmartP.db")).unwrap();
+            let params: String = bconn
+                .query_row(
+                    "SELECT params FROM cloud_config WHERE config_name='booster_config'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(params, r#"{"v":2}"#);
+        });
+    }
+
+    #[test]
+    fn revert_ignores_stale_wal() {
+        with_dbs(|smartp, teg| {
+            make_smartp(smartp, r#"{"v":"live"}"#);
+            make_teg(teg, &[]);
+            let root = smartp.parent().unwrap();
+            cmd_backup(Some(&root.to_string_lossy().into_owned()), Some(&"snap".to_string())).unwrap();
+            {
+                let conn = Connection::open(smartp).unwrap();
+                conn.execute(
+                    "UPDATE cloud_config SET params = ?1 WHERE config_name='booster_config'",
+                    [r#"{"v":"dirty"}"#],
+                )
+                .unwrap();
+            }
+            fs::write(
+                smartp.with_file_name("SmartP.db-wal"),
+                b"this is not a valid wal and must be discarded",
+            )
+            .unwrap();
+            let name = fs::read_dir(root.join("backup"))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            cmd_revert(Some(&root.to_string_lossy().into_owned()), Some(&name)).unwrap();
+            let conn = Connection::open_with_flags(smartp, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            let params: String = conn
+                .query_row(
+                    "SELECT params FROM cloud_config WHERE config_name='booster_config'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(params, r#"{"v":"live"}"#);
+        });
+    }
+
+    #[test]
+    fn serde_keeps_u64_max() {
+        let n = "18446744073709551615";
+        let v: Value = serde_json::from_str(n).unwrap();
+        assert_eq!(v.to_string(), n);
     }
 
     #[test]
