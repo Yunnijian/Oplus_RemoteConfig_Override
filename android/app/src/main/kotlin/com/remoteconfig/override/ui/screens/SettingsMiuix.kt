@@ -35,6 +35,7 @@ import com.remoteconfig.override.settings.UiMode
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.util.BlurredBar
 import com.remoteconfig.override.ui.util.rememberBlurBackdrop
+import com.remoteconfig.override.BuildConfig
 import com.remoteconfig.override.platform.appDisplayName
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.viewmodel.SettingsViewModel
@@ -55,7 +56,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 /** 关于项展示的版本文本（与简报逐字一致）。 */
 /** 关于项版本文本（应用名随生效平台：ColorOS=Color云控修改 / HyperOS=Hyper 云控修改）。 */
 private val aboutVersion: String
-    @Composable get() = "${LocalPlatform.current.appDisplayName()} v1.2.1"
+    @Composable get() = "${LocalPlatform.current.appDisplayName()} v${BuildConfig.VERSION_NAME}"
 
 /**
  * 设置页 — Miuix 实现（精简为对齐 KernelSU 设置页外观组）。

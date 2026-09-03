@@ -45,13 +45,14 @@ import com.remoteconfig.override.ui.component.material.SegmentedColumn
 import com.remoteconfig.override.ui.component.material.SegmentedDropdownItem
 import com.remoteconfig.override.ui.component.material.SegmentedListItem
 import com.remoteconfig.override.ui.component.material.expressiveTopAppBarColors
+import com.remoteconfig.override.BuildConfig
 import com.remoteconfig.override.platform.appDisplayName
 import com.remoteconfig.override.ui.theme.LocalPlatform
 import com.remoteconfig.override.viewmodel.SettingsViewModel
 
 /** 关于项版本文本（应用名随生效平台：ColorOS=Color云控修改 / HyperOS=Hyper 云控修改）。 */
 private val aboutVersion: String
-    @Composable get() = "${LocalPlatform.current.appDisplayName()} v1.2.1"
+    @Composable get() = "${LocalPlatform.current.appDisplayName()} v${BuildConfig.VERSION_NAME}"
 
 /**
  * 设置页 — Material 3 实现（精简为对齐 KernelSU 设置页外观组）。

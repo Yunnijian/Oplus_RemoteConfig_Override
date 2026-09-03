@@ -11,8 +11,8 @@ val LocalUiMode = staticCompositionLocalOf { UiMode.Miuix }
 /** 当前生效平台（ColorOS / HyperOS，P2.0a）。默认 ColorOS，由 MainActivity 显式 provide。 */
 val LocalPlatform = staticCompositionLocalOf { Platform.ColorOS }
 
-// 性能开关（LocalEnableBlur / LocalEnableFloatingBottomBar / LocalEnableFloatingBottomBarBlur /
-// LocalEnableNavigationBadge）定义在 Theme.kt（对齐 KernelSU Theme.kt:133-141），
+// 性能开关（LocalEnableBlur / LocalEnableFloatingBottomBar / LocalEnableFloatingBottomBarBlur）
+// 定义在 Theme.kt（对齐 KernelSU Theme.kt:133-141），
 // 默认必须为 false，由 MainActivity 显式 provide。
 
 /**

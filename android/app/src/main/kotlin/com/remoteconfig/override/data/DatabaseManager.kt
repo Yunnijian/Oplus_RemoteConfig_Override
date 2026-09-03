@@ -1,5 +1,7 @@
 package com.remoteconfig.override.data
 
+import android.net.Uri
+
 import android.content.Context
 import com.topjohnwu.superuser.Shell
 import java.io.File
@@ -13,7 +15,6 @@ class DatabaseManager(context: Context) {
     private val appContext = context.applicationContext
 
     companion object {
-        private const val EXPORT_DIR = "/storage/emulated/0/cosa_json"
         private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_.]*")
     }
 
@@ -65,32 +66,15 @@ class DatabaseManager(context: Context) {
         }
     }
 
-    /**
-     * 导出配置到内部存储：原样落盘 [json]（当前编辑器文本），不读数据库。
-     * 写临时文件 → root shell `mkdir -p $EXPORT_DIR && cp && chmod 644` → 删临时文件。
-     */
-    fun exportConfig(packageName: String, json: String): WriteResult {
-        if (!validPackage(packageName)) return WriteResult(false, "包名格式无效")
-        if (json.isBlank()) return WriteResult(false, "JSON 内容为空")
-        val temporary = File(appContext.cacheDir, "export-${UUID.randomUUID()}.json")
+    /** 通过 SAF Uri 写出 JSON，不经 root、不落公共目录。 */
+    fun exportConfig(uri: Uri, json: String): WriteResult {
         return try {
-            temporary.writeText(json)
-            val exportPath = "$EXPORT_DIR/$packageName.json"
-            val command = listOf(
-                "mkdir -p ${quote(EXPORT_DIR)}",
-                "cp ${quote(temporary.absolutePath)} ${quote(exportPath)}",
-                "chmod 644 ${quote(exportPath)}",
-            ).joinToString(" && ")
-            val result = Shell.cmd(command).exec()
-            WriteResult(
-                result.isSuccess,
-                if (result.isSuccess) "已导出至 $exportPath"
-                else result.message("导出失败"),
-            )
+            appContext.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(json.toByteArray(Charsets.UTF_8))
+            } ?: return WriteResult(false, "无法打开导出目标")
+            WriteResult(true, "已导出")
         } catch (error: Exception) {
-            WriteResult(false, "导出失败: ${error.message ?: "无法创建临时文件"}")
-        } finally {
-            temporary.delete()
+            WriteResult(false, "导出失败: ${error.message ?: "写入失败"}")
         }
     }
 

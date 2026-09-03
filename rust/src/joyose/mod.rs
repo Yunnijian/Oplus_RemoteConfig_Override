@@ -8,4 +8,5 @@ pub mod caps;
 pub mod migt;
 pub mod resolve;
 pub mod scoped;
+mod digest;
 pub mod store;

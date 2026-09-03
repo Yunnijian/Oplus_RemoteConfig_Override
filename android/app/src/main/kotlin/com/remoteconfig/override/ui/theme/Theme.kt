@@ -129,5 +129,3 @@ val LocalEnableFloatingBottomBar = staticCompositionLocalOf { false }
 /** 悬浮底栏实时模糊。 */
 val LocalEnableFloatingBottomBarBlur = staticCompositionLocalOf { false }
 
-/** 导航角标（默认开启）。 */
-val LocalEnableNavigationBadge = staticCompositionLocalOf { true }

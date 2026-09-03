@@ -80,9 +80,6 @@ class SettingsRepositoryImpl(
         get() = prefs.getFloat(KEY_PAGE_SCALE, 1.0f)
         set(value) = prefs.edit { putFloat(KEY_PAGE_SCALE, value) }
 
-    override var enableNavigationBadge: Boolean
-        get() = prefs.getBoolean(KEY_ENABLE_NAVIGATION_BADGE, true)
-        set(value) = prefs.edit { putBoolean(KEY_ENABLE_NAVIGATION_BADGE, value) }
 
     override var platformMode: String
         get() = prefs.getString(KEY_PLATFORM_MODE, "auto") ?: "auto"
@@ -117,7 +114,6 @@ class SettingsRepositoryImpl(
         const val KEY_ENABLE_FLOATING_BOTTOM_BAR_BLUR = "enable_floating_bottom_bar_blur"
         const val KEY_ENABLE_PREDICTIVE_BACK = "enable_predictive_back"
         const val KEY_PAGE_SCALE = "page_scale"
-        const val KEY_ENABLE_NAVIGATION_BADGE = "enable_navigation_badge"
         const val KEY_PLATFORM_MODE = "platform_mode"
         const val KEY_HYPEROS_APP_SORT_OPTION = "hyperos_app_sort_option"
         const val KEY_HYPEROS_APP_SHOW_INSTALLED_ONLY = "hyperos_app_show_installed_only"

@@ -233,6 +233,15 @@ private fun ConfigEditorContent(
     }
 
     var pendingImportText by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.exportConfig(uri) { success, msg ->
+                resultSuccess = success; resultMessage = msg; showResultDialog = true
+            }
+        }
+    }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -295,7 +304,7 @@ private fun ConfigEditorContent(
                     })
                     DropdownMenuItem(text = { Text("导出配置") }, onClick = {
                         showOverflow = false
-                        viewModel.exportConfig { success, msg -> resultSuccess = success; resultMessage = msg; showResultDialog = true }
+                        exportLauncher.launch(viewModel.exportFileName())
                     })
                 }
             }

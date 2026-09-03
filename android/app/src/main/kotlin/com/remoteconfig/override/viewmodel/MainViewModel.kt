@@ -7,8 +7,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remoteconfig.override.data.DatabaseManager
 import com.remoteconfig.override.model.GameConfigSummary
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -286,7 +288,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _baselineJson.value = null
                 }
             } finally {
-                _isEditorLoading.value = false
+                if (isActive) _isEditorLoading.value = false
             }
         }
     }
@@ -299,7 +301,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun createNewConfig(packageName: String) {
         loadConfigJob?.cancel()
-        val existing = _gameList.value.any { it.packageName == packageName }
+        val existing = allRows.any { it.packageName == packageName }
         if (existing) {
             loadConfig(packageName)
             return
@@ -400,11 +402,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 导出当前编辑器文本到内部存储（Bug 2：导出 _editingJson 而非 DB 旧值） */
-    fun exportConfig(onComplete: (Boolean, String) -> Unit) {
-        val pkg = _editingPackageName.value ?: run { onComplete(false, "未选择应用"); return }
+    fun exportFileName(): String =
+        (_editingPackageName.value ?: "config") + ".json"
+
+    fun exportConfig(uri: Uri, onComplete: (Boolean, String) -> Unit) {
         val json = _editingJson.value ?: run { onComplete(false, "无可导出的配置"); return }
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { dbManager.exportConfig(pkg, json) }
+            val result = withContext(Dispatchers.IO) { dbManager.exportConfig(uri, json) }
             onComplete(result.success, result.message)
         }
     }

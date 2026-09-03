@@ -26,7 +26,6 @@ data class SettingsUiState(
     val enableBlur: Boolean = false,
     val enableFloatingBottomBar: Boolean = false,
     val enableFloatingBottomBarBlur: Boolean = false,
-    val enableNavigationBadge: Boolean = true,
     val enablePredictiveBack: Boolean = false,
     val pageScale: Float = 1.0f,
 )
@@ -53,7 +52,6 @@ class SettingsViewModel(
         enableBlur = repo.enableBlur,
         enableFloatingBottomBar = repo.enableFloatingBottomBar,
         enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur,
-        enableNavigationBadge = repo.enableNavigationBadge,
         enablePredictiveBack = repo.enablePredictiveBack,
         pageScale = repo.pageScale,
     )
@@ -148,10 +146,6 @@ class SettingsViewModel(
         _uiState.update { it.copy(enableFloatingBottomBarBlur = enabled) }
     }
 
-    fun setEnableNavigationBadge(enabled: Boolean) {
-        repo.enableNavigationBadge = enabled
-        _uiState.update { it.copy(enableNavigationBadge = enabled) }
-    }
 
     fun setEnablePredictiveBack(enabled: Boolean) {
         repo.enablePredictiveBack = enabled

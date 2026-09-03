@@ -15,7 +15,6 @@ package com.remoteconfig.override.settings
  * - [enableFloatingBottomBarBlur]：悬浮底栏实时模糊
  * - [enablePredictiveBack]：预测性返回手势开关
  * - [pageScale]：全局界面缩放比例（0.8f..1.1f）
- * - [enableNavigationBadge]：导航栏角标开关
  * - [platformMode]：平台选择（"auto" / "coloros" / "hyperos"），默认 auto，自动按系统属性检测
  * - [hyperOsAppSortOption]：HyperOS 应用列表排序（AppSortConfig.toInt() 打包，对齐 KernelSU superuserSortOption）
  */
@@ -31,7 +30,6 @@ interface SettingsRepository {
     var enableFloatingBottomBarBlur: Boolean
     var enablePredictiveBack: Boolean
     var pageScale: Float
-    var enableNavigationBadge: Boolean
     var platformMode: String
     var hyperOsAppSortOption: Int
     var hyperOsAppShowInstalledOnly: Boolean

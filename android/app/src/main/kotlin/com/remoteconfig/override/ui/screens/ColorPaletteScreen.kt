@@ -28,7 +28,6 @@ data class ColorPaletteUiState(
     val enableBlur: Boolean,
     val enableFloatingBottomBar: Boolean,
     val enableFloatingBottomBarBlur: Boolean,
-    val enableNavigationBadge: Boolean,
     val enablePredictiveBack: Boolean,
     val pageScale: Float,
     val currentColorMode: ColorMode,
@@ -52,7 +51,6 @@ data class ColorPaletteScreenActions(
     val onSetEnableBlur: (Boolean) -> Unit,
     val onSetEnableFloatingBottomBar: (Boolean) -> Unit,
     val onSetEnableFloatingBottomBarBlur: (Boolean) -> Unit,
-    val onSetEnableNavigationBadge: (Boolean) -> Unit,
     val onSetEnablePredictiveBack: (Boolean) -> Unit,
     val onSetPageScale: (Float) -> Unit,
 )
@@ -94,7 +92,6 @@ internal fun rememberColorPaletteStateAndActions(onBack: () -> Unit): Pair<Color
         enableBlur = settingsState.enableBlur,
         enableFloatingBottomBar = settingsState.enableFloatingBottomBar,
         enableFloatingBottomBarBlur = settingsState.enableFloatingBottomBarBlur,
-        enableNavigationBadge = settingsState.enableNavigationBadge,
         enablePredictiveBack = settingsState.enablePredictiveBack,
         pageScale = settingsState.pageScale,
         currentColorMode = ColorMode.fromValue(settingsState.themeMode),
@@ -121,7 +118,6 @@ internal fun rememberColorPaletteStateAndActions(onBack: () -> Unit): Pair<Color
             onSetEnableBlur = viewModel::setEnableBlur,
             onSetEnableFloatingBottomBar = viewModel::setEnableFloatingBottomBar,
             onSetEnableFloatingBottomBarBlur = viewModel::setEnableFloatingBottomBarBlur,
-            onSetEnableNavigationBadge = viewModel::setEnableNavigationBadge,
             onSetEnablePredictiveBack = viewModel::setEnablePredictiveBack,
             onSetPageScale = viewModel::setPageScale,
         )

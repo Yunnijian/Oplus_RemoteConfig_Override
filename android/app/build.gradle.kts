@@ -17,7 +17,8 @@ android {
         // minSdk 33：KernelSU 悬浮底栏/液态玻璃用 miuix-blur（要求 API 33+），完整对齐 KernelSU
         minSdk = 33
         targetSdk = 36
-        versionCode = 2
+        // 每次发版手动 +1，或后续接 CI 注入
+        versionCode = 3
         versionName = "1.2.1"
         // The target system SQLite library is the 64-bit /system/lib64/libsqlite.so.
         ndk {
@@ -51,6 +52,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

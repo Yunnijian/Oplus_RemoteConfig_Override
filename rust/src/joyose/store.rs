@@ -13,6 +13,7 @@
 //! shared with or touched by this tool.
 
 use crate::joyose::appview;
+use crate::joyose::digest::sha256_hex_file;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 use std::error::Error;
@@ -145,6 +146,73 @@ fn restore_db_atomically(src: &Path, dest: &str) -> CliResult<()> {
     heal_sidecars(dest_path);
     restorecon(dest);
     Ok(())
+}
+
+
+fn db_mtime(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+}
+
+fn write_backup_manifest(dir: &Path, originals: &[(String, String)]) -> CliResult<()> {
+    let mut files = serde_json::Map::new();
+    for (orig, name) in originals {
+        let dest = dir.join(name);
+        if !dest.exists() {
+            continue;
+        }
+        files.insert(
+            name.clone(),
+            json!({
+                "sha256": sha256_hex_file(&dest)?,
+                "size": fs::metadata(&dest)?.len(),
+                "mtime": db_mtime(Path::new(orig)),
+            }),
+        );
+    }
+    let manifest = json!({
+        "created": epoch(),
+        "files": files,
+    });
+    fs::write(dir.join("manifest.json"), serde_json::to_vec_pretty(&manifest)?)?;
+    Ok(())
+}
+
+fn verify_backup_manifest(dir: &Path) -> CliResult<()> {
+    let text = fs::read_to_string(dir.join("manifest.json"))
+        .map_err(|_| "备份缺少 manifest.json，拒绝恢复".to_string())?;
+    let man: Value = serde_json::from_str(&text).map_err(|e| format!("manifest 解析失败: {e}"))?;
+    let files = man
+        .get("files")
+        .and_then(Value::as_object)
+        .ok_or("manifest 缺少 files")?;
+    if files.is_empty() {
+        return Err("manifest files 为空".into());
+    }
+    for (name, meta) in files {
+        let path = dir.join(name);
+        if !path.exists() {
+            return Err(format!("备份缺少文件: {name}").into());
+        }
+        let size = fs::metadata(&path)?.len();
+        let expect_size = meta.get("size").and_then(Value::as_u64).unwrap_or(u64::MAX);
+        if size != expect_size {
+            return Err(format!("{name} 大小与 manifest 不一致").into());
+        }
+        let expect = meta.get("sha256").and_then(Value::as_str).unwrap_or("");
+        let actual = sha256_hex_file(&path)?;
+        if actual != expect {
+            return Err(format!("{name} 校验失败（可能已被篡改）").into());
+        }
+    }
+    Ok(())
+}
+
+fn backup_manifest_ok(dir: &Path) -> bool {
+    verify_backup_manifest(dir).is_ok()
 }
 
 fn restorecon(path: &str) {
@@ -656,6 +724,7 @@ pub fn cmd_backup(data_root: Option<&String>, label: Option<&String>) -> CliResu
     fs::create_dir_all(&dir)?;
     let root_meta = fs::metadata(root)?;
     stop_joyose();
+    let mut copied: Vec<(String, String)> = Vec::new();
     for (db, name) in [(smartp_db(), "SmartP.db"), (teg_db(), "teg_config.db")] {
         if Path::new(&db).exists() {
             let conn = open_rw(&db)?;
@@ -668,8 +737,11 @@ pub fn cmd_backup(data_root: Option<&String>, label: Option<&String>) -> CliResu
             // without a root shell (same ownership-return pattern as the
             // cosa SQLite sidecars).
             let _ = chown(&dest, Some(root_meta.uid()), Some(root_meta.gid()));
+            copied.push((db.clone(), name.to_string()));
         }
     }
+    write_backup_manifest(&dir, &copied)?;
+    let _ = chown(&dir.join("manifest.json"), Some(root_meta.uid()), Some(root_meta.gid()));
     let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
     let _ = chown(&dir, Some(root_meta.uid()), Some(root_meta.gid()));
     let name = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -696,6 +768,7 @@ pub fn cmd_backup_list(data_root: Option<&String>) -> CliResult<bool> {
                 "name": name,
                 "smartp": dir.join("SmartP.db").exists(),
                 "teg": dir.join("teg_config.db").exists(),
+                "valid": backup_manifest_ok(&dir),
             }));
         }
     }
@@ -716,6 +789,7 @@ pub fn cmd_revert(data_root: Option<&String>, name: Option<&String>) -> CliResul
     if !dir.is_dir() {
         return Err(format!("备份不存在: {name}").into());
     }
+    verify_backup_manifest(&dir)?;
     stop_joyose();
     let mut restored = Vec::new();
     for (db, fname) in [(smartp_db(), "SmartP.db"), (teg_db(), "teg_config.db")] {

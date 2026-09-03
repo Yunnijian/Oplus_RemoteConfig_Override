@@ -436,7 +436,7 @@ class JoyoseManager(context: Context) {
     }
 
     @Serializable
-    data class BackupEntry(val name: String, val smartp: Boolean = false, val teg: Boolean = false)
+    data class BackupEntry(val name: String, val smartp: Boolean = false, val teg: Boolean = false, val valid: Boolean = true)
 
     @Serializable
     data class BackupListResult(val ok: Boolean = false, val backups: List<BackupEntry> = emptyList())

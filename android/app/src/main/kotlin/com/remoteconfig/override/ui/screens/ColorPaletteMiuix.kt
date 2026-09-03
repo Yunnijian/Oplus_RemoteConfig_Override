@@ -105,7 +105,7 @@ private val KeyColorNames: List<String> = listOf(
  * 主题取色屏 — Miuix 实现（完整对齐 KernelSU `ColorPaletteScreenMiuix.kt` 分组结构）。
  *
  * 主题模式 TabRow → 第一组 Card（启用 Monet 颜色 / 强调色 / 色彩风格 / 色彩标准）
- * → 第二组 Card（模糊 / 悬浮底栏 / 液态玻璃 / 导航栏角标）
+ * → 第二组 Card（模糊 / 悬浮底栏 / 液态玻璃）
  * → 第三组 Card（预测性返回手势 / 界面缩放）。
  * 全部文案为 KernelSU values-zh-rCN 中文，硬编码。
  *
