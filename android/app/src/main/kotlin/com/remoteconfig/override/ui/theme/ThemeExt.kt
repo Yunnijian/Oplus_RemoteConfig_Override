@@ -191,9 +191,9 @@ fun rememberRemoteConfigColorScheme(
     }
     // 每次重组先试预热缓存：命中 → 同步返回（单波更新）
     val warm = RemoteConfigSchemeCache.peek(resolvedSeed, isDark, isAmoled, paletteStyle, colorSpec)
-    // 冷启动/新参数组合兜底：首帧同步基线 + 后台补齐（未就绪前沿用旧值）
+    // 冷启动未命中：首帧用系统动态色（框架缓存），后台 HCT 后再替换。
     var fallback by remember {
-        mutableStateOf(remoteConfigColorSchemeFromSeed(resolvedSeed, isDark, isAmoled, paletteStyle, colorSpec))
+        mutableStateOf(if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context))
     }
     LaunchedEffect(resolvedSeed, isDark, isAmoled, paletteStyle, colorSpec) {
         fallback = RemoteConfigSchemeCache

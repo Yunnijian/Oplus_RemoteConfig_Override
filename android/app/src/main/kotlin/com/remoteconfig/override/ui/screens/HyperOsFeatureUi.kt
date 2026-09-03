@@ -670,7 +670,7 @@ private val TEMP_KEY_POINTS = (0..80 step 10).map { it.toFloat() }
 @Composable
 internal fun BandTempSliderRow(temp: String, enabled: Boolean, onCommit: (String) -> Unit) {
     var dragging by remember { mutableStateOf<Float?>(null) }
-    val v = dragging ?: temp.toFloatOrNull() ?: 0f
+    val v = (dragging ?: temp.toFloatOrNull() ?: 0f).coerceIn(0f, 80f)
     val snapped = (v * 2).toInt() / 2f
     val shown = "${tempStr(snapped)}℃"
     when (LocalUiMode.current) {
@@ -713,7 +713,7 @@ internal fun BandTempSliderRow(temp: String, enabled: Boolean, onCommit: (String
                     dragging = null
                 },
                 valueRange = 0f..80f,
-                steps = 160,
+                steps = 159,
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -849,10 +849,10 @@ private fun CurveEditorBody(
                 state.rows.forEachIndexed { i, row ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (format.hasKey) {
-                            CurveFieldMiuixCompat(row.key, { row.key = it }, weight = 0.8f, label = format.keyLabel ?: "")
+                            CurveFieldMiuixCompat(row.key, { row.key = it }, modifier = Modifier.weight(0.8f), label = format.keyLabel ?: "")
                         }
-                        CurveFieldMiuixCompat(row.x, { row.x = it }, weight = 1f, label = format.xLabel)
-                        CurveFieldMiuixCompat(row.y, { row.y = it }, weight = 1.4f, label = format.yLabel)
+                        CurveFieldMiuixCompat(row.x, { row.x = it }, modifier = Modifier.weight(1f), label = format.xLabel)
+                        CurveFieldMiuixCompat(row.y, { row.y = it }, modifier = Modifier.weight(1.4f), label = format.yLabel)
                         IconButtonCompat(onClick = { state.removeAt(i) }) {
                             when (LocalUiMode.current) {
                                 UiMode.Miuix -> MiuixIcon(
@@ -908,14 +908,10 @@ private fun CurveFieldMiuixCompat(
     value: String,
     onValueChange: (String) -> Unit,
     singleLine: Boolean = true,
-    weight: Float? = null,
+    modifier: Modifier = Modifier.fillMaxWidth(),
     label: String = "",
 ) {
-    val modifier = if (weight != null) {
-        Modifier.fillMaxWidth(weight).padding(top = if (label.isNotEmpty()) 2.dp else 0.dp)
-    } else {
-        Modifier.fillMaxWidth()
-    }
+    val modifier = modifier.padding(top = if (label.isNotEmpty()) 2.dp else 0.dp)
     if (LocalUiMode.current == UiMode.Miuix) {
         Column(modifier) {
             if (label.isNotEmpty()) {
@@ -1156,10 +1152,10 @@ private fun CmdEditorBody(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 CurveFieldMiuixCompat(
-                                    row.key, { row.key = it }, weight = 1f,
+                                    row.key, { row.key = it }, modifier = Modifier.weight(1f),
                                     label = if (isGlk) "占位符(${CmdCodec.GLK_PLACEHOLDERS.joinToString("/")})" else "键",
                                 )
-                                CurveFieldMiuixCompat(row.value, { row.value = it }, weight = 1f, label = "值")
+                                CurveFieldMiuixCompat(row.value, { row.value = it }, modifier = Modifier.weight(1f), label = "值")
                                 IconButtonCompat(onClick = { state.rows = state.rows.toMutableList().apply { removeAt(i) } }) {
                                     when (LocalUiMode.current) {
                                         UiMode.Miuix -> MiuixIcon(

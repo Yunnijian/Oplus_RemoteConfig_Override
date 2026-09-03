@@ -3,6 +3,11 @@ package com.remoteconfig.override.ui.screens
 import android.annotation.SuppressLint
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -63,7 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
-import com.materialkolor.rememberDynamicColorScheme
+import com.remoteconfig.override.ui.theme.RemoteConfigSchemeCache
 import com.remoteconfig.override.R
 import com.remoteconfig.override.ui.theme.LocalEnableBlur
 import com.remoteconfig.override.ui.theme.isExpandedWidth
@@ -533,23 +538,23 @@ private fun ThemePreviewCardMiuix(
     val seedColor = if (keyColor == 0) colorScheme.primary else Color(keyColor)
     val effectiveStyle = if (keyColor == 0) PaletteStyle.TonalSpot else paletteStyle
     val effectiveSpec = if (keyColor == 0) ColorSpec.SpecVersion.Default else colorSpec
-    val dynamicCs = rememberDynamicColorScheme(
-        seedColor = seedColor,
-        isDark = isDark,
-        style = effectiveStyle,
-        specVersion = effectiveSpec,
-    )
+    val warm = RemoteConfigSchemeCache.peek(seedColor, isDark, false, effectiveStyle, effectiveSpec)
+    var dynamicCs by remember(seedColor, isDark, effectiveStyle, effectiveSpec) { mutableStateOf(warm) }
+    LaunchedEffect(seedColor, isDark, effectiveStyle, effectiveSpec) {
+        dynamicCs = RemoteConfigSchemeCache.prefetch(seedColor, isDark, false, effectiveStyle, effectiveSpec).await()
+    }
+    val cs = dynamicCs
 
-    val bgColor = if (miuixMonet) dynamicCs.background else colorScheme.surface
-    val textColor = if (miuixMonet) dynamicCs.onSurface else colorScheme.onBackground
+    val bgColor = if (miuixMonet && cs != null) cs.background else colorScheme.surface
+    val textColor = if (miuixMonet && cs != null) cs.onSurface else colorScheme.onBackground
     val accentCardColor = when {
-        miuixMonet -> dynamicCs.secondaryContainer
+        miuixMonet && cs != null -> cs.secondaryContainer
         isDark -> Color(0xFF1A3825)
         else -> Color(0xFFDFFAE4)
     }
-    val cardColor = if (miuixMonet) dynamicCs.surfaceContainerHighest else colorScheme.surfaceVariant
-    val navBarColor = if (miuixMonet) dynamicCs.surfaceContainer else colorScheme.surface
-    val iconColor = if (miuixMonet) dynamicCs.primary else colorScheme.primary
+    val cardColor = if (miuixMonet && cs != null) cs.surfaceContainerHighest else colorScheme.surfaceVariant
+    val navBarColor = if (miuixMonet && cs != null) cs.surfaceContainer else colorScheme.surface
+    val iconColor = if (miuixMonet && cs != null) cs.primary else colorScheme.primary
     val navSelectedColor = colorScheme.onSurfaceContainer
     val navUnselectedColor = colorScheme.onSurfaceContainer.copy(alpha = 0.5f)
 

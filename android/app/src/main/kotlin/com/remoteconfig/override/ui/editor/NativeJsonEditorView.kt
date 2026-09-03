@@ -621,6 +621,7 @@ class NativeJsonEditorView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        traceScope.cancel()
         dismissInput()
         cancelVelocityTracking()
         editorScroller.forceFinished(true)

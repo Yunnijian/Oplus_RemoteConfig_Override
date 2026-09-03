@@ -980,13 +980,9 @@ fun HyperOsMigtScreen(pkg: String) {
         if (scoped.base != null && !migt.writing) viewModel.loadMigt(pkg)
     }
 
-    // 本地表单（编辑中副本）；「默认即生效」：每次确认修改立即整条 joyose-migt-write 落库
     var form by remember { mutableStateOf<MigtCodec.Pack?>(null) }
-    LaunchedEffect(migt.form) { form = migt.form }
-    // form 被确认修改后自动保存（写入中由 ViewModel 排队，不丢连改）
-    LaunchedEffect(form) {
-        val f = form
-        if (f != null && f != migt.form) viewModel.saveMigtPack(f)
+    LaunchedEffect(migt.form) {
+        if (form == null || migt.form == null) form = migt.form
     }
 
     var curveTarget by remember { mutableStateOf<CurveTarget?>(null) }
@@ -1120,6 +1116,20 @@ fun HyperOsMigtScreen(pkg: String) {
                         }
                     },
                 )
+            }
+        }
+
+        if (form != null) {
+            item(key = "migt-save") {
+                HyperOsSectionCard(rows = listOf<@Composable () -> Unit> {
+                    HyperOsActionRow(
+                        title = "保存参数包",
+                        summary = if (form != migt.form) "将当前编辑写入 booster_config" else "没有未保存的修改",
+                        enabled = form != migt.form && !migt.writing,
+                    ) {
+                        form?.let { viewModel.saveMigtPack(it) }
+                    }
+                })
             }
         }
 

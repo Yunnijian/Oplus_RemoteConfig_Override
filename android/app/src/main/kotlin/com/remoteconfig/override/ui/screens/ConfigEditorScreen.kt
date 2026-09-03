@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -114,7 +115,7 @@ fun ConfigEditorPane(
     onClosed: () -> Unit,
     bottomInnerPadding: Dp = 0.dp,
 ) {
-    val editingPackageName by viewModel.editingPackageName.collectAsState()
+    val editingPackageName by viewModel.editingPackageName.collectAsStateWithLifecycle()
     LaunchedEffect(packageName) {
         if (editingPackageName != packageName) {
             viewModel.loadConfig(packageName)
@@ -144,15 +145,15 @@ private fun ConfigEditorContent(
     showBack: Boolean = true,
     bottomInnerPadding: Dp = 0.dp,
 ) {
-    val editingJson by viewModel.editingJson.collectAsState()
-    val editingPackageName by viewModel.editingPackageName.collectAsState()
-    val baselineJson by viewModel.baselineJson.collectAsState()
+    val editingJson by viewModel.editingJson.collectAsStateWithLifecycle()
+    val editingPackageName by viewModel.editingPackageName.collectAsStateWithLifecycle()
+    val baselineJson by viewModel.baselineJson.collectAsStateWithLifecycle()
     // 写入守护：root shell 最长 10s，期间禁用写入类菜单防止并发重复触发。
-    val isWriting by viewModel.isWriting.collectAsState()
+    val isWriting by viewModel.isWriting.collectAsStateWithLifecycle()
     // 脏标记：编辑内容与基准（最近一次载入的原文）不一致即为未保存修改。
     val isDirty = editingPackageName != null && editingJson != baselineJson
     // 编辑器/窗格加载状态：与列表刷新（isLoading）分离，双窗下点列表项不影响左列表
-    val isEditorLoading by viewModel.isEditorLoading.collectAsState()
+    val isEditorLoading by viewModel.isEditorLoading.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // Bug 2：编辑器配色（背景/正文/行号/高亮色表/光标/状态栏）必须跟随应用主题
     // （LocalColorMode，SYSTEM/Monet-SYSTEM 回落系统），而非系统深色。

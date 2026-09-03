@@ -36,6 +36,12 @@ fun RemoteConfigMiuixTheme(
     val darkTheme = appSettings.colorMode.isDark || (appSettings.colorMode.isSystem && systemDarkTheme)
     val colorStyle = appSettings.paletteStyle
     val colorSpec = appSettings.colorSpec
+    PrewarmRemoteConfigSchemes(
+        isDark = darkTheme,
+        isAmoled = appSettings.colorMode.isAmoled,
+        paletteStyle = colorStyle,
+        colorSpec = colorSpec,
+    )
 
     val miuixPaletteStyle = try {
         ThemePaletteStyle.valueOf(colorStyle.name)

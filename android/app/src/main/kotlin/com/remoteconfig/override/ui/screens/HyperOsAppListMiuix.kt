@@ -37,7 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -129,7 +129,7 @@ fun HyperOsAppListMiuix(
     viewModel: HyperOsViewModel,
     bottomInnerPadding: Dp = 0.dp,
 ) {
-    val state by viewModel.listState.collectAsState()
+    val state by viewModel.listState.collectAsStateWithLifecycle()
     // LocalNavigator.current 是 @Composable getter，提前提升（对齐 ColorPaletteScreen 的做法）。
     val navigator = LocalNavigator.current
     val density = LocalDensity.current
@@ -215,9 +215,10 @@ fun HyperOsAppListMiuix(
             overscrollEffect = null,
         ) {
             items(apps, key = { it.pkg }, contentType = { "app" }) { app ->
+                val iconBmp = remember(app.pkg) { viewModel.getCachedIcon(app.pkg) }
                 AppRowCardMiuix(
                     app = app,
-                    icon = viewModel.getCachedIcon(app.pkg),
+                    icon = iconBmp,
                     onClick = { navigator.push(Route.HyperOsAppDetail(app.pkg)) },
                 )
             }
@@ -525,8 +526,9 @@ private fun AppRowCardMiuix(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
+                val image = remember(icon) { icon.asImageBitmap() }
                 Image(
-                    bitmap = icon.asImageBitmap(),
+                    bitmap = image,
                     contentDescription = null,
                     modifier = Modifier
                         .size(40.dp)

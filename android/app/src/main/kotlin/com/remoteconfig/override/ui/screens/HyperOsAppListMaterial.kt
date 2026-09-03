@@ -46,7 +46,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -102,7 +102,7 @@ fun HyperOsAppListMaterial(
     viewModel: HyperOsViewModel,
     bottomInnerPadding: Dp = 0.dp,
 ) {
-    val state by viewModel.listState.collectAsState()
+    val state by viewModel.listState.collectAsStateWithLifecycle()
     val navigator = LocalNavigator.current
     val haptic = LocalHapticFeedback.current
 

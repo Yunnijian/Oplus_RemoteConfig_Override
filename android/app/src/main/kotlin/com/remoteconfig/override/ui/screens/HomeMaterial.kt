@@ -14,9 +14,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,18 +61,18 @@ fun HomeContentMaterial(
     bottomInnerPadding: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
-    val systemStatus by viewModel.systemStatus.collectAsState()
-    val installedConfigCount by viewModel.installedConfigCount.collectAsState()
-    val cosaVersion by viewModel.cosaVersion.collectAsState()
+    val systemStatus by viewModel.systemStatus.collectAsStateWithLifecycle()
+    val installedConfigCount by viewModel.installedConfigCount.collectAsStateWithLifecycle()
+    val cosaVersion by viewModel.cosaVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val mainPagerState = LocalMainPagerState.current
 
     // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
     val hyperOS = LocalPlatform.current == Platform.HyperOS
     val hyperOsViewModel: HyperOsViewModel = composeViewModel()
-    val joyoseStat by hyperOsViewModel.statState.collectAsState()
-    val listState by hyperOsViewModel.listState.collectAsState()
-    val commonState by hyperOsViewModel.commonState.collectAsState()
+    val joyoseStat by hyperOsViewModel.statState.collectAsStateWithLifecycle()
+    val listState by hyperOsViewModel.listState.collectAsStateWithLifecycle()
+    val commonState by hyperOsViewModel.commonState.collectAsStateWithLifecycle()
     val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
     LaunchedEffect(hyperOS) {
         if (hyperOS) {
@@ -185,8 +187,7 @@ fun HomeContentMaterial(
                         headlineContent = { Text("查看源代码") },
                         supportingContent = { Text("在 GitHub 上查看源代码") },
                         leadingContent = {
-                            Image(painter = painterResource(id = R.drawable.author_avatar),
-                                contentDescription = "GitHub 头像", modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                            Icon(Icons.Outlined.Code, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         },
                         trailingContent = {
                             Icon(Icons.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

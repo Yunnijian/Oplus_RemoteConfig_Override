@@ -40,7 +40,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -135,13 +135,13 @@ fun ConfigListContentMiuix(
     dualPaneSelected: String? = null,
     onDualPaneSelect: (String) -> Unit = {},
 ) {
-    val gameList by viewModel.gameList.collectAsState()
-    val systemStatus by viewModel.systemStatus.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val refreshing by viewModel.refreshing.collectAsState()
-    val sortConfig by viewModel.sortConfig.collectAsState()
-    val showInstalledOnly by viewModel.showInstalledOnly.collectAsState()
-    val hasDbData by viewModel.hasDbData.collectAsState()
+    val gameList by viewModel.gameList.collectAsStateWithLifecycle()
+    val systemStatus by viewModel.systemStatus.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val sortConfig by viewModel.sortConfig.collectAsStateWithLifecycle()
+    val showInstalledOnly by viewModel.showInstalledOnly.collectAsStateWithLifecycle()
+    val hasDbData by viewModel.hasDbData.collectAsStateWithLifecycle()
 
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current

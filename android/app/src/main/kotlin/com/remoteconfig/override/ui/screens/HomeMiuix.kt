@@ -32,7 +32,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -91,18 +91,18 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 @Composable
 fun HomeContentMiuix(viewModel: MainViewModel, bottomInnerPadding: Dp = 0.dp) {
-    val systemStatus by viewModel.systemStatus.collectAsState()
-    val installedConfigCount by viewModel.installedConfigCount.collectAsState()
-    val cosaVersion by viewModel.cosaVersion.collectAsState()
+    val systemStatus by viewModel.systemStatus.collectAsStateWithLifecycle()
+    val installedConfigCount by viewModel.installedConfigCount.collectAsStateWithLifecycle()
+    val cosaVersion by viewModel.cosaVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val mainPagerState = LocalMainPagerState.current
 
     // HyperOS 平台分支：状态卡与设备信息卡的数据源切换为 Joyose（轻量 stat，无重查询）
     val hyperOS = LocalPlatform.current == Platform.HyperOS
     val hyperOsViewModel: HyperOsViewModel = composeViewModel()
-    val joyoseStat by hyperOsViewModel.statState.collectAsState()
-    val listState by hyperOsViewModel.listState.collectAsState()
-    val commonState by hyperOsViewModel.commonState.collectAsState()
+    val joyoseStat by hyperOsViewModel.statState.collectAsStateWithLifecycle()
+    val listState by hyperOsViewModel.listState.collectAsStateWithLifecycle()
+    val commonState by hyperOsViewModel.commonState.collectAsStateWithLifecycle()
     val joyoseVersion = remember(hyperOS) { if (hyperOS) hyperOsViewModel.joyoseVersion else "" }
     LaunchedEffect(hyperOS) {
         if (hyperOS) {
