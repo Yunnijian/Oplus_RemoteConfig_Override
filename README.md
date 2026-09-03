@@ -79,7 +79,7 @@ aapt2 通过参数覆盖：
 
 - **UI**: Jetpack Compose + Material 3，**双 UI 模式**（Miuix 0.9.3 / Material 3，设置内即时切换，两套主题与页面外壳）
 - **导航**: Navigation3（`androidx.navigation3`，类型安全路由；宽屏与窄屏共用同一导航图）
-- **液态玻璃底栏**: AndroidLiquidGlass（`io.github.kyant0:backdrop` 2.0.1，可在设置内关闭回退纯色底栏）
+- **液态玻璃底栏**: miuix-blur（API 33+，可在设置内关闭回退纯色底栏）
 - **主题取色**: material-kolor 5.0.0（keyColor / palette style / color spec，对齐 KernelSU ColorPalette）
 - **平板适配**: material3-window-size-class（Google 标准 WindowSizeClass；宽屏 NavigationRail + 配置页 list-detail 双窗格，纯应用内布局，无需 OPPO 平行视窗）
 - **Root 交互**: libsu (topjohnwu)
@@ -116,7 +116,9 @@ android/app/src/main/kotlin/com/remoteconfig/override/
 └── viewmodel/
     └── MainViewModel.kt      # 主 ViewModel（数据层不动）
 rust/
-├── src/main.rs               # rusqlite 数据库命令行工具
+├── src/main.rs               # ColorOS cosa CLI + joyose 分发
+├── src/joyose/               # HyperOS Joyose：store/migt/scoped/appview/caps/resolve
+├── rust-toolchain.toml
 └── Cargo.toml
 ```
 

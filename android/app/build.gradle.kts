@@ -26,8 +26,22 @@ android {
         }
     }
 
+    val rcoStore = System.getenv("RCO_STORE_FILE") ?: providers.gradleProperty("RCO_STORE_FILE").orNull
+    signingConfigs {
+        create("release") {
+            if (!rcoStore.isNullOrBlank()) {
+                storeFile = file(rcoStore)
+                storePassword = System.getenv("RCO_STORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("RCO_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("RCO_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
     buildTypes {
         release {
+            if (!rcoStore.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -36,12 +50,8 @@ android {
             )
         }
         debug {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 
@@ -73,6 +83,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
