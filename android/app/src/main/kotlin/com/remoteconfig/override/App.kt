@@ -45,7 +45,11 @@ class App : Application() {
         Shell.setDefaultBuilder(
             Shell.Builder.create()
                 .setFlags(Shell.FLAG_MOUNT_MASTER)   // 挂载命名空间（用于访问 /data/data）
-                .setTimeout(10)
+            // 不调用 setTimeout()：libsu 6.0.0 里该值只用于**创建 root shell 时的可用性检查**
+            // （ShellImpl 构造器 FutureTask.get(timeout, SECONDS)），与每条命令无关 ——
+            // Shell.cmd().exec() 走 JobTask.run 的无参 FutureTask.get()，没有每命令超时。
+            // 原先传 10 秒等于把库默认 20 秒砍半：首次启动若用户未在 10 秒内点掉 su 授权弹窗，
+            // shell 创建直接抛 "Shell check timeout"。KernelSU 同样不覆盖此值。
         )
     }
 }

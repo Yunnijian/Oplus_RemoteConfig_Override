@@ -6,8 +6,9 @@ use rusqlite::{
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::fs;
-use std::os::unix::fs::{chown, MetadataExt, PermissionsExt};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::os::unix::fs::{chown, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -270,14 +271,7 @@ fn cmd_read(package: &str, output: Option<&str>) -> Result<bool> {
                 let text = serde_json::to_string_pretty(&Value::Object(object))?;
                 if let Some(path) = output {
                     let path = Path::new(path);
-                    if let Some(parent) = path
-                        .parent()
-                        .filter(|parent| !parent.as_os_str().is_empty())
-                    {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::write(path, text)?;
-                    fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+                    write_export(path, &text)?;
                     println!("已导出: {}", path.display());
                 } else {
                     println!("{text}");
@@ -293,6 +287,44 @@ fn cmd_read(package: &str, output: Option<&str>) -> Result<bool> {
     }
     eprintln!("未找到包名: {package}");
     Ok(false)
+}
+
+/// `read <包名> <输出文件>` 的落盘（P2-3 防御加固）。
+///
+/// 本进程以 uid 0 运行，输出路径直接来自命令行参数；`fs::write` 会跟随符号链接，
+/// 等于把"覆写任意 root 可读文件"的能力交给任何能构造该参数的调用方。
+///
+/// std 没有稳定的 O_NOFOLLOW 开关（`OpenOptionsExt::follow_symlinks` 到 rustc 1.98
+/// 仍是 unstable），且该标志的数值在 Linux/bionic（0o400000）与 Darwin（0o200）上
+/// 不同，不能硬编码进 `custom_flags`。这里用可移植的等价三段式：先用不跟随链接的
+/// `symlink_metadata` 拒绝符号链接；路径不存在时用 `O_CREAT|O_EXCL` 创建（竞态下
+/// 目标变成链接也会失败）；只有已存在的普通文件才截断覆写 —— 重复导出到同一文件是
+/// 正常用法，所以不能一律 `create_new`。
+fn write_export(path: &Path, text: &str) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(
+                format!("导出目标是符号链接，已拒绝写入: {}", path.display()).into(),
+            )
+        }
+        Ok(_) => OpenOptions::new().write(true).truncate(true).open(path)?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(path)?,
+        Err(err) => return Err(err.into()),
+    };
+    file.write_all(text.as_bytes())?;
+    // open(2) 的 mode 会被 umask 削掉高位，导出件要能被内容提供器读走，显式补齐。
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+    Ok(())
 }
 
 fn write_one(
@@ -967,5 +999,61 @@ mod tests {
         for bare in [" stat |", " freeze |"] {
             assert!(!usage().contains(bare), "usage() 含裸子命令名 {bare:?}");
         }
+    }
+
+    fn export_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "cosa-p23-{}-{tag}-{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// P2-3：不存在的目标按 0o644 创建（umask 不得把组/其他位的读权限削掉）。
+    #[test]
+    fn write_export_creates_file_readable_by_content_provider() {
+        let dir = export_dir("create");
+        let target = dir.join("nested/export.json");
+        write_export(&target, "{\"a\":1}").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "{\"a\":1}");
+        assert_eq!(mode_of(&target), 0o644, "导出件必须全局可读");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// P2-3：重复导出到同一普通文件是正常用法，必须截断覆写而不是失败或追加。
+    #[test]
+    fn write_export_truncates_existing_regular_file() {
+        let dir = export_dir("truncate");
+        let target = dir.join("export.json");
+        fs::write(&target, "aaaaaaaaaaaaaaaaaaaa").unwrap();
+        write_export(&target, "short").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "short");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// P2-3：目标是指向别处的符号链接时必须显式报错，且链接指向的文件一字未动。
+    #[test]
+    fn write_export_refuses_to_follow_symlink() {
+        let dir = export_dir("symlink");
+        let victim = dir.join("victim");
+        fs::write(&victim, "keep me").unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        let err = write_export(&link, "boom").unwrap_err().to_string();
+        assert!(err.contains("符号链接"), "{err}");
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep me");
+        assert_eq!(fs::read_to_string(&link).unwrap(), "keep me");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

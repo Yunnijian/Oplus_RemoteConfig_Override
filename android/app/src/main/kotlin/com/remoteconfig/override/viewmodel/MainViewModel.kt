@@ -133,10 +133,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshAll() {
         viewModelScope.launch {
             _isLoading.value = true
-            // 单次 `list` 同时供系统状态（数量）与游戏列表使用，不再各查一遍 shell
-            val configuredPkgs = checkSystemStatus()
-            loadGameList(configuredPkgs)
-            _isLoading.value = false
+            try {
+                // 单次 `list` 同时供系统状态（数量）与游戏列表使用，不再各查一遍 shell
+                val configuredPkgs = checkSystemStatus()
+                loadGameList(configuredPkgs)
+            } finally {
+                // 必须 finally 复位：loadGameList 里的图标解码会抛 Error（OOM 不被内层
+                // catch(_:Exception) 捕获），漏一次就让列表永久转圈且再也刷不动。
+                _isLoading.value = false
+            }
         }
     }
 
@@ -145,9 +150,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_refreshing.value || _isLoading.value) return
         viewModelScope.launch {
             _refreshing.value = true
-            val configuredPkgs = checkSystemStatus()
-            loadGameList(configuredPkgs)
-            _refreshing.value = false
+            try {
+                val configuredPkgs = checkSystemStatus()
+                loadGameList(configuredPkgs)
+            } finally {
+                _refreshing.value = false
+            }
         }
     }
 

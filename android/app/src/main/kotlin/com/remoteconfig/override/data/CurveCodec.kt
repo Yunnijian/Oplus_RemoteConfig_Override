@@ -37,17 +37,14 @@ object CurveCodec {
     fun parse(text: String, format: Format): List<Segment>? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return emptyList()
+        // 多档格式必须在按 separator 拆之前先分流：档内也可能出现 separator
+        // （如 `47.5:60;165#10:0` 里的逗号），整条先拆会把档边界拆坏 ——
+        // 逐档处理交给 parseGrouped。该判断只依赖 format，放在循环外。
+        if (format.isGrouped) return parseGrouped(trimmed, format)
         val segments = ArrayList<Segment>()
         for (rawSeg in trimmed.split(format.separator)) {
             val seg = rawSeg.trim()
             if (seg.isEmpty()) return null
-            // 多档格式：`;` 分隔档，档分隔符之后不能拆到 x/y —— 先按档切开
-            if (format.isGrouped) {
-                // 段内可能粘着档分隔符（如 `47.5:60;165#10:0`）：整条先按 separator 拆会把它拆坏，
-                // 因此多档解析改为逐档处理 —— 见 parseGrouped
-                segments.clear()
-                return parseGrouped(trimmed, format)
-            }
             val parsed = parseSegment(seg, format) ?: return null
             segments.add(parsed)
         }
