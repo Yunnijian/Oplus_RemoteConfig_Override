@@ -233,7 +233,10 @@ fun ColorPaletteContentMiuix(
                         // 强调色始终显示（不包 AnimatedVisibility）：
                         // AnimatedVisibility 内的 OverlayDropdownPreference 弹出锚点异常，
                         // 下拉无法展开（Bug 2）。移出动画容器后始终可展开。
-                        // 色彩风格/色彩标准（keyColor!=0 时）同理保持可见。
+                        // 下面两组（色彩风格/色彩标准）仍按 keyColor!=0 折叠 —— 与 KernelSU
+                        // ColorPaletteScreenMiuix 的 AnimatedVisibility 逐字一致；Material 皮肤
+                        // 则无条件显示，同样对齐 KS 的 ColorPaletteScreenMaterial。两皮肤行为不同
+                        // 是"各自对齐各自基准"的结果，不是漂移（§13 决策树第②级）。
                         Column {
                             val colorItems = KeyColorNames
                             val colorValues = listOf(0) + keyColorOptions

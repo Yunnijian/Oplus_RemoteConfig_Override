@@ -759,7 +759,8 @@ fn usage() -> &'static str {
      cosa joyose-backup-list <备份根目录> | joyose-revert <备份根目录> <名称>\n\
      cosa joyose-apps | joyose-app <包名> [booster_params.json] [common_params.json]\n\
      cosa joyose-device-caps | joyose-migt-write <完整条目串> | joyose-migt-remove <包名>\n\
-     cosa joyose-scoped <包名> [booster_params.json] [common_params.json] | joyose-scoped-write <包名> <作用域json文件>"
+     cosa joyose-purge-dead | joyose-scoped <包名> [booster_params.json] [common_params.json]\n\
+     cosa joyose-scoped-write <包名> <作用域json文件>"
 }
 
 fn main() -> ExitCode {
@@ -789,6 +790,7 @@ fn main() -> ExitCode {
         Some("joyose-backup-list") => joyose::store::cmd_backup_list(args.get(2)),
         Some("joyose-revert") => joyose::store::cmd_revert(args.get(2), args.get(3)),
         Some("joyose-apps") => joyose::store::cmd_apps(),
+        Some("joyose-purge-dead") => joyose::store::cmd_purge_dead(),
         Some("joyose-app") => {
             joyose::appview::cmd_app_view(args.get(2), args.get(3), args.get(4))
         }
@@ -968,7 +970,7 @@ mod tests {
     /// 否则照抄帮助文本必然 `Unknown command`。
     #[test]
     fn usage_lists_only_dispatched_subcommands() {
-        const JOYOSE: [&str; 16] = [
+        const JOYOSE: [&str; 17] = [
             "joyose-stat",
             "joyose-list",
             "joyose-read",
@@ -983,6 +985,7 @@ mod tests {
             "joyose-device-caps",
             "joyose-migt-write",
             "joyose-migt-remove",
+            "joyose-purge-dead",
             "joyose-scoped",
             "joyose-scoped-write",
         ];

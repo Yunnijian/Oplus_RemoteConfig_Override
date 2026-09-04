@@ -16,6 +16,7 @@ use crate::joyose::appview;
 use crate::joyose::digest::sha256_hex_file;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;
 use std::os::unix::fs::{chown, MetadataExt, PermissionsExt};
@@ -684,6 +685,99 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
     }))
 }
 
+/// P2-25：`cloud_config` 里那条**放错名字的死数据**。P0-1 修复前 `migt` 写入把
+/// 整份 booster_config 存进了 `config_name='smartp'` 的行；Joyose 只按已知配置名
+/// 加载，这一行永远不会被读到，纯粹白占 SmartP.db 体积（实测约一半）。
+const DEAD_CONFIG: &str = "smartp";
+/// 判定死数据的参照物：只有与它同构的 `smartp` 行才是 P0-1 的历史残留。
+const CANONICAL_CONFIG: &str = "booster_config";
+
+/// 死数据判定（纯函数，便于单测）：两行都必须是**非空 JSON 对象**且**顶层键集合相同**。
+///
+/// 只比顶层键、不比值 —— 值会随正常写入漂移（真机上两者相差百来字节），但顶层形状
+/// `{header, game_booster}` 是 booster_config 的指纹；一条真被当作独立配置使用的行
+/// 不会恰好撞上同样的形状，那种情况必须拒绝删除。
+fn dead_row_mirrors_canonical(canonical: &Value, dead: &Value) -> bool {
+    let (Some(c), Some(d)) = (canonical.as_object(), dead.as_object()) else {
+        return false;
+    };
+    !c.is_empty() && c.keys().collect::<BTreeSet<_>>() == d.keys().collect::<BTreeSet<_>>()
+}
+
+/// `joyose-purge-dead` — 一次性清理 SmartP.db 的 `smartp` 死行（P2-25）。
+///
+/// 判定与删除共用一次读写连接，避免"检查时同构、删除时已变"的窗口。三种结果：
+/// ① 没有该行 → 直接成功（幂等，可重复执行）；② 有但与 `booster_config` 不同构 →
+/// **显式报错、不动库**（铁律 ①）；③ 同构 → 删除并走统一收尾
+/// `checkpoint → heal_sidecars → restorecon`（铁律 ②，见 [`checkpoint_and_close`]）。
+pub fn cmd_purge_dead() -> CliResult<bool> {
+    let path = smartp_db();
+    if !Path::new(&path).exists() {
+        return Err("SmartP.db 不存在，无法判定死数据".into());
+    }
+    let conn = open_rw(&path)?;
+    let read = |name: &str| -> CliResult<Option<Value>> {
+        let text: Option<String> = conn
+            .query_row(
+                "SELECT params FROM cloud_config WHERE config_name = ?1",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        text.map(|t| {
+            serde_json::from_str::<Value>(&t)
+                .map_err(|e| format!("SmartP {name} 解析失败: {e}").into())
+        })
+        .transpose()
+    };
+    let dead = match read(DEAD_CONFIG) {
+        Ok(Some(doc)) => doc,
+        Ok(None) => {
+            checkpoint_and_close(conn, &path);
+            println!(
+                "{}",
+                json!({ "ok": true, "purged": false, "reason": format!("没有 {DEAD_CONFIG} 行，无需清理") })
+            );
+            return Ok(true);
+        }
+        Err(err) => {
+            drop(conn);
+            return Err(err);
+        }
+    };
+    let canonical = match read(CANONICAL_CONFIG) {
+        Ok(Some(doc)) => doc,
+        Ok(None) => {
+            drop(conn);
+            return Err(format!(
+                "找不到 {CANONICAL_CONFIG} 行，无法判定 {DEAD_CONFIG} 是否为历史残留，已放弃清理"
+            )
+            .into());
+        }
+        Err(err) => {
+            drop(conn);
+            return Err(err);
+        }
+    };
+    if !dead_row_mirrors_canonical(&canonical, &dead) {
+        drop(conn);
+        return Err(format!(
+            "{DEAD_CONFIG} 行与 {CANONICAL_CONFIG} 顶层结构不同构，不是 P0-1 的历史残留，已放弃清理"
+        )
+        .into());
+    }
+    let removed = conn.execute(
+        "DELETE FROM cloud_config WHERE config_name = ?1",
+        [DEAD_CONFIG],
+    )?;
+    checkpoint_and_close(conn, &path);
+    println!(
+        "{}",
+        json!({ "ok": true, "purged": removed > 0, "removed": removed, "config": DEAD_CONFIG })
+    );
+    Ok(true)
+}
+
 /// `joyose-freeze` / `joyose-unfreeze` — pin (or release) the teg SDK cloud
 /// sync via `pref_local_max_version`. Joyose is force-stopped first because
 /// SharedPreferences has a per-process cache.
@@ -952,6 +1046,108 @@ mod tests {
             Ok(v) => v,
             Err(p) => std::panic::resume_unwind(p),
         }
+    }
+
+    /// P2-25：往 SmartP.db 里再塞一行任意配置名。
+    fn insert_cloud_row(path: &Path, name: &str, params: &str) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute(
+            "INSERT INTO cloud_config (config_name, group_name, enable, version, with_model, model, params) VALUES (?1, ?1, 1, 1, 0, '{}', ?2)",
+            params![name, params],
+        )
+        .unwrap();
+    }
+
+    fn cloud_row_names(path: &Path) -> Vec<String> {
+        let conn = Connection::open(path).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT config_name FROM cloud_config ORDER BY config_name")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    /// 同构判定的边界：顶层键集合相同才算历史残留；空对象、非对象、键不同都不算。
+    #[test]
+    fn dead_row_shape_test_is_top_level_key_set() {
+        let canonical = json!({"header": {"version": "1"}, "game_booster": {"booster_config": {}}});
+        assert!(dead_row_mirrors_canonical(
+            &canonical,
+            &json!({"game_booster": {"x": 1}, "header": {}})
+        ), "键集合相同（值不同、顺序不同）应判为同构");
+        assert!(!dead_row_mirrors_canonical(
+            &canonical,
+            &json!({"header": {}})
+        ), "缺键不得判为同构");
+        assert!(!dead_row_mirrors_canonical(
+            &canonical,
+            &json!({"header": {}, "game_booster": {}, "extra": 1})
+        ), "多键不得判为同构");
+        assert!(!dead_row_mirrors_canonical(&canonical, &json!([])));
+        assert!(!dead_row_mirrors_canonical(&canonical, &json!("x")));
+        assert!(
+            !dead_row_mirrors_canonical(&json!({}), &json!({})),
+            "空对象互相比对不得判为同构（无从判定形状）"
+        );
+    }
+
+    /// P2-25 主路径：删 smartp，booster_config 与无关行一律不动。
+    #[test]
+    fn purge_dead_removes_only_the_mirroring_row() {
+        with_dbs(|smartp, _teg| {
+            make_smartp(smartp, r#"{"header":{"version":"7"},"game_booster":{"a":1}}"#);
+            insert_cloud_row(
+                smartp,
+                "smartp",
+                r#"{"game_booster":{"a":1,"stale":true},"header":{"version":"1"}}"#,
+            );
+            insert_cloud_row(smartp, "common_config", r#"{"whatever":1}"#);
+
+            assert!(cmd_purge_dead().unwrap());
+            assert_eq!(
+                cloud_row_names(smartp),
+                vec!["booster_config".to_string(), "common_config".to_string()],
+                "只应删掉 smartp 行"
+            );
+            let conn = Connection::open(smartp).unwrap();
+            let kept: String = conn
+                .query_row(
+                    "SELECT params FROM cloud_config WHERE config_name='booster_config'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(kept, r#"{"header":{"version":"7"},"game_booster":{"a":1}}"#);
+        });
+    }
+
+    /// P2-25 护栏：smartp 行形状对不上时**必须报错且一行不少**（可能是真配置）。
+    #[test]
+    fn purge_dead_refuses_when_shape_does_not_match() {
+        with_dbs(|smartp, _teg| {
+            make_smartp(smartp, r#"{"header":{"version":"7"},"game_booster":{"a":1}}"#);
+            insert_cloud_row(smartp, "smartp", r#"{"tegrules":{"x":1}}"#);
+
+            let err = cmd_purge_dead().unwrap_err().to_string();
+            assert!(err.contains("不同构"), "{err}");
+            assert_eq!(
+                cloud_row_names(smartp),
+                vec!["booster_config".to_string(), "smartp".to_string()],
+                "判定失败时一行都不许删"
+            );
+        });
+    }
+
+    /// P2-25 幂等：没有 smartp 行时成功返回，且不动 booster_config。
+    #[test]
+    fn purge_dead_without_the_row_is_a_noop_success() {
+        with_dbs(|smartp, _teg| {
+            make_smartp(smartp, r#"{"header":{"version":"7"},"game_booster":{"a":1}}"#);
+            assert!(cmd_purge_dead().unwrap());
+            assert_eq!(cloud_row_names(smartp), vec!["booster_config".to_string()]);
+        });
     }
 
     #[test]

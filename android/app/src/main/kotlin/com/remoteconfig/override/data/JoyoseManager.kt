@@ -1,7 +1,6 @@
 package com.remoteconfig.override.data
 
 import android.content.Context
-import com.topjohnwu.superuser.Shell
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -134,10 +133,10 @@ class JoyoseManager(context: Context) {
 
     private fun quote(value: String): String = "'${value.replace("'", "'\\''")}'"
 
-    private fun run(vararg args: String): Shell.Result =
-        Shell.cmd((listOf(binary) + args).joinToString(" ", transform = ::quote)).exec()
+    private fun run(vararg args: String): RootResult =
+        execRoot((listOf(binary) + args).joinToString(" ", transform = ::quote))
 
-    private fun parseOut(result: Shell.Result, fallback: String): String =
+    private fun parseOut(result: RootResult, fallback: String): String =
         (result.out.asSequence() + result.err.asSequence())
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -306,7 +305,7 @@ class JoyoseManager(context: Context) {
             val q = quote(n)
             "echo $q=\$(cat /sys/module/migt/parameters/$q 2>/dev/null)"
         }
-        val result = Shell.cmd(script).exec()
+        val result = execRoot(script)
         val map = mutableMapOf<String, String>()
         for (line in result.out) {
             val idx = line.indexOf('=')
@@ -329,9 +328,9 @@ class JoyoseManager(context: Context) {
         val safeKeys = keys.map { it.replace("'", "") }.filter { it.isNotBlank() }
         if (safeKeys.isEmpty()) return emptyMap()
         val pattern = safeKeys.joinToString("|") { Regex.escape(it) }
-        val result = Shell.cmd(
+        val result = execRoot(
             "grep -h -s -E ${quote("name=\"($pattern)\"")} /data/user/0/$PKG/shared_prefs/*.xml",
-        ).exec()
+        )
         val map = mutableMapOf<String, String>()
         for (line in result.out) {
             val nameIdx = line.indexOf("name=\"")

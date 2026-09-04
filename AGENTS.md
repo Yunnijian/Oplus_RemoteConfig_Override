@@ -15,7 +15,7 @@ Oplus RemoteConfig Override：**双平台**游戏云控配置修改工具——C
 ## 架构概要（双端，无 JNI，唯一通信 = root shell + 命令行 + stdout JSON）
 
 - `android/` — 主应用（Kotlin 2.4 + Compose，MVVM + Repository）。Navigation3 自研 Navigator（15 路由）；数据层 `DatabaseManager`(ColorOS) / `JoyoseManager`(HyperOS) 经 libsu 调 `libcosa.so`。
-- `rust/` — 特权 CLI `cosa`：`main.rs`（ColorOS 5 命令）+ `joyose/` 8 模块（17 命令：store/appview/scoped/migt/caps/resolve/digest）。交叉编译为 `libcosa.so`（arm64，可执行形态随 jniLibs 分发），构建走 `rust/build-android.sh`（含产物自检，勿手工拷贝）。
+- `rust/` — 特权 CLI `cosa`：`main.rs`（ColorOS 5 命令）+ `joyose/` 8 模块（18 命令：store/appview/scoped/migt/caps/resolve/digest）。交叉编译为 `libcosa.so`（arm64，可执行形态随 jniLibs 分发），构建走 `rust/build-android.sh`（含产物自检，勿手工拷贝）。
 - `KernelSU/` — vendored 第三方源码（已 gitignore，不入库）：**Miuix 皮肤的 UI 对齐基准**（组件选型决策树第②级"命中即移植"），**只读**，勿修改。
 
 ## 核心约束
@@ -24,14 +24,15 @@ Oplus RemoteConfig Override：**双平台**游戏云控配置修改工具——C
 2. **SQLite 必须 bundled**：`rusqlite` 仅用 `bundled` feature，禁止链接系统 `libsqlite.so`；`serde_json` 必须开 `preserve_order` + `arbitrary_precision`；`panic = "unwind"`（abort 会跳过 WAL checkpoint）。
 3. **arm64-only**：ABI 仅 `arm64-v8a`，Rust 目标仅 `aarch64-linux-android`。
 4. **三条铁律**（PROJECT_GUIDE §12.4）：① 任何写库失败必须显式报错，stdout 只放一个 JSON 文档；② root 触库收尾必须 `checkpoint → heal_sidecars → restorecon`；③ **改 Rust 必重跑 `build-android.sh` 并同步 Kotlin wire model**（两端靠字段名隐式对齐，`ignoreUnknownKeys` 会静默降级——最易踩的跨端陷阱）。
+5. **root 命令一律走 `data/RootShell.kt` 的 `execRoot()`**，不要直接 `Shell.cmd().exec()`。libsu 6.0.0 的 `setTimeout()` 只管创建 shell 时的 `shellCheck()`，**命令级没有超时**，挂死即永久阻塞；`execRoot` 用 `Shell.Job.enqueue()` + `Future.get(30s)` 补上这个能力，超时返回 `RootResult.TIMEOUT`（语义是"结果未知"，不是"失败"——命令仍在 libsu 队列里跑完，故超时值必须远大于正常耗时，**不要**为了快速重试而调小）。
 
 ## 验证命令
 
 ```bash
-# Rust 测试（宿主执行，58 用例；改 Rust 必跑，勿用交叉 target 跑测试）
+# Rust 测试（宿主执行，62 用例；改 Rust 必跑，勿用交叉 target 跑测试）
 cd rust && cargo test
 
-# Android 单元测试（36 用例）
+# Android 单元测试（38 用例）
 cd android && ./gradlew :app:testDebugUnitTest
 # 若当前 shell 的 JAVA_HOME 指向 jdk 发行包外层目录（见下），Gradle 会拒绝启动，
 # 需临时覆盖：JAVA_HOME=<下面的 JDK 路径> ./gradlew …

@@ -21,13 +21,11 @@ import com.remoteconfig.override.viewmodel.HyperOsViewModel
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.jsonObject
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme as miuixColorScheme
 
@@ -87,9 +85,7 @@ fun HyperOsThermalFpsScreen(pkg: String) {
         viewModel.loadThermal(pkg)
     }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val found = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
     val (pointer, fragment) = found ?: (null to null)
 
@@ -127,7 +123,7 @@ fun HyperOsThermalFpsScreen(pkg: String) {
     HyperOsFeatureScaffold(
         title = "温控与帧率",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (fragment == null || pointer == null) {
@@ -324,12 +320,10 @@ fun HyperOsBandEditorScreen(pkg: String, curveKey: String, curveLabel: String, b
     val pid = curveKey.contains("PID")
     val noun = if (battery) "低电量档" else "温控档"
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val found = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
     val (pointer, fragment) = found ?: (null to null)
-    val bands = remember(scoped.edited, curveKey) {
+    val bands = remember(fragment, curveKey) {
         (fragment?.get(curveKey) as? JsonPrimitive)?.takeIf { it.isString }
             ?.content?.let { parseFpsBands(it) }.orEmpty()
     }
@@ -370,7 +364,7 @@ fun HyperOsBandEditorScreen(pkg: String, curveKey: String, curveLabel: String, b
     HyperOsFeatureScaffold(
         title = "$curveLabel · ${bandKey} $noun",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (band == null || pointer == null) {
@@ -510,12 +504,10 @@ fun HyperOsSimpleCurveEditorScreen(pkg: String, curveKey: String, curveLabel: St
     val caps by viewModel.deviceCapsState.collectAsStateWithLifecycle()
     LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val found = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
     val (pointer, fragment) = found ?: (null to null)
-    val points = remember(scoped.edited, curveKey) {
+    val points = remember(fragment, curveKey) {
         (fragment?.get(curveKey) as? JsonPrimitive)?.takeIf { it.isString }
             ?.content?.let { parseSimpleCurve(it, CurveCodec.TEMP_FPS) }.orEmpty()
     }
@@ -532,7 +524,7 @@ fun HyperOsSimpleCurveEditorScreen(pkg: String, curveKey: String, curveLabel: St
     HyperOsFeatureScaffold(
         title = curveLabel,
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (pointer == null) {
@@ -588,9 +580,7 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
     LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val found = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
     val (pointer, fragment) = found ?: (null to null)
     val scenes = remember(fragment) { fragment?.let(viewModel::parseSceneInfo).orEmpty() }
@@ -625,7 +615,7 @@ fun HyperOsPerfScheduleScreen(pkg: String) {
     HyperOsFeatureScaffold(
         title = "性能调度",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (pointer == null || fragment == null) {
@@ -792,9 +782,7 @@ fun HyperOsFisrScreen(pkg: String) {
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
     LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
 
     val novatekFound = remember(document) { document.findAnyFragment("/game_booster/novatek_game_params/") }
     val novatekRaw = (novatekFound?.second as? JsonPrimitive)?.content
@@ -830,7 +818,7 @@ fun HyperOsFisrScreen(pkg: String) {
     HyperOsFeatureScaffold(
         title = "插帧超分",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (novatekFound == null) {
@@ -1147,9 +1135,7 @@ fun HyperOsGpuTunerScreen(pkg: String) {
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
     LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val pointer = "/game_booster/self_gpu_tuner_config/$pkg"
     val fragment = remember(document) { document?.get(pointer) as? JsonObject }
 
@@ -1163,7 +1149,7 @@ fun HyperOsGpuTunerScreen(pkg: String) {
     HyperOsFeatureScaffold(
         title = "GPU 自研调参",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         if (fragment == null) {
@@ -1240,9 +1226,7 @@ fun HyperOsDynResScreen(pkg: String) {
     val scoped by viewModel.scopedEditorState.collectAsStateWithLifecycle()
     LaunchedEffect(pkg) { viewModel.loadDetail(pkg) }
 
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-    }
+    val document = scoped.document
     val ovrrideFound = remember(document) { document.findFragment("/game_booster/booster_config/ovrride_config/") }
     val miglFound = remember(document) { document.findFragment("/game_booster/migl_settings/game_params/") }
 
@@ -1271,7 +1255,7 @@ fun HyperOsDynResScreen(pkg: String) {
     HyperOsFeatureScaffold(
         title = "动态分辨率",
         error = detail.switchError ?: scoped.error,
-        loading = detail.loading || scoped.loading,
+        loading = detail.loading || scoped.loading || scoped.parsing,
         onBack = navigator::pop,
     ) {
         val (ovPointer, ovFragment) = ovrrideFound ?: (null to null)

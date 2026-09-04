@@ -20,7 +20,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 
 /**
  * HyperOS 应用功能页 v2 — 分发器 + 功能入口模型。
@@ -63,18 +62,16 @@ fun HyperOsAppDetailScreen(packageName: String) {
         }
     }
 
-    // 片段文档解析按 edited 文本缓存：避免每次重组重复解析整份片段文档。
-    val document = remember(scoped.edited) {
-        scoped.edited?.let { text ->
-            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
-        }
-    }
+    // 片段文档由 VM 解析并随草稿原子更新（P2-17）：这里只读，不再按 edited 文本重解析。
+    val document = scoped.document
+    // 草稿在后台重解析的那一帧也算加载中：否则这里会闪一帧"无片段"的空态。
+    val busy = state.loading || scoped.parsing
 
     when (LocalUiMode.current) {
         UiMode.Miuix -> HyperOsAppDetailMiuix(
             view = state.view,
             header = headerInfo,
-            loading = state.loading,
+            loading = busy,
             error = state.error,
             editError = scoped.error,
             document = document,
@@ -87,7 +84,7 @@ fun HyperOsAppDetailScreen(packageName: String) {
         UiMode.Material -> HyperOsAppDetailMaterial(
             view = state.view,
             header = headerInfo,
-            loading = state.loading,
+            loading = busy,
             error = state.error,
             editError = scoped.error,
             document = document,

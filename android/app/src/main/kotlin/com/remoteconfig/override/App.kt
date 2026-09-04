@@ -50,6 +50,7 @@ class App : Application() {
             // Shell.cmd().exec() 走 JobTask.run 的无参 FutureTask.get()，没有每命令超时。
             // 原先传 10 秒等于把库默认 20 秒砍半：首次启动若用户未在 10 秒内点掉 su 授权弹窗，
             // shell 创建直接抛 "Shell check timeout"。KernelSU 同样不覆盖此值。
+            // 命令级的看门狗在调用侧：见 data/RootShell.kt 的 execRoot()（P2-26）。
         )
     }
 }

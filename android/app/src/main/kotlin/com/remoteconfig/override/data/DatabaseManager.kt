@@ -3,7 +3,6 @@ package com.remoteconfig.override.data
 import android.net.Uri
 
 import android.content.Context
-import com.topjohnwu.superuser.Shell
 import java.io.File
 import java.util.UUID
 
@@ -23,19 +22,19 @@ class DatabaseManager(context: Context) {
 
     private fun quote(value: String): String = "'${value.replace("'", "'\\''")}'"
 
-    private fun run(vararg args: String): Shell.Result {
+    private fun run(vararg args: String): RootResult {
         val command = buildList {
             add(binary)
             addAll(args.asList())
         }.joinToString(" ", transform = ::quote)
-        return Shell.cmd(command).exec()
+        return execRoot(command)
     }
 
     /**
      * 合并 stdout/stderr 的全部非空行（而非仅取首行）：Rust CLI 的双库失败报告与
      * “已忽略未知字段”警告均为多行输出，只取首行会丢失后续库的失败详情。
      */
-    private fun Shell.Result.message(fallback: String): String =
+    private fun RootResult.message(fallback: String): String =
         (out.asSequence() + err.asSequence())
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -46,7 +45,7 @@ class DatabaseManager(context: Context) {
         packageName.length <= 255 && PACKAGE_NAME.matches(packageName)
 
     fun checkRoot(): Boolean =
-        Shell.cmd("id -u").exec().out.any { it.trim() == "0" }
+        execRoot("id -u").out.any { it.trim() == "0" }
 
     /**
      * 单次 `list` 同时得出数据库可用性、配置数量与包名列表（原先 checkDatabase /
@@ -114,14 +113,14 @@ class DatabaseManager(context: Context) {
 
     fun getCosaVersion(): String {
         cachedCosaVersion?.let { return it }
-        val version = Shell.cmd("dumpsys package com.oplus.cosa | grep versionName | head -1")
-            .exec().out.firstOrNull()?.substringAfter('=')?.trim()?.ifEmpty { null } ?: "未知"
+        val version = execRoot("dumpsys package com.oplus.cosa | grep versionName | head -1")
+            .out.firstOrNull()?.substringAfter('=')?.trim()?.ifEmpty { null } ?: "未知"
         cachedCosaVersion = version
         return version
     }
 
     fun clearGameData(): WriteResult {
-        val result = Shell.cmd("pm clear com.oplus.cosa").exec()
+        val result = execRoot("pm clear com.oplus.cosa")
         return if (result.isSuccess) WriteResult(true, "应用增强服务数据已清除")
         else WriteResult(false, result.message("清除失败"))
     }

@@ -323,15 +323,9 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     /** 对指定片段做一次内存修改；返回 false = 状态未就绪或片段缺失（记日志留痕，UI 无感跳过）。 */
     private fun mutateScopedFragment(pointer: String, mutate: (JsonObject) -> JsonObject): Boolean {
-        val st = _scopedEditorState.value
-        val edited = st.edited
-        if (edited == null) {
-            Log.w(TAG, "scoped edit skipped: edited text not ready")
-            return false
-        }
-        val doc = runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
+        val doc = scopedDocument()
         if (doc == null) {
-            Log.w(TAG, "scoped edit skipped: edited text is not a valid JSON object")
+            Log.w(TAG, "scoped edit skipped: draft not ready or not a valid JSON object")
             return false
         }
         val frag = doc[pointer] as? JsonObject
@@ -344,7 +338,12 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         if (newFrag == frag) return false
         val newDoc = JsonObject(doc + (pointer to newFrag))
         _scopedEditorState.update {
-            it.copy(edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc), error = null)
+            it.copy(
+                edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc),
+                document = newDoc,
+                parsing = false,
+                error = null,
+            )
         }
         return true
     }
@@ -365,20 +364,19 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     /** 片段本体替换（片段即标量/数组时使用，如 novatek token 串、gex 上限、黑名单数组）。 */
     fun updateFragmentSelf(pointer: String, value: JsonElement) {
-        val st = _scopedEditorState.value
-        val edited = st.edited
-        if (edited == null) {
-            Log.w(TAG, "scoped edit skipped: edited text not ready")
-            return
-        }
-        val doc = runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
+        val doc = scopedDocument()
         if (doc == null || !doc.containsKey(pointer)) {
             Log.w(TAG, "scoped edit skipped: pointer $pointer missing")
             return
         }
         val newDoc = JsonObject(doc + (pointer to value))
         _scopedEditorState.update {
-            it.copy(edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc), error = null)
+            it.copy(
+                edited = prettyJson.encodeToString(JsonObject.serializer(), newDoc),
+                document = newDoc,
+                parsing = false,
+                error = null,
+            )
         }
         requestScopedSave()
     }
@@ -670,7 +668,11 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
 
     /** 当前作用域草稿的解析文档（未就绪/解析失败返回 null）。 */
     private fun scopedDocument(): JsonObject? {
-        val edited = _scopedEditorState.value.edited ?: return null
+        val st = _scopedEditorState.value
+        st.document?.let { return it }
+        val edited = st.edited ?: return null
+        // 只有后台重解析在途（原始 JSON 编辑器逐键改草稿）才会走到这里；调用方都是
+        // 用户提交动作，不能因为一帧的空窗就静默丢掉这次编辑。
         return runCatching { strictJson.parseToJsonElement(edited).jsonObject }.getOrNull()
     }
 
@@ -841,6 +843,16 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         val base: String? = null,
         /** 当前编辑文本（onTextChanged 实时更新）。 */
         val edited: String? = null,
+        /**
+         * [edited] 的解析结果 —— 功能子屏与详情页取片段的唯一来源（P2-17）。
+         *
+         * 原先 8 处各自 `remember(scoped.edited) { Json.parseToJsonElement(...) }`：
+         * 一次提交要在主线程把整份草稿（几十 KB）重复解析一遍，而 [mutateScopedFragment]
+         * 为了改它其实刚解析过一次。现在解析结果随文本一起在这里原子更新，UI 只读。
+         */
+        val document: JsonObject? = null,
+        /** [document] 正在后台重解析 —— 只有逐键改草稿（原始 JSON 编辑器）时短暂为真。 */
+        val parsing: Boolean = false,
         val error: String? = null,
         /** CLI 未能解析的指针（正常为空；非空即 Rust 侧指针与文档形状脱节）。 */
         val warning: String? = null,
@@ -868,6 +880,8 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
                             packageName = packageName,
                             base = text,
                             edited = text,
+                            // CLI 返回的就是解析后的对象，直接复用，省掉一次整份重解析
+                            document = scoped.document,
                             warning = scoped.skipped.takeIf { it.isNotEmpty() }?.joinToString(" · "),
                         )
                     }
@@ -877,8 +891,26 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updateScopedEdited(text: String) {
-        _scopedEditorState.update { it.copy(edited = text, error = null) }
+    /**
+     * 原始 JSON 编辑器逐键回写：文本立即生效（输入框要跟手），解析结果丢到 Default
+     * 线程重算。这是唯一一条"每次变更都要重解析整份草稿"的路径，绝不能留在主线程。
+     */
+    fun updateScopedEdited(text: String) = refreshScopedDocument(text)
+
+    /** 改草稿文本 + 后台重算 [ScopedEditorState.document]。 */
+    private fun refreshScopedDocument(text: String) {
+        _scopedEditorState.update {
+            it.copy(edited = text, document = null, parsing = true, error = null)
+        }
+        viewModelScope.launch {
+            val doc = withContext(Dispatchers.Default) {
+                runCatching { strictJson.parseToJsonElement(text).jsonObject }.getOrNull()
+            }
+            // 期间又改过草稿 → 这份结果已过期，让最后一次按键的回填，别把 UI 打回 null
+            _scopedEditorState.update {
+                if (it.edited == text) it.copy(document = doc, parsing = false) else it
+            }
+        }
     }
 
     /** 放弃修改：edited 重置回 base（功能页与作用域编辑器的丢弃确认共用）。
@@ -887,7 +919,7 @@ class HyperOsViewModel(application: Application) : AndroidViewModel(application)
     fun revertScopedEditor() {
         val st = _scopedEditorState.value
         if (st.writing || st.base == null || st.edited == st.base) return
-        _scopedEditorState.update { it.copy(edited = st.base, error = null) }
+        refreshScopedDocument(st.base)
     }
 
     /**
