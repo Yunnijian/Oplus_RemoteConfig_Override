@@ -331,7 +331,7 @@ pub fn read_params_any(config: &str) -> CliResult<(String, Value)> {
         let Some(text) = text else { return Ok(None) };
         let value: Value = serde_json::from_str(&text)
             .map_err(|e| format!("{label} {config} 解析失败: {e}"))?;
-        Ok(Some(if unwrap { unwrap_rule(value) } else { value }))
+        Ok(Some(if unwrap { unwrap_rule(value, config) } else { value }))
     };
 
     let mut problems = Vec::new();
@@ -378,8 +378,15 @@ fn query_optional(
 }
 
 /// teg rule_content wrapper → bare params (pass-through when not a wrapper).
-fn unwrap_rule(value: Value) -> Value {
-    if value.get("config_name").is_some() && value.get("params").is_some() {
+///
+/// A wrapper is identified by **`config_name` equalling the queried module**
+/// plus an object `params` member (P2-21): a bare params document whose own
+/// payload happens to carry `config_name`/`params` fields must pass through
+/// untouched, or the app's real config would be silently shredded.
+fn unwrap_rule(value: Value, config: &str) -> Value {
+    let wrapper = value.get("config_name").and_then(Value::as_str) == Some(config)
+        && value.get("params").is_some_and(Value::is_object);
+    if wrapper {
         value.get("params").cloned().unwrap_or(value)
     } else {
         value
@@ -511,7 +518,7 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
     if !doc.is_object() {
         return Err("JSON 顶层必须是对象".into());
     }
-    let doc = unwrap_rule(doc);
+    let doc = unwrap_rule(doc, config);
 
     stop_joyose();
 
@@ -644,7 +651,7 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
 
     let verify = |db: &str, text: &str| -> CliResult<()> {
         let value: Value = serde_json::from_str(text).map_err(|e| format!("{db} 回读解析失败: {e}"))?;
-        if unwrap_rule(value) != doc {
+        if unwrap_rule(value, config) != doc {
             return Err(format!("{db} 回读校验不一致").into());
         }
         Ok(())
@@ -680,27 +687,48 @@ pub fn write_document(config: &str, doc: Value) -> CliResult<Value> {
 /// `joyose-freeze` / `joyose-unfreeze` — pin (or release) the teg SDK cloud
 /// sync via `pref_local_max_version`. Joyose is force-stopped first because
 /// SharedPreferences has a per-process cache.
-fn teg_rewrite(new_value: &'static str) -> CliResult<bool> {
+///
+/// Both directions are **idempotent** (P2-6): when the SP already carries the
+/// target value the command succeeds without touching the file and reports
+/// `changed:false` — a repeated tap must not surface a failure for a state
+/// that is already correct.
+fn teg_rewrite(new_value: &str) -> CliResult<bool> {
     if !Path::new(TEG_SP).exists() {
         return Err(format!(
             "teg SP 尚未初始化: {TEG_SP}。请先让 Joyose 完成一次云控拉取"
         )
         .into());
     }
-    stop_joyose();
-    let xml = fs::read_to_string(TEG_SP).map_err(|e| format!("读取 SP 失败: {e}"))?;
-    let meta = fs::metadata(TEG_SP)?;
-    let new_xml = rewrite_sp(&xml, new_value)?;
-    if new_xml == xml {
-        return Err("SP 改写失败：内容未发生变化".into());
-    }
-    let tmp = format!("{TEG_SP}.cosa-tmp");
-    fs::write(&tmp, new_xml)?;
-    let _ = chown(Path::new(&tmp), Some(meta.uid()), Some(meta.gid()));
-    let _ = fs::set_permissions(Path::new(&tmp), fs::Permissions::from_mode(0o660));
-    fs::rename(&tmp, TEG_SP)?;
-    restorecon(TEG_SP);
-    println!("{}", json!({ "ok": true, "path": TEG_SP, "pref_local_max_version": new_value }));
+    // Fast path: the SP already carries the target value → succeed without
+    // touching the file, without force-stopping and without a failure toast.
+    let current = fs::read_to_string(TEG_SP).map_err(|e| format!("读取 SP 失败: {e}"))?;
+    let changed = if sp_current(&current) == Some(new_value) {
+        false
+    } else {
+        // Slow path keeps the original ordering: force-stop **before** taking
+        // the snapshot we are about to rewrite, or a live Joyose could push
+        // other preferences in between and lose them under our rename.
+        stop_joyose();
+        let xml = fs::read_to_string(TEG_SP).map_err(|e| format!("读取 SP 失败: {e}"))?;
+        let meta = fs::metadata(TEG_SP)?;
+        let new_xml = rewrite_sp(&xml, new_value)?;
+        let tmp = format!("{TEG_SP}.cosa-tmp");
+        fs::write(&tmp, new_xml)?;
+        let _ = chown(Path::new(&tmp), Some(meta.uid()), Some(meta.gid()));
+        let _ = fs::set_permissions(Path::new(&tmp), fs::Permissions::from_mode(0o660));
+        fs::rename(&tmp, TEG_SP)?;
+        restorecon(TEG_SP);
+        true
+    };
+    println!(
+        "{}",
+        json!({
+            "ok": true,
+            "path": TEG_SP,
+            "pref_local_max_version": new_value,
+            "changed": changed,
+        })
+    );
     Ok(true)
 }
 
@@ -1040,5 +1068,60 @@ mod tests {
         let plain = r#"{"header":{"version":"1"}}"#;
         let out = mirror_rule_content(plain, &doc).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&out).unwrap(), doc);
+    }
+
+    // ── P2-21: unwrap_rule must not shred look-alike payloads ──────────────
+
+    #[test]
+    fn unwrap_rule_passes_lookalike_params_through() {
+        // 真实 params 恰好带 config_name + params 字段：旧判定会被误拆。
+        let lookalike = json!({
+            "config_name": "migt_profile",
+            "params": {"target_fps": 120},
+            "header": {"version": "1"},
+        });
+        assert_eq!(unwrap_rule(lookalike.clone(), "booster_config"), lookalike);
+    }
+
+    #[test]
+    fn unwrap_rule_unwraps_genuine_wrapper_only() {
+        let wrapper = json!({"config_name": "booster_config", "params": {"game_booster": {}}});
+        assert_eq!(
+            unwrap_rule(wrapper, "booster_config"),
+            json!({"game_booster": {}})
+        );
+        // 同名键但 params 不是对象 → 不是包装，原样返回。
+        let odd = json!({"config_name": "booster_config", "params": 5});
+        assert_eq!(unwrap_rule(odd.clone(), "booster_config"), odd);
+    }
+
+    #[test]
+    fn write_document_round_trips_lookalike_payload() {
+        with_dbs(|smartp, teg| {
+            let original = json!({
+                "config_name": "migt_profile",
+                "params": {"target_fps": 120},
+            });
+            make_smartp(smartp, &original.to_string());
+            make_teg(teg, &[]);
+            let written = write_document("booster_config", original.clone()).unwrap();
+            assert_eq!(written["ok"], json!(true));
+            let (_, read) = read_params_any("booster_config").unwrap();
+            assert_eq!(read, original, "不该被拆的没被拆");
+        });
+    }
+
+    // ── P2-6: freeze / unfreeze are idempotent ─────────────────────────────
+
+    #[test]
+    fn freeze_target_value_is_idempotent() {
+        // rewrite_sp 在值已正确时逐字节不变 → 幂等分支命中，不写文件不报错。
+        let frozen = rewrite_sp(SAMPLE_SP, TEG_MAX).unwrap();
+        assert_eq!(rewrite_sp(&frozen, TEG_MAX).unwrap(), frozen);
+        // 反向同理（解冻目标值 0）。
+        let thawed = rewrite_sp(SAMPLE_SP, "0").unwrap();
+        assert_eq!(rewrite_sp(&thawed, "0").unwrap(), thawed);
+        // 且幂等判断读的是当前值本身：已冻结文档能直接命中 TEG_MAX。
+        assert_eq!(sp_current(&frozen), Some(TEG_MAX));
     }
 }

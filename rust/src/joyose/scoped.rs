@@ -150,11 +150,13 @@ pub fn merge(root: &mut Value, scoped: &Value) -> Result<usize, String> {
 
 /// The pointer set the editor was built from; the write path validates
 /// against a freshly collected one so a renamed key cannot pass as new.
+/// Read-only membership hits (`path: None`, see P2-4 in appview.rs) are not
+/// part of the editable set.
 fn feature_pointers(params: &Value, package: &str, common: Option<&Value>) -> Result<Vec<String>, String> {
     Ok(collect(params, package, common)?
         .features
         .iter()
-        .map(|f| f.path.clone())
+        .filter_map(|f| f.path.clone())
         .collect())
 }
 
@@ -272,7 +274,8 @@ mod tests {
             .as_array()
             .expect("features 应为数组")
             .iter()
-            .map(|f| f["path"].as_str().expect("path 应为字符串").to_owned())
+            .filter_map(|f| f["path"].as_str())
+            .map(str::to_owned)
             .collect()
     }
 
@@ -294,6 +297,38 @@ mod tests {
             let (_, skipped) = extract(&params, &pointers(&view));
             assert!(skipped.is_empty(), "{package} 有未解析指针: {skipped:?}");
         }
+    }
+
+    /// P2-4：只读成员类（黑名单/整表类别）不进入可编辑指针集；
+    /// 拿容器指针来写必须被拒绝。
+    #[test]
+    fn container_pointers_are_not_editable() {
+        let mut params = doc();
+        params["game_booster"]["novatek_black_app"] = json!(["com.a.sgame"]);
+        let view = collect(&params, "com.a.sgame", None).unwrap().to_json();
+        let list = pointers(&view);
+        assert!(
+            !list.iter().any(|p| p.contains("novatek_black_app")),
+            "黑名单容器指针泄漏进编辑集: {list:?}"
+        );
+        assert!(
+            !list.iter().any(|p| p.ends_with("game_scenario_control_config")),
+            "场景控制整表指针泄漏进编辑集: {list:?}"
+        );
+        // 编辑器外部伪造容器指针时，写入入口的指针集校验必须挡下它
+        // （feature_pointers 不再包含该指针 → "不是该应用现有的云控片段"）。
+        let fresh = collect(&params, "com.a.sgame", None).unwrap();
+        let editable: Vec<String> = fresh
+            .features
+            .iter()
+            .filter_map(|f| f.path.clone())
+            .collect();
+        assert!(
+            !editable
+                .iter()
+                .any(|p| p == "/game_booster/novatek_black_app"),
+            "伪造的容器指针不应出现在校验集里: {editable:?}"
+        );
     }
 
     #[test]

@@ -28,15 +28,22 @@ Oplus RemoteConfig Override：**双平台**游戏云控配置修改工具——C
 ## 验证命令
 
 ```bash
-# Rust 测试（宿主执行，41 用例；改 Rust 必跑，勿用交叉 target 跑测试）
+# Rust 测试（宿主执行，55 用例；改 Rust 必跑，勿用交叉 target 跑测试）
 cd rust && cargo test
 
 # Android 单元测试（36 用例）
 cd android && ./gradlew :app:testDebugUnitTest
 
 # 改 Rust 后的产物重建（含 DT_NEEDED 与特征串自检；NDK 路径经环境变量传入）
-cd rust && NDK=/path/to/android-ndk ./build-android.sh
+cd rust && NDK=/Users/tubi/Desktop/mifan/.toolchains/android-sdk/ndk/26.3.11579264 ./build-android.sh
 ```
+
+本机工具链实际位置（同一台机器上有**两份** SDK，NDK 只在第二份里）：
+
+- Gradle 用的 SDK：`/Users/tubi/Library/Android/sdk`（`android/local.properties` 的 `sdk.dir`，只有 platforms/build-tools，**无 NDK**，所以 Gradle 构建正常但交叉编译找不到 clang）
+- `$ANDROID_HOME` / `$ANDROID_SDK_ROOT`：`/Users/tubi/Desktop/mifan/.toolchains/android-sdk`
+- NDK：`/Users/tubi/Desktop/mifan/.toolchains/android-sdk/ndk/26.3.11579264`（另有 `29.0.14206865`；构建用 26.3，其 `toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang` 即脚本要求的编译器，本机 `uname -m` = x86_64 故 HOST_TAG 走 `darwin-x86_64`）
+- JDK：`/Users/tubi/Desktop/mifan/.toolchains/jdk-21`（Kotlin `jvmTarget = JVM_21`）
 
 上面三条已封装为 Qoder Command **`/validate`**（`.qoder/commands/validate.md`，本地资产，`.qoder/` 已 gitignore）：按本次改动范围选跑对应测试、区分「编译失败」与「断言失败」并给出可推送结论。改动 `android/` 或 `rust/` 后先跑它。
 

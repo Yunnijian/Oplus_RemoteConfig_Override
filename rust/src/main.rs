@@ -22,6 +22,15 @@ const EXCLUDED: [&str; 2] = [
     "oplus.cosa.common.model.config",
     "oplus.cosa.default.model.config",
 ];
+/// Names of the local-config protection triggers installed by
+/// `install_protection`; the rollback path must lift them to be able to put
+/// a captured row back, and re-installs them right after (same pattern as
+/// `delete_one`).
+const PROTECTION_TRIGGERS: [&str; 3] = [
+    "protect_local_pkg_update",
+    "protect_local_pkg_insert",
+    "protect_local_pkg_delete",
+];
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type Columns = Vec<(String, String)>;
@@ -408,28 +417,43 @@ fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
     if dbs.is_empty() {
         return Err("未找到数据库".into());
     }
+    write_dbs(&dbs, package, object)
+}
 
-    // 逐库独立执行：任一库失败不影响其他库的写入与结果收集；
-    // 整体失败时错误信息标明具体失败的库，便于定位双库不一致。
-    let mut skipped = BTreeSet::new();
-    let mut failures: Vec<String> = Vec::new();
-    for db in &dbs {
-        // Heal sidecars possibly left root-owned by a previous interrupted run.
+/// Dual-DB write with all-or-nothing semantics (P2-7): every database's
+/// original row is captured up-front, and the first failure rolls back the
+/// already-written databases, so a partial success can never leave the two
+/// cosa copies permanently apart.
+fn write_dbs(
+    dbs: &[PathBuf],
+    package: &str,
+    object: &Map<String, Value>,
+) -> Result<bool> {
+    let mut originals = Vec::with_capacity(dbs.len());
+    for db in dbs {
         chown_sidecars(db);
-        if let Err(err) = write_one(db, package, object, &mut skipped) {
-            failures.push(format!("write failed on {}: {}", db.display(), err));
-            // The write may have created/used sidecars owned by root before
-            // failing; hand them back so the target app keeps working.
-            chown_sidecars(db);
+        match capture_row(db, package) {
+            Ok(before) => originals.push(before),
+            Err(err) => {
+                return Err(format!("capture failed on {}: {}", db.display(), err).into())
+            }
         }
     }
 
-    if !failures.is_empty() {
-        // Report failures first: printing the skipped-field note beforehand
-        // would be picked up as the only visible line by the app, hiding the
-        // actual per-database failure details.
-        return Err(failures.join("\n").into());
+    let mut skipped = BTreeSet::new();
+    for (index, db) in dbs.iter().enumerate() {
+        // Heal sidecars possibly left root-owned by a previous interrupted run.
+        chown_sidecars(db);
+        if let Err(err) = write_one(db, package, object, &mut skipped) {
+            let failure = format!("write failed on {}: {}", db.display(), err);
+            // The write may have created/used sidecars owned by root before
+            // failing; hand them back so the target app keeps working.
+            chown_sidecars(db);
+            let (written_errors, failed_error) = rollback_dbs(dbs, &originals, index);
+            return Err(rollback_report(&failure, &written_errors, failed_error.as_ref()));
+        }
     }
+
     if !skipped.is_empty() {
         eprintln!(
             "已忽略未知字段: {}",
@@ -438,6 +462,166 @@ fn cmd_write(package: &str, json_path: &str) -> Result<bool> {
     }
     println!("{package} 配置写入成功");
     Ok(true)
+}
+
+/// Keep rollback messages readable: the app surfaces stderr verbatim.
+fn shorten(text: &str) -> String {
+    const MAX: usize = 160;
+    if text.len() <= MAX {
+        return text.to_owned();
+    }
+    let mut end = MAX;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
+/// One package row captured before any dual-DB mutation (P2-7).
+struct BeforeRow {
+    package: String,
+    existed: bool,
+    columns: Vec<String>,
+    values: Vec<SqlValue>,
+}
+
+fn capture_row(db: &Path, package: &str) -> Result<BeforeRow> {
+    let conn = open_cosa_ro(db)?;
+    let cols = columns(&conn)?;
+    let package_name = package_column(&cols)?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT * FROM {} WHERE {} = ?1 LIMIT 1",
+        quote_identifier(TABLE),
+        quote_identifier(&package_name)
+    ))?;
+    let names: Vec<String> = stmt.column_names().iter().map(ToString::to_string).collect();
+    let mut rows = stmt.query([package])?;
+    let (existed, values) = match rows.next()? {
+        Some(row) => (
+            true,
+            (0..names.len())
+                .map(|index| row.get::<_, SqlValue>(index).unwrap_or(SqlValue::Null))
+                .collect::<Vec<_>>(),
+        ),
+        None => (false, Vec::new()),
+    };
+    Ok(BeforeRow { package: package.to_owned(), existed, columns: names, values })
+}
+
+/// Put a captured row back verbatim (or delete the row the run inserted).
+/// Protection triggers are lifted for the duration and re-installed after —
+/// restoring a `from_server = 0` local row would otherwise be RAISE(IGNORE)d
+/// by the very triggers this tool relies on.
+fn restore_row(db: &Path, before: &BeforeRow) -> Result<()> {
+    chown_sidecars(db);
+    let conn = Connection::open(db)?;
+    let cols = columns(&conn)?;
+    let package_name = package_column(&cols)?;
+    let table = quote_identifier(TABLE);
+    let package_column = quote_identifier(&package_name);
+    let mut stmts: Vec<(String, Vec<SqlValue>)> = Vec::new();
+    if before.existed {
+        stmts.push((
+            format!("DELETE FROM {table} WHERE {package_column} = ?"),
+            vec![SqlValue::Text(before.package.clone())],
+        ));
+        let columns = before
+            .columns
+            .iter()
+            .map(|name| quote_identifier(name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let placeholders = std::iter::repeat_n("?", before.values.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        stmts.push((
+            format!("INSERT INTO {table} ({columns}) VALUES ({placeholders})"),
+            before.values.clone(),
+        ));
+    } else {
+        stmts.push((
+            format!("DELETE FROM {table} WHERE {package_column} = ?"),
+            vec![SqlValue::Text(before.package.clone())],
+        ));
+    }
+    let drop_triggers = PROTECTION_TRIGGERS
+        .iter()
+        .map(|name| format!("DROP TRIGGER IF EXISTS {name}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    conn.execute_batch(&drop_triggers)?;
+    let mut result: Result<()> = Ok(());
+    for (sql, values) in &stmts {
+        if let Err(err) = conn.execute(sql, params_from_iter(values.iter())) {
+            result = Err(err.into());
+            break;
+        }
+    }
+    match result.and_then(|()| install_protection(&conn, &cols)) {
+        Ok(()) => {
+            finish(conn, db);
+            Ok(())
+        }
+        Err(err) => {
+            // Never swallow: without the triggers the vendor app could
+            // overwrite local configs again, and the caller must know.
+            let _ = install_protection(&conn, &cols);
+            drop(conn);
+            chown_sidecars(db);
+            Err(err)
+        }
+    }
+}
+
+/// Restore every database up to and including the failing one to its captured
+/// row (P2-7). Returns `(errors for databases that had already been written,
+/// error for the failing database)` — reported apart, because a failing
+/// database usually never changed at all (e.g. it could not be opened).
+fn rollback_dbs(
+    dbs: &[PathBuf],
+    originals: &[BeforeRow],
+    failed_index: usize,
+) -> (Vec<String>, Option<String>) {
+    let mut written_errors = Vec::new();
+    let mut failed_error = None;
+    for (index, (db, row)) in dbs.iter().zip(originals).enumerate() {
+        if index > failed_index {
+            break;
+        }
+        if let Err(err) = restore_row(db, row) {
+            let text = format!("{}: {}", db.display(), shorten(&err.to_string()));
+            if index == failed_index {
+                failed_error = Some(text);
+            } else {
+                written_errors.push(text);
+            }
+        }
+        chown_sidecars(db);
+    }
+    (written_errors, failed_error)
+}
+
+/// Turn a failed dual-DB mutation plus its rollback outcome into the one error
+/// the CLI reports — 铁律 1: a partial success is never reported as success.
+fn rollback_report(
+    failure: &str,
+    written_errors: &[String],
+    failed_error: Option<&String>,
+) -> Box<dyn Error> {
+    if !written_errors.is_empty() {
+        return format!(
+            "{failure}; 回滚未完全成功（双库可能不一致，请立即用备份恢复）: {}",
+            written_errors.join("; ")
+        )
+        .into();
+    }
+    match failed_error {
+        None => format!("{failure}; 已回滚全部数据库，未做任何改动").into(),
+        Some(err) => format!(
+            "{failure}; 已回滚写入成功的数据库；失败库自身回滚未能确认（{err}），请校验该库后重试"
+        )
+        .into(),
+    }
 }
 
 fn delete_one(db: &Path, package: &str) -> Result<()> {
@@ -489,17 +673,31 @@ fn cmd_delete(package: &str) -> Result<bool> {
     if dbs.is_empty() {
         return Err("未找到数据库".into());
     }
-    // 逐库独立执行：任一库失败不影响其他库的删除与结果收集；
-    // 整体失败时错误信息标明具体失败的库，与 write 语义保持一致。
-    let mut failures: Vec<String> = Vec::new();
-    for db in &dbs {
-        if let Err(err) = delete_one(db, package) {
-            failures.push(format!("delete failed on {}: {}", db.display(), err));
-            chown_sidecars(db);
+    delete_dbs(&dbs, package)
+}
+
+/// Dual-DB delete with all-or-nothing semantics (P2-7): rows are captured
+/// before the first deletion and every database is restored on failure, so
+/// one package can never end up deleted in one cosa copy only.
+fn delete_dbs(dbs: &[PathBuf], package: &str) -> Result<bool> {
+    let mut originals = Vec::with_capacity(dbs.len());
+    for db in dbs {
+        chown_sidecars(db);
+        match capture_row(db, package) {
+            Ok(before) => originals.push(before),
+            Err(err) => {
+                return Err(format!("capture failed on {}: {}", db.display(), err).into())
+            }
         }
     }
-    if !failures.is_empty() {
-        return Err(failures.join("\n").into());
+
+    for (index, db) in dbs.iter().enumerate() {
+        if let Err(err) = delete_one(db, package) {
+            let failure = format!("delete failed on {}: {}", db.display(), err);
+            chown_sidecars(db);
+            let (written_errors, failed_error) = rollback_dbs(dbs, &originals, index);
+            return Err(rollback_report(&failure, &written_errors, failed_error.as_ref()));
+        }
     }
     println!("{package} 已删除");
     Ok(true)
@@ -523,11 +721,13 @@ fn cmd_protect() -> Result<bool> {
 
 fn usage() -> &'static str {
     "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect\n\
-     joyose: stat [备份根目录] | list | read <配置名> | write <配置名> <json文件> | freeze | unfreeze\n\
-             backup <备份根目录> [标签] | backup-list <备份根目录> | revert <备份根目录> <名称>\n\
-             apps | app <包名> [booster_params.json] [common_params.json]\n\
-             device-caps | migt-write <完整条目串> | migt-remove <包名>\n\
-             scoped <包名> [booster_params.json] [common_params.json] | scoped-write <包名> <作用域json文件>"
+     joyose 子命令一律带 joyose- 前缀（与 argv[1] 完全一致，照抄可执行）:\n\
+     cosa joyose-stat [备份根目录] | joyose-list | joyose-read <配置名> | joyose-write <配置名> <json文件>\n\
+     cosa joyose-freeze | joyose-unfreeze | joyose-backup <备份根目录> [标签]\n\
+     cosa joyose-backup-list <备份根目录> | joyose-revert <备份根目录> <名称>\n\
+     cosa joyose-apps | joyose-app <包名> [booster_params.json] [common_params.json]\n\
+     cosa joyose-device-caps | joyose-migt-write <完整条目串> | joyose-migt-remove <包名>\n\
+     cosa joyose-scoped <包名> [booster_params.json] [common_params.json] | joyose-scoped-write <包名> <作用域json文件>"
 }
 
 fn main() -> ExitCode {
@@ -579,6 +779,193 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "cosa-p27-{}-{tag}-{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("db_game_database")
+    }
+
+    /// `extra` appends column definitions; `rows` are (package, config,
+    /// from_server) tuples inserted verbatim.
+    fn make_db(path: &Path, extra: &str, rows: &[(&str, &str, i64)]) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE {TABLE} (\
+               id INTEGER PRIMARY KEY, package_name TEXT, config TEXT, from_server INTEGER{extra}\
+             );"
+        ))
+        .unwrap();
+        for (package, config, from_server) in rows {
+            conn.execute(
+                &format!(
+                    "INSERT INTO {TABLE} (package_name, config, from_server) VALUES (?1, ?2, ?3)"
+                ),
+                rusqlite::params![package, config, from_server],
+            )
+            .unwrap();
+        }
+        drop(conn);
+    }
+
+    fn read_back(path: &Path, package: &str) -> Option<String> {
+        let conn = open_cosa_ro(path).unwrap();
+        conn.query_row(
+            &format!("SELECT config FROM {TABLE} WHERE package_name = ?1"),
+            [package],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    }
+
+    fn object(config: &str) -> Map<String, Value> {
+        serde_json::from_str::<Value>(&format!(r#"{{"config":"{config}"}}"#))
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn write_dbs_updates_every_database_on_success() {
+        let first = temp_db("ok-a");
+        let second = temp_db("ok-b");
+        make_db(&first, "", &[("com.x", "old", 1)]);
+        make_db(&second, "", &[("com.x", "old", 1)]);
+        write_dbs(&[first.clone(), second.clone()], "com.x", &object("new")).unwrap();
+        assert_eq!(read_back(&first, "com.x").as_deref(), Some("new"));
+        assert_eq!(read_back(&second, "com.x").as_deref(), Some("new"));
+        let _ = fs::remove_dir_all(first.parent().unwrap());
+        let _ = fs::remove_dir_all(second.parent().unwrap());
+    }
+
+    /// P2-7：第二个库写失败时，第一个库必须回到写入前的行（不该变的没变）。
+    #[test]
+    fn write_dbs_rolls_back_the_written_database_on_second_failure() {
+        let first = temp_db("rb-a");
+        let second = temp_db("rb-b");
+        make_db(&first, "", &[("com.x", "old", 1)]);
+        // 无该包行 + NOT NULL 列 → write_one 的 INSERT 必然失败。
+        make_db(&second, ", mandatory TEXT NOT NULL", &[]);
+        let err = write_dbs(&[first.clone(), second.clone()], "com.x", &object("new"))
+            .err()
+            .expect("必须报错")
+            .to_string();
+        assert!(err.contains("write failed on"), "{err}");
+        assert!(err.contains("回滚"), "{err}");
+        assert_eq!(
+            read_back(&first, "com.x").as_deref(),
+            Some("old"),
+            "已写入的库必须被回滚"
+        );
+        assert_eq!(read_back(&second, "com.x"), None, "失败库不得留下半写条目");
+        let _ = fs::remove_dir_all(first.parent().unwrap());
+        let _ = fs::remove_dir_all(second.parent().unwrap());
+    }
+
+    /// 捕获阶段就失败时，一个库都不许被改动。
+    #[test]
+    fn write_dbs_aborts_before_touching_anything_when_capture_fails() {
+        let first = temp_db("cap-a");
+        let second = temp_db("cap-b");
+        make_db(&first, "", &[("com.x", "old", 1)]);
+        fs::write(&second, b"not a sqlite database at all").unwrap();
+        let err = write_dbs(&[first.clone(), second.clone()], "com.x", &object("new"))
+            .err()
+            .expect("必须报错")
+            .to_string();
+        assert!(err.contains("capture failed"), "{err}");
+        assert_eq!(read_back(&first, "com.x").as_deref(), Some("old"));
+        let _ = fs::remove_dir_all(first.parent().unwrap());
+        let _ = fs::remove_dir_all(second.parent().unwrap());
+    }
+
+    /// 回滚必须能覆盖保护触发器（本地行 from_server=0 会被 RAISE(IGNORE) 拦住）。
+    #[test]
+    fn restore_row_put_back_a_protected_local_row() {
+        let db = temp_db("trig-a");
+        make_db(&db, "", &[("com.x", "old", 0)]);
+        let before = capture_row(&db, "com.x").unwrap();
+        write_one(&db, "com.x", &object("new"), &mut BTreeSet::new()).unwrap();
+        assert_eq!(read_back(&db, "com.x").as_deref(), Some("new"));
+        restore_row(&db, &before).unwrap();
+        assert_eq!(read_back(&db, "com.x").as_deref(), Some("old"));
+        let _ = fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    /// P2-7：删除路径同样全有或全无。
+    #[test]
+    fn delete_dbs_restores_the_row_when_a_later_database_fails() {
+        let first = temp_db("del-a");
+        let second = temp_db("del-b");
+        make_db(&first, "", &[("com.x", "old", 0)]);
+        make_db(&second, "", &[("com.x", "old", 0)]);
+        // 第二个库只读 → delete_one 打不开写事务。
+        fs::set_permissions(&second, fs::Permissions::from_mode(0o444)).unwrap();
+        let err = delete_dbs(&[first.clone(), second.clone()], "com.x")
+            .err()
+            .expect("必须报错")
+            .to_string();
+        assert!(err.contains("delete failed on"), "{err}");
+        assert_eq!(
+            read_back(&first, "com.x").as_deref(),
+            Some("old"),
+            "已删除的库必须被恢复"
+        );
+        let _ = fs::set_permissions(&second, fs::Permissions::from_mode(0o644));
+        let _ = fs::remove_dir_all(first.parent().unwrap());
+        let _ = fs::remove_dir_all(second.parent().unwrap());
+    }
+
+    /// P2-20：usage 文案里的每个子命令都必须在 main 里有分发分支，
+    /// 否则照抄帮助文本必然 `Unknown command`。
+    #[test]
+    fn usage_lists_only_dispatched_subcommands() {
+        const JOYOSE: [&str; 16] = [
+            "joyose-stat",
+            "joyose-list",
+            "joyose-read",
+            "joyose-write",
+            "joyose-freeze",
+            "joyose-unfreeze",
+            "joyose-backup",
+            "joyose-backup-list",
+            "joyose-revert",
+            "joyose-apps",
+            "joyose-app",
+            "joyose-device-caps",
+            "joyose-migt-write",
+            "joyose-migt-remove",
+            "joyose-scoped",
+            "joyose-scoped-write",
+        ];
+        let source = include_str!("main.rs");
+        for name in JOYOSE {
+            assert!(usage().contains(name), "usage() 未列出 {name}");
+            assert!(
+                source.contains(&format!("Some(\"{name}\") =>")),
+                "{name} 在 usage() 里有、在分发里没有"
+            );
+        }
+        // 旧的裸名写法不得复活（`joyose: stat | list` 那类）。
+        assert!(!usage().contains("joyose: stat"), "usage() 仍是旧的裸子命令文案");
+        for bare in [" stat |", " freeze |"] {
+            assert!(!usage().contains(bare), "usage() 含裸子命令名 {bare:?}");
         }
     }
 }

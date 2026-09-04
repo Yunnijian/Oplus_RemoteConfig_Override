@@ -90,7 +90,9 @@ class JoyoseManager(context: Context) {
         val label: String,
         val source: String,
         val key: String,
-        val path: String,
+        /** RFC 6901 指针；null = 只读成员类（黑名单/整表类别），
+         *  其指针会指向全局容器，Rust 侧不产出、作用域编辑也不收录。 */
+        val path: String? = null,
         val params: List<ParamItem> = emptyList(),
         val overrides: List<String> = emptyList(),
         val gate: Gate? = null,

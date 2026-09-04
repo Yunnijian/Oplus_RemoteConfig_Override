@@ -18,6 +18,7 @@
 
 use crate::joyose::resolve::{alias_set, token_matches};
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 
 // ── model ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,12 @@ pub struct FeatureHit {
     /// RFC 6901 JSON Pointer into the booster_config params document, e.g.
     /// `/game_booster/booster_config/ovrride_config/3`.  `joyose-scoped`
     /// resolves it to extract and write back exactly this fragment.
-    pub path: String,
+    /// `None` marks a **read-only membership hit**: the config lives in a
+    /// shared container (blacklist array, whole-table category) whose pointer
+    /// would address *every* app's entry at once — writing it back through
+    /// the scoped editor would replace the global array, so such hits must
+    /// never carry a pointer (P2-4).
+    pub path: Option<String>,
     pub params: Vec<Param>,
     /// Baseline entries overridden by this hit's values, if any.
     pub overrides: Vec<String>,
@@ -95,6 +101,11 @@ fn arr<'a>(v: &'a Value, key: &str) -> &'a [Value] {
 
 fn empty_map() -> Map<String, Value> {
     Map::new()
+}
+
+/// RFC 6901 escaping for one pointer reference token (`~` → `~0`, `/` → `~1`).
+fn esc(token: &str) -> String {
+    token.replace('~', "~0").replace('/', "~1")
 }
 
 /// Every scalar (non object/array) field of an entry.
@@ -149,7 +160,7 @@ fn novatek_params(raw: &str) -> Vec<Param> {
     params
 }
 
-// ── package index (P1.5, single pass) ───────────────────────────────────────
+// ── package index (P1.5) ────────────────────────────────────────────────────
 
 /// One app in the per-app feature index.
 pub struct PackageIndexEntry {
@@ -158,15 +169,14 @@ pub struct PackageIndexEntry {
     pub features: usize,
 }
 
-/// Build the per-app feature index in a single pass over `game_booster`.
+/// Build the per-app feature index over `game_booster`.
 ///
-/// Counting rules mirror [`collect`]'s scans: group-alias entries
-/// (`booster_config.ovrride_config[].game_name` referring to a
-/// `game_group_mapping_config` group) expand to every member package;
-/// token strings count their head token; whitelist arrays / package-keyed
-/// objects / pkg fields count each mention. Global structures and the
-/// common_config whitelists (`game_list`/`support_app`) are excluded —
-/// membership there is not a per-app config.
+/// The app list is enumerated from every per-app structure [`collect`]
+/// scans; the count itself **is** `collect(pkg).features.len()`, so the
+/// `joyose-apps` badge can never drift away from what `joyose-app` renders
+/// (P2-5 — the old hand-mirrored counters still counted the fisr table that
+/// collect no longer injects).  Zero-hit candidates (group aliases used as
+/// token heads, "OTHER" wildcards, …) are dropped from the index.
 pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
     use std::collections::HashMap;
 
@@ -191,12 +201,8 @@ pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
             .map(|(g, _)| g.to_string())
     };
 
-    let mut counts: HashMap<&str, usize> = HashMap::new();
-    fn bump<'a>(counts: &mut HashMap<&'a str, usize>, key: &'a str) {
-        if !key.is_empty() {
-            *counts.entry(key).or_insert(0) += 1;
-        }
-    }
+    // Candidates: every name a per-app entry could address the package by.
+    let mut candidates: HashSet<String> = HashSet::new();
 
     // ① ovrride_config: group alias → expand to member packages.
     for entry in arr(get(gb, "booster_config"), "ovrride_config") {
@@ -204,12 +210,10 @@ pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
             continue;
         };
         match groups.get(key) {
-            Some(pkgs) => {
-                for pkg in pkgs {
-                    bump(&mut counts, pkg);
-                }
+            Some(pkgs) => candidates.extend(pkgs.iter().map(|p| (*p).to_owned())),
+            None => {
+                candidates.insert(key.to_owned());
             }
-            None => bump(&mut counts, key),
         }
     }
 
@@ -223,86 +227,84 @@ pub fn package_index(gb: &Value) -> Vec<PackageIndexEntry> {
     ] {
         for raw in arr(gb, field) {
             if let Some(raw) = raw.as_str() {
-                bump(&mut counts, raw.split(sep).next().unwrap_or(""));
+                candidates.insert(raw.split(sep).next().unwrap_or("").to_owned());
             }
         }
     }
     let ext = get(gb, "novatek_extend_config");
     for raw in arr(ext, "novatek_non_playing_config") {
         if let Some(raw) = raw.as_str() {
-            bump(&mut counts, raw.split('_').next().unwrap_or(""));
+            candidates.insert(raw.split('_').next().unwrap_or("").to_owned());
         }
     }
     for raw in arr(ext, "novatek_gex_fps_limit") {
         if let Some(raw) = raw.as_str() {
-            bump(&mut counts, raw.split(':').next().unwrap_or(""));
+            candidates.insert(raw.split(':').next().unwrap_or("").to_owned());
         }
     }
 
-    // ③ plain package arrays (membership-only; keep blacklist relevant to per-app).
-    for field in [
-        "novatek_black_app",
-    ] {
-        for value in arr(gb, field) {
-            if let Some(pkg) = value.as_str() {
-                bump(&mut counts, pkg);
-            }
+    // ③ plain package arrays (blacklist membership is a per-app hit).
+    for value in arr(gb, "novatek_black_app") {
+        if let Some(pkg) = value.as_str() {
+            candidates.insert(pkg.to_owned());
         }
     }
 
     // ④ alias+cmdlines objects.
-    for (container, inner) in [("mivk_settings", "app_params"), ("migl_settings", "game_params")] {
+    for (container, inner) in [
+        ("mivk_settings", "app_params"),
+        ("migl_settings", "game_params"),
+    ] {
         for entry in arr(get(gb, container), inner) {
             for cmdline in arr(entry, "app_cmdlines")
                 .iter()
                 .chain(arr(entry, "game_cmdlines").iter())
             {
                 if let Some(pkg) = cmdline.as_str() {
-                    bump(&mut counts, pkg);
+                    candidates.insert(pkg.to_owned());
                 }
             }
         }
     }
 
-    // ⑤ fisr game_list (OTHER is a wildcard, not a package).
-    for entry in arr(get(gb, "fisr_config"), "enhance_config") {
-        for value in arr(entry, "game_list") {
-            if let Some(pkg) = value.as_str() {
-                if pkg != "OTHER" {
-                    bump(&mut counts, pkg);
-                }
+    // ⑤ package-keyed objects.
+    for container in [
+        "self_gpu_tuner_config",
+        "low_display_refresh_rate_scenes_by_single_game",
+    ] {
+        if let Some(m) = get(gb, container).as_object() {
+            for key in m.keys() {
+                candidates.insert(key.clone());
             }
         }
     }
 
-    // ⑥ package-keyed objects / pkg fields / package_list.
-    if let Some(m) = get(gb, "self_gpu_tuner_config").as_object() {
-        for key in m.keys() {
-            bump(&mut counts, key);
-        }
-    }
-    if let Some(m) = get(gb, "low_display_refresh_rate_scenes_by_single_game").as_object() {
-        for key in m.keys() {
-            bump(&mut counts, key);
-        }
-    }
+    // ⑥ entry arrays carrying a pkg field / package_list.
     for entry in arr(gb, "support_resolution_enhance_config") {
         if let Some(pkg) = get(entry, "pkg").as_str() {
-            bump(&mut counts, pkg);
+            candidates.insert(pkg.to_owned());
         }
     }
     for value in arr(get(gb, "game_scenario_control_config"), "package_list") {
         if let Some(pkg) = value.as_str() {
-            bump(&mut counts, pkg);
+            candidates.insert(pkg.to_owned());
         }
     }
+    candidates.remove("");
 
-    let mut entries: Vec<PackageIndexEntry> = counts
-        .into_iter()
-        .map(|(pkg, features)| PackageIndexEntry {
-            package: pkg.to_owned(),
-            group: group_of(pkg),
-            features,
+    // Count with collect() itself: one truth, no hand-mirrored scans.
+    let mut params = Map::new();
+    params.insert("game_booster".to_owned(), gb.clone());
+    let params = Value::Object(params);
+    let mut entries: Vec<PackageIndexEntry> = candidates
+        .iter()
+        .filter_map(|pkg| {
+            let view = collect(&params, pkg, None).ok()?;
+            (!view.features.is_empty()).then(|| PackageIndexEntry {
+                package: pkg.clone(),
+                group: group_of(pkg),
+                features: view.features.len(),
+            })
         })
         .collect();
     entries.sort_unstable_by(|a, b| b.features.cmp(&a.features).then(a.package.cmp(&b.package)));
@@ -395,14 +397,14 @@ pub fn collect(
             label: "游戏主配置（锁帧/温度/场景/perflock）",
             source,
             key: key.to_owned(),
-            path: format!("/game_booster/booster_config/ovrride_config/{i}"),
+            path: Some(format!("/game_booster/booster_config/ovrride_config/{i}")),
             params,
             overrides,
             gate: gate_of("booster_enable"),
         });
     }
     if override_hits.len() > 1 {
-        conflicts.extend(override_hits.iter().map(|hit| hit.path.clone()));
+        conflicts.extend(override_hits.iter().filter_map(|hit| hit.path.clone()));
     }
     features.extend(override_hits);
 
@@ -435,7 +437,7 @@ pub fn collect(
                     label,
                     source: Source::Direct,
                     key: package.to_owned(),
-                    path: format!("{prefix}/{field}/{i}"),
+                    path: Some(format!("{prefix}/{field}/{i}")),
                     params: novatek_params(raw),
                     overrides: Vec::new(),
                     gate: None,
@@ -456,7 +458,9 @@ pub fn collect(
                 label: "Novatek GEX 帧率上限",
                 source: Source::Direct,
                 key: package.to_owned(),
-                path: format!("/game_booster/novatek_extend_config/novatek_gex_fps_limit/{i}"),
+                path: Some(format!(
+                    "/game_booster/novatek_extend_config/novatek_gex_fps_limit/{i}"
+                )),
                 params: token_param(raw),
                 overrides: Vec::new(),
                 gate: None,
@@ -472,7 +476,9 @@ pub fn collect(
             label: "Novatek 黑名单",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "/game_booster/novatek_black_app".into(),
+            // 指针会指向整个黑名单数组（P2-4）：回写将替换全局数组，
+            // 故只读展示、不产出 path。
+            path: None,
             params: vec![param("blacklisted", Value::Bool(true))],
             overrides: Vec::new(),
             gate: None,
@@ -517,7 +523,7 @@ pub fn collect(
                     .and_then(Value::as_str)
                     .unwrap_or(package)
                     .to_owned(),
-                path: format!("/game_booster/{container_key}/{inner_key}/{i}"),
+                path: Some(format!("/game_booster/{container_key}/{inner_key}/{i}")),
                 params,
                 overrides: Vec::new(),
                 gate: nested_gate(container_key),
@@ -546,7 +552,10 @@ pub fn collect(
             label: "高通 GPU tuner 分档属性",
             source: Source::Direct,
             key: package.to_owned(),
-            path: format!("/game_booster/self_gpu_tuner_config/{package}"),
+            path: Some(format!(
+                "/game_booster/self_gpu_tuner_config/{}",
+                esc(package)
+            )),
             params,
             overrides: Vec::new(),
             gate: gate_of("self_gpu_tuner_enable"),
@@ -574,7 +583,7 @@ pub fn collect(
                     label,
                     source: Source::Direct,
                     key: package.to_owned(),
-                    path: format!("/game_booster/{field}/{i}"),
+                    path: Some(format!("/game_booster/{field}/{i}")),
                     params,
                     overrides: Vec::new(),
                     gate,
@@ -598,8 +607,11 @@ pub fn collect(
             label: "单游戏低刷场景表",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "/game_booster/low_display_refresh_rate_scenes_by_single_game"
-                .into(),
+            // 指针指到本 App 的表项（整张表是全局容器，不能作为本 App 片段回写）。
+            path: Some(format!(
+                "/game_booster/low_display_refresh_rate_scenes_by_single_game/{}",
+                esc(package)
+            )),
             params: vec![param("scene_ids", scenes.clone())],
             overrides: Vec::new(),
             gate: None,
@@ -617,7 +629,7 @@ pub fn collect(
                 label: "分辨率增强",
                 source: Source::Direct,
                 key: package.to_owned(),
-                path: format!("/game_booster/support_resolution_enhance_config/{i}"),
+                path: Some(format!("/game_booster/support_resolution_enhance_config/{i}")),
                 params: vec![param(
                     "isSupportHotSwap",
                     get(entry, "isSupportHotSwap").clone(),
@@ -642,7 +654,9 @@ pub fn collect(
             label: "游戏场景控制",
             source: Source::Direct,
             key: package.to_owned(),
-            path: "/game_booster/game_scenario_control_config".into(),
+            // 参数投影自整张全局配置表（P2-4）：任何可用指针都会替换
+            // 全局容器（含 package_list），故只读展示、不产出 path。
+            path: None,
             params,
             overrides: Vec::new(),
             gate: None,
@@ -818,6 +832,13 @@ pub(crate) mod tests {
                 "support_scale_app_list": ["com.a.sgame"],
                 "migt": ["com.a.sgame;0:384000;30"],
                 "SOC_GameList": ["com.a.sgame"],
+                "low_display_refresh_rate_scenes_by_single_game": {
+                    "com.a.sgame": [1, 3]
+                },
+                "game_scenario_control_config": {
+                    "enable": true,
+                    "package_list": ["com.a.sgame"]
+                },
                 "support_resolution_enhance_config": [
                     {"pkg": "com.a.sgame", "isSupportHotSwap": false}
                 ]
@@ -865,6 +886,8 @@ pub(crate) mod tests {
             "cgame_df",
             "migt",
             "resolution_enhance",
+            "low_rr_scenes",
+            "scenario_control",
         ] {
             assert!(cats.contains(&expected), "missing {expected}: {cats:?}");
         }
@@ -1007,15 +1030,99 @@ pub(crate) mod tests {
                 .find(|e| e.package == pkg)
                 .map(|e| (e.features, e.group.as_deref()))
         };
-        // sgame: ovrride(组展开) + novatek + non_playing + gex + migt + cgame_df + resolution_enhance
-        //   （fisr/highfps/scale/soc 等全局名单已移出；索引计数另含不产出
-        //    view feature 的条目，实测为 8）
-        assert_eq!(find("com.a.sgame"), Some((8, Some("SGAME"))));
+        // sgame: ovrride(组展开) + novatek 主档/非游玩档/gex + migt + cgame_df
+        //   + low_rr + scenario + resolution_enhance = 9（fisr 已不再计数）。
+        assert_eq!(find("com.a.sgame"), Some((9, Some("SGAME"))));
         // sgamece: ovrride(同组展开)+novatek = 2 —— 组条目对组内每个成员都生效
         assert_eq!(find("com.a.sgamece"), Some((2, Some("SGAME"))));
         assert_eq!(find("com.miHoYo.Yuanshen"), Some((1, Some("YUANSHEN"))));
         assert_eq!(find("com.miHoYo.hkrpg"), Some((1, None))); // mivk only
         // 排序：features 降序
         assert!(apps.windows(2).all(|w| w[0].features >= w[1].features));
+    }
+
+    /// P2-5 的核心不变式：列表页徽标数必须逐个等于详情页 features 条数。
+    #[test]
+    fn package_index_count_equals_app_view() {
+        let gb = doc().get("game_booster").unwrap().clone();
+        for entry in package_index(&gb) {
+            let view = collect(&doc(), &entry.package, None).unwrap();
+            assert_eq!(
+                entry.features,
+                view.features.len(),
+                "{} 徽标与详情页不一致",
+                entry.package
+            );
+        }
+    }
+
+    /// P2-4：整容器类别（黑名单数组、全局场景控制表）只读展示，
+    /// 绝不产出可回写指针；真正属于本 App 的片段必须指针精确到条目。
+    #[test]
+    fn container_categories_never_carry_write_pointers() {
+        let mut doc = doc();
+        doc["game_booster"]["novatek_black_app"] = json!(["com.a.sgame"]);
+        let view = collect(&doc, "com.a.sgame", None).unwrap();
+        for read_only in ["novatek_blacklist", "scenario_control"] {
+            let hit = view
+                .features
+                .iter()
+                .find(|f| f.category == read_only)
+                .unwrap_or_else(|| panic!("missing {read_only}"));
+            assert!(hit.path.is_none(), "{read_only} 不得产出回写指针");
+        }
+        // 真正属于本 App 的片段：指针精确到条目/键，不得指向全局容器。
+        let path_of = |category: &str| {
+            view.features
+                .iter()
+                .find(|f| f.category == category)
+                .and_then(|f| f.path.clone())
+        };
+        assert_eq!(
+            path_of("low_rr_scenes").as_deref(),
+            Some("/game_booster/low_display_refresh_rate_scenes_by_single_game/com.a.sgame")
+        );
+        assert_eq!(
+            path_of("novatek_main").as_deref(),
+            Some("/game_booster/novatek_game_params/0")
+        );
+        assert_eq!(
+            path_of("novatek_non_playing").as_deref(),
+            Some("/game_booster/novatek_extend_config/novatek_non_playing_config/0")
+        );
+        assert_eq!(
+            path_of("novatek_gex_limit").as_deref(),
+            Some("/game_booster/novatek_extend_config/novatek_gex_fps_limit/0")
+        );
+        assert_eq!(
+            path_of("migt").as_deref(),
+            Some("/game_booster/migt/0")
+        );
+    }
+
+    /// P2-4 回归：作用域回写黑名单成员不得替换整个全局数组。
+    #[test]
+    fn scoped_write_of_membership_hit_cannot_touch_global_array() {
+        let mut doc = doc();
+        doc["game_booster"]["novatek_black_app"] = json!(["com.a.sgame", "com.other"]);
+        let view = collect(&doc, "com.a.sgame", None).unwrap();
+        // 该 App 的可回写指针集里不允许出现 novatek_black_app 容器指针。
+        let editable: Vec<&str> = view
+            .features
+            .iter()
+            .filter_map(|f| f.path.as_deref())
+            .collect();
+        assert!(
+            !editable
+                .iter()
+                .any(|p| p.starts_with("/game_booster/novatek_black_app")),
+            "blacklist pointer leaked into scoped edit set: {editable:?}"
+        );
+        // 其他 App 的黑名单条目不受任何 per-app 指针影响。
+        let other = collect(&doc, "com.other", None).unwrap();
+        assert!(other
+            .features
+            .iter()
+            .all(|f| f.path.as_deref().is_none_or(|p| !p.contains("novatek_black_app"))));
     }
 }
