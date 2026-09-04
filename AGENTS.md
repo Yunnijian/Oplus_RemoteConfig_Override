@@ -29,7 +29,7 @@ Oplus RemoteConfig Override：**双平台**游戏云控配置修改工具——C
 ## 验证命令
 
 ```bash
-# Rust 测试（宿主执行，62 用例；改 Rust 必跑，勿用交叉 target 跑测试）
+# Rust 测试（宿主执行，65 用例；改 Rust 必跑，勿用交叉 target 跑测试）
 cd rust && cargo test
 
 # Android 单元测试（38 用例）

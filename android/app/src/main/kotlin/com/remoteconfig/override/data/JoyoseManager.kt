@@ -379,9 +379,16 @@ class JoyoseManager(context: Context) {
         }
     }
 
-    fun freeze(): WriteResult = execOk("joyose-freeze", successMessage = "已冻结 teg 云控")
+    /**
+     * 冻结/解冻 teg 云控。传 dataRoot 是为了让 CLI 把**冻结前的**
+     * `pref_local_max_version` 记在 App 私有目录里，解冻时原样还回去（P2-27）——
+     * 解冻若硬写 0，SDK 会认为本地版本为 0 而全量重拉，把用户改过的云控覆盖掉。
+     */
+    fun freeze(): WriteResult =
+        execOk("joyose-freeze", dataRoot.absolutePath, successMessage = "已冻结 teg 云控")
 
-    fun unfreeze(): WriteResult = execOk("joyose-unfreeze", successMessage = "已解冻")
+    fun unfreeze(): WriteResult =
+        execOk("joyose-unfreeze", dataRoot.absolutePath, successMessage = "已解冻")
 
     fun backup(label: String?): WriteResult =
         execOk(

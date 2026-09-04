@@ -755,7 +755,7 @@ fn usage() -> &'static str {
     "用法: cosa list | read <包名> [输出文件] | write <包名> <json文件> | delete <包名> | protect\n\
      joyose 子命令一律带 joyose- 前缀（与 argv[1] 完全一致，照抄可执行）:\n\
      cosa joyose-stat [备份根目录] | joyose-list | joyose-read <配置名> | joyose-write <配置名> <json文件>\n\
-     cosa joyose-freeze | joyose-unfreeze | joyose-backup <备份根目录> [标签]\n\
+     cosa joyose-freeze [备份根目录] | joyose-unfreeze [备份根目录] | joyose-backup <备份根目录> [标签]\n\
      cosa joyose-backup-list <备份根目录> | joyose-revert <备份根目录> <名称>\n\
      cosa joyose-apps | joyose-app <包名> [booster_params.json] [common_params.json]\n\
      cosa joyose-device-caps | joyose-migt-write <完整条目串> | joyose-migt-remove <包名>\n\
@@ -784,8 +784,8 @@ fn main() -> ExitCode {
         Some("joyose-list") => joyose::store::cmd_list(),
         Some("joyose-read") => joyose::store::cmd_read(args.get(2)),
         Some("joyose-write") => joyose::store::cmd_write(args.get(2), args.get(3)),
-        Some("joyose-freeze") => joyose::store::cmd_freeze(),
-        Some("joyose-unfreeze") => joyose::store::cmd_unfreeze(),
+        Some("joyose-freeze") => joyose::store::cmd_freeze(args.get(2)),
+        Some("joyose-unfreeze") => joyose::store::cmd_unfreeze(args.get(2)),
         Some("joyose-backup") => joyose::store::cmd_backup(args.get(2), args.get(3)),
         Some("joyose-backup-list") => joyose::store::cmd_backup_list(args.get(2)),
         Some("joyose-revert") => joyose::store::cmd_revert(args.get(2), args.get(3)),

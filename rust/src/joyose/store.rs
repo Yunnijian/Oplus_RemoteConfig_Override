@@ -786,7 +786,15 @@ pub fn cmd_purge_dead() -> CliResult<bool> {
 /// target value the command succeeds without touching the file and reports
 /// `changed:false` — a repeated tap must not surface a failure for a state
 /// that is already correct.
-fn teg_rewrite(new_value: &str) -> CliResult<bool> {
+///
+/// 解冻**不是**"写回 0"（P2-27）：`pref_local_max_version=0` 语义上仍是未冻结，
+/// 但 teg SDK 会认为本地版本为 0，下一次云控检查必然判定有更新 → 全量拉取 →
+/// 覆盖用户改过的本地云控，而这正是冻结要防的事。所以冻结时把原值记进 App 私有
+/// 目录的 [`FREEZE_STATE_FILE`]，解冻时原样还回去。
+///
+/// [`unfreeze_target`] 是这套取舍的纯函数实现（可单测），[`freeze_should_record`]
+/// 同理。
+fn teg_rewrite(new_value: &str, note: Option<(&str, &str)>) -> CliResult<bool> {
     if !Path::new(TEG_SP).exists() {
         return Err(format!(
             "teg SP 尚未初始化: {TEG_SP}。请先让 Joyose 完成一次云控拉取"
@@ -814,24 +822,103 @@ fn teg_rewrite(new_value: &str) -> CliResult<bool> {
         restorecon(TEG_SP);
         true
     };
-    println!(
-        "{}",
-        json!({
-            "ok": true,
-            "path": TEG_SP,
-            "pref_local_max_version": new_value,
-            "changed": changed,
-        })
-    );
+    let mut body = json!({
+        "ok": true,
+        "path": TEG_SP,
+        "pref_local_max_version": new_value,
+        "changed": changed,
+    });
+    if let Some((key, value)) = note {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(key.to_owned(), Value::from(value));
+        }
+    }
+    println!("{body}");
     Ok(true)
 }
 
-pub fn cmd_freeze() -> CliResult<bool> {
-    teg_rewrite(TEG_MAX)
+/// 冻结前原值的记录文件（放在 App 私有目录里，与备份同级）。
+const FREEZE_STATE_FILE: &str = "freeze_state";
+
+/// 解冻取值的三种出处，直接打进 stdout JSON 便于排障。
+const RESTORED_FROM_STATE: &str = "freeze-state";
+const RESTORED_FROM_UNCHANGED: &str = "already-unfrozen";
+const RESTORED_FROM_LEGACY: &str = "legacy-zero";
+
+/// 冻结时是否要记录原值。**已经是冻结值就不记** —— 否则二次冻结会把真正的
+/// 冻结前值冲成 `TEG_MAX`，解冻就再也回不去了（P2-6 的幂等快速路径顺带保护记录）。
+fn freeze_should_record(current: Option<&str>) -> bool {
+    current != Some(TEG_MAX)
 }
 
-pub fn cmd_unfreeze() -> CliResult<bool> {
-    teg_rewrite("0")
+/// 解冻该写回什么（P2-27 的核心取舍，纯函数便于单测）：
+/// ① 记过原值 → 原样还回去；② 没记过但当前也不是冻结值 → 本来就没冻结，
+/// 保持现值，**绝不**写成 0；③ 确实处于冻结却没有记录（旧版本冻的、或 App
+/// 数据被清过）→ 只能退回旧的写 0 行为。
+fn unfreeze_target(saved: Option<&str>, current: Option<&str>) -> (&'static str, String) {
+    if let Some(value) = saved {
+        return (RESTORED_FROM_STATE, value.to_owned());
+    }
+    match current {
+        Some(value) if value != TEG_MAX => (RESTORED_FROM_UNCHANGED, value.to_owned()),
+        _ => (RESTORED_FROM_LEGACY, "0".to_owned()),
+    }
+}
+
+/// 只认纯数字：一个被手改过的记录文件不该把任意字符串灌进 Joyose 的 SP。
+fn read_freeze_state(root: &Path) -> Option<String> {
+    fs::read_to_string(root.join(FREEZE_STATE_FILE))
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|value| !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// root 写出来的文件默认 root:root，App 进程既读不动也删不掉 → 按目录属主补齐，
+/// 与 [`restore_db_atomically`] / teg SP 重写同一套做法（收尾 restorecon）。
+fn write_freeze_state(root: &Path, value: &str) -> CliResult<()> {
+    let meta = fs::metadata(root).map_err(|e| format!("冻结状态目录不可访问: {e}"))?;
+    let tmp = root.join(format!("{FREEZE_STATE_FILE}.tmp"));
+    fs::write(&tmp, format!("{value}\n"))?;
+    let _ = chown(&tmp, Some(meta.uid()), Some(meta.gid()));
+    let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+    fs::rename(&tmp, root.join(FREEZE_STATE_FILE))?;
+    if let Some(path) = root.join(FREEZE_STATE_FILE).to_str() {
+        restorecon(path);
+    }
+    Ok(())
+}
+
+/// 读当前 `pref_local_max_version`。**读不到必须报错而不是返回 None** ——
+/// None 只代表"文件在、键不在"，与"文件不可访问"必须区分开，否则冻结会在
+/// SP 根本不存在时先写下一个原值记录，把后续解冻带偏。
+fn sp_max_version() -> CliResult<Option<String>> {
+    let xml = fs::read_to_string(TEG_SP)
+        .map_err(|e| format!("读取 teg SP 失败 {TEG_SP}: {e}"))?;
+    Ok(sp_current(&xml).map(str::to_owned))
+}
+
+pub fn cmd_freeze(data_root: Option<&String>) -> CliResult<bool> {
+    let current = sp_max_version()?;
+    if freeze_should_record(current.as_deref()) {
+        match data_root.map(Path::new) {
+            // 键本来就不存在时记 0：与 rewrite_sp 的"缺失即插入"语义一致。
+            Some(root) => write_freeze_state(root, current.as_deref().unwrap_or("0"))?,
+            None => eprintln!("未传备份根目录：本次冻结不记录原值，解冻将退回写 0（旧行为）"),
+        }
+    }
+    teg_rewrite(TEG_MAX, None)
+}
+
+pub fn cmd_unfreeze(data_root: Option<&String>) -> CliResult<bool> {
+    let root = data_root.map(Path::new);
+    let saved = root.and_then(read_freeze_state);
+    let (source, target) = unfreeze_target(saved.as_deref(), sp_max_version()?.as_deref());
+    if saved.is_some() {
+        if let Some(root) = root {
+            let _ = fs::remove_file(root.join(FREEZE_STATE_FILE));
+        }
+    }
+    teg_rewrite(&target, Some(("restored_from", source)))
 }
 
 /// `joyose-backup <data_root> [label]` — snapshot both DBs into
@@ -1148,6 +1235,64 @@ mod tests {
             assert!(cmd_purge_dead().unwrap());
             assert_eq!(cloud_row_names(smartp), vec!["booster_config".to_string()]);
         });
+    }
+
+    /// P2-27：解冻必须优先用记下来的原值，且**绝不**在设备本来就没冻结时写 0。
+    #[test]
+    fn unfreeze_target_restores_saved_value_and_never_zeroes_unfrozen() {
+        // ① 记过原值 → 原样还回去，无论当前是什么
+        assert_eq!(
+            unfreeze_target(Some("715115"), Some(TEG_MAX)),
+            (RESTORED_FROM_STATE, "715115".to_owned())
+        );
+        assert_eq!(
+            unfreeze_target(Some("715115"), Some("715115")),
+            (RESTORED_FROM_STATE, "715115".to_owned())
+        );
+        // ② 没记过、当前也不是冻结值 → 保持现值（这就是旧实现把 715115 冲成 0 的那条路）
+        assert_eq!(
+            unfreeze_target(None, Some("715115")),
+            (RESTORED_FROM_UNCHANGED, "715115".to_owned())
+        );
+        // ③ 确实处于冻结但没有记录 → 才允许退回旧的写 0
+        assert_eq!(
+            unfreeze_target(None, Some(TEG_MAX)),
+            (RESTORED_FROM_LEGACY, "0".to_owned())
+        );
+        assert_eq!(unfreeze_target(None, None), (RESTORED_FROM_LEGACY, "0".to_owned()));
+    }
+
+    /// P2-27：二次冻结不得覆盖已存的原值 —— 所以"已经是冻结值"时压根不记。
+    #[test]
+    fn freeze_only_records_the_previous_value_when_actually_changing() {
+        assert!(!freeze_should_record(Some(TEG_MAX)), "已冻结时再冻结不该记值");
+        assert!(freeze_should_record(Some("715115")));
+        assert!(freeze_should_record(None), "键不存在也算一次真实变更，需要记录");
+    }
+
+    /// 记录文件只认纯数字：被手改过的内容不该把任意字符串灌进 Joyose 的 SP。
+    #[test]
+    fn freeze_state_round_trip_accepts_only_digits() {
+        let root = std::env::temp_dir().join(format!(
+            "cosa-freeze-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        write_freeze_state(&root, TEG_MAX).unwrap();
+        assert_eq!(read_freeze_state(&root).as_deref(), Some(TEG_MAX));
+        write_freeze_state(&root, "715115").unwrap();
+        assert_eq!(read_freeze_state(&root).as_deref(), Some("715115"));
+
+        fs::write(root.join(FREEZE_STATE_FILE), "rm -rf /").unwrap();
+        assert_eq!(read_freeze_state(&root), None, "非数字内容必须被拒");
+        fs::write(root.join(FREEZE_STATE_FILE), "\n").unwrap();
+        assert_eq!(read_freeze_state(&root), None, "空内容必须被拒");
+        fs::remove_file(root.join(FREEZE_STATE_FILE)).unwrap();
+        assert_eq!(read_freeze_state(&root), None);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
