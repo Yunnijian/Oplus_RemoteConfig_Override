@@ -64,3 +64,5 @@ _br.js
 # Local documents — never committed unless explicitly asked to sync them
 /docs/reviews/
 /docs/PROJECT_GUIDE.md
+/AGENTS.md
+/CHANGELOG.md
